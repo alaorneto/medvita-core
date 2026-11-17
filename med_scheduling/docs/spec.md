@@ -1,22 +1,46 @@
 # Agenda médica
 
-Especificação inicial gerada por `skeleton_startapp`. Substitua cada parágrafo pelo comportamento real da app antes do primeiro release; o check E012 verifica apenas a presença das seções, não a qualidade do conteúdo. Veja [apps e instalação](https://github.com/alaorneto/skeleton/blob/f38c9a02166d63e402d2c7708e616ae842441665/docs/concepts.md#apps-pacotes-e-deployment) e o roteiro de [extensão](https://github.com/alaorneto/skeleton/blob/f38c9a02166d63e402d2c7708e616ae842441665/docs/extending.md).
+A agenda do consultório: configuração (profissionais, salas, tipos de atendimento), grade de horários, bloqueios, consultas com situação, encaixe, lista de espera e recepção. As consultas são projetadas no `skeleton_calendar`. A app não guarda dado clínico nem valor: só um `billing_code` opaco que o financeiro resolve.
 
 ## Contract
-`med_scheduling` é instalada globalmente e ativada por organização; instalar o código não concede permissões. A app nasce indisponível e desativada: a plataforma concede a disponibilidade e cada organização ativa explicitamente (`default_enabled` é obsoleto e fica `false`).
 
-Cada `Practice` pertence a uma organização e deriva de `SecuredRecord`: UUID imutável, revisão, proprietário e visibilidade. Os campos de negócio são `code` (até 64 caracteres, único entre registros vivos da organização) e `title` (até 200). Nenhum campo é sensível; declare em `sensitive_fields` qualquer campo novo cujo valor não possa aparecer na auditoria.
+### Ativação e dependências
 
-O gateway usa `med_scheduling.practice` com criação, leitura, alteração, exclusão lógica e restauração conforme `TablePermission` e a autorização do registro. Alterar, excluir ou restaurar exige a revisão atual.
+Depende de `io.katua.sk.med.patients` (o paciente de cada consulta) e de `org.skeleton.calendar` (a projeção das consultas e a disponibilidade dos profissionais). Instalada globalmente e ativada por organização, depois das dependências.
 
-A página própria fica em `/o/<org>/apps/med_scheduling/` e o sumário em `/api/v1/o/<org>/apps/med_scheduling/summary/`. Ambos exigem app ativa e `table.read`, e contam somente registros legíveis pelo ator.
+### Acesso
 
-Outras apps consomem esta só por `PracticeService`, declarada em `runtime.service_api` e documentada em [service-api.md](service-api.md). Página e sumário chamam o mesmo serviço, que devolve DTOs imutáveis e revalida a autorização.
+Dois contêineres (`SecuredRecord` expostos):
+
+- `Practice`: o consultório. Profissionais, salas, tipos de atendimento e a lista de espera são derivados dele: ler pede `read` no consultório, alterar pede `update`.
+- `Schedule`: a agenda de um profissional, sala ou equipamento. Grade, bloqueios e consultas são derivados dela.
+
+O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do administrador, dá ao papel `member` leitura e alteração das tabelas dos contêineres e concede leitura do consultório aos grupos de leitura e leitura e alteração aos de gestão. Pelo gateway genérico do núcleo o consultório só tem os dados do estabelecimento alterados.
+
+### Modelo de dados
+
+"P" marca os campos em `personal_fields`.
+
+**`Practice`** (contêiner): `name` (obrigatório), `legal_name`, `tax_id` (CPF ou CNPJ válido), `phone`, `email`, `address`, `city`, `state`, `timezone` (nome IANA; padrão `America/Sao_Paulo`), `is_default` (um por organização).
+
+**`Professional`** (derivada do consultório)
+
+| Campo | P | Regra |
+|---|---|---|
+| `practice` | | imutável |
+| `user` | | pessoa da organização ligada ao profissional (opcional); uma ficha viva por pessoa |
+| `display_name` | P | obrigatório |
+| `council`, `council_number`, `council_state` | P (número) | conselho (`crm`, `cro`, `crp`, `coren`, `crefito`, `crn`, `crfa`, `other`), número e UF; `council_label` é "CRM-SP 123456" |
+| `specialty`, `rqe` | | especialidade e registro de qualificação |
+| `tax_id` | P | CPF, para o recibo |
+| `is_active` | | inativo some das listas |
+
+**`Room`** (derivada do consultório): `name`, `kind` (`room`, `equipment`), `is_active`.
+
+**`AppointmentType`** (derivada do consultório): `code` (minúsculas, único no consultório entre os vivos, imutável), `name`, `duration_minutes` (5 a 480), `color` (uma de oito chaves fixas, pintada pelo CSS da app), `billing_code`, `requires_room`, `is_active`.
 
 ## Acceptance
-Critérios observáveis a confirmar por testes reais (não por inferência):
 
-- Com organizações A/B, um membro de A não obtém registros de B em lista, detalhe, contagem, sumário, auditoria ou restauração, inclusive por UUID conhecido.
-- Sem `table.read`, página e sumário são negados; com ela, o sumário exclui registros privados de terceiros.
-- Duas alterações com a mesma revisão não vencem ambas.
-- Restaurar um registro cujo `code` colide com outro vivo retorna conflito sem sobrescrevê-lo.
+- Só o administrador configura o consultório; a configuração é idempotente pela chave e única por organização.
+- A recepção lê profissionais, salas e tipos e não os altera; a organização B não vê nada da A.
+- Nome, número do conselho e CPF do profissional saem `[REDACTED]` na auditoria.

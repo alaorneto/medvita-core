@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import SummaryView
+from . import views
 
 app_name = "med_scheduling_api"
-urlpatterns = [path("summary/", SummaryView.as_view(), name="summary")]
+urlpatterns = [path("practice/", views.PracticeAPI.as_view(), name="practice")]

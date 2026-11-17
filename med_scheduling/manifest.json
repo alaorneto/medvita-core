@@ -55,7 +55,7 @@
     ],
     "service_api": {
       "classes": [
-        "PracticeService"
+        "SchedulingService"
       ],
       "module": "applications.med_scheduling.service_api"
     },
