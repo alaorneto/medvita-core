@@ -1,22 +1,41 @@
 # Prontuário
 
-Especificação inicial gerada por `skeleton_startapp`. Substitua cada parágrafo pelo comportamento real da app antes do primeiro release; o check E012 verifica apenas a presença das seções, não a qualidade do conteúdo. Veja [apps e instalação](https://github.com/alaorneto/skeleton/blob/f38c9a02166d63e402d2c7708e616ae842441665/docs/concepts.md#apps-pacotes-e-deployment) e o roteiro de [extensão](https://github.com/alaorneto/skeleton/blob/f38c9a02166d63e402d2c7708e616ae842441665/docs/extending.md).
+O registro clínico do consultório: arquivos clínicos, o prontuário de cada paciente, atendimentos com seções estruturadas selados na assinatura, adendos, alergias, medicamentos em uso, CID-10, modelos, documentos simples, anexos e a trilha de leitura. A app **não** faz assinatura digital ICP-Brasil, receita de controlados, laudo de exame nem telemedicina.
 
 ## Contract
-`med_records` é instalada globalmente e ativada por organização; instalar o código não concede permissões. A app nasce indisponível e desativada: a plataforma concede a disponibilidade e cada organização ativa explicitamente (`default_enabled` é obsoleto e fica `false`).
 
-Cada `Archive` pertence a uma organização e deriva de `SecuredRecord`: UUID imutável, revisão, proprietário e visibilidade. Os campos de negócio são `code` (até 64 caracteres, único entre registros vivos da organização) e `title` (até 200). Nenhum campo é sensível; declare em `sensitive_fields` qualquer campo novo cujo valor não possa aparecer na auditoria.
+### Ativação e dependências
 
-O gateway usa `med_records.archive` com criação, leitura, alteração, exclusão lógica e restauração conforme `TablePermission` e a autorização do registro. Alterar, excluir ou restaurar exige a revisão atual.
+Depende de `io.katua.sk.med.patients` (o paciente de cada prontuário) e de `io.katua.sk.med.scheduling` (a ficha do profissional que assina e a consulta atendida). Instalada globalmente e ativada por organização, depois das dependências.
 
-A página própria fica em `/o/<org>/apps/med_records/` e o sumário em `/api/v1/o/<org>/apps/med_records/summary/`. Ambos exigem app ativa e `table.read`, e contam somente registros legíveis pelo ator.
+### Acesso
 
-Outras apps consomem esta só por `ArchiveService`, declarada em `runtime.service_api` e documentada em [service-api.md](service-api.md). Página e sumário chamam o mesmo serviço, que devolve DTOs imutáveis e revalida a autorização.
+Um contêiner (`SecuredRecord` exposto): `Archive`, o arquivo clínico, unidade de sigilo. Todo o resto deriva dele, direto ou pelo prontuário: ler pede `read` no arquivo, escrever pede `update`. A recepção não recebe concessão em arquivo nenhum e por isso não lê conteúdo clínico.
+
+O `setup` (capacidade `access.manage`) tem dois modos:
+
+- `shared`: um arquivo padrão da clínica, privado e do administrador, lido e escrito pelos grupos informados (em geral, Profissionais de saúde).
+- `per_professional`: um arquivo pessoal para cada profissional ativo vinculado a uma pessoa, do qual a pessoa é dona; ninguém mais o lê.
+
+Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (quem decide são as concessões por registro). `create_archive` cria outros arquivos (uma especialidade, um profissional novo).
+
+### Modelo de dados
+
+**`Archive`** (contêiner): `name`, `kind` (`shared` ou `personal`, imutável), `is_default` (um por organização).
+
+**`PatientChart`** (derivada do arquivo): `archive` e `patient` (imutáveis; um prontuário vivo por arquivo e paciente), `opened_at`, `last_entry_at` (o último registro clínico, base da guarda legal).
+
+### Prontuário
+
+`open_chart` obtém ou cria o prontuário do paciente: exige alteração no arquivo e leitura do paciente. Sem `archive_id` usa o arquivo padrão que o ator altera, ou o único; com vários e nenhum padrão, pede o arquivo. `chart` e `charts_for_patient` não devolvem conteúdo clínico.
+
+### Guarda legal
+
+O prontuário é guardado por 20 anos depois do último registro (Lei 13.787/2018, constante `RETENTION_YEARS` em `retention.py`). A guarda registrada em `med_patients` (`med_records.retention`) veta excluir ou anonimizar o paciente enquanto houver prontuário com registro nesse prazo; resta a restrição de tratamento. A guarda roda no contexto da organização de quem pediu, sem abrir outro.
 
 ## Acceptance
-Critérios observáveis a confirmar por testes reais (não por inferência):
 
-- Com organizações A/B, um membro de A não obtém registros de B em lista, detalhe, contagem, sumário, auditoria ou restauração, inclusive por UUID conhecido.
-- Sem `table.read`, página e sumário são negados; com ela, o sumário exclui registros privados de terceiros.
-- Duas alterações com a mesma revisão não vencem ambas.
-- Restaurar um registro cujo `code` colide com outro vivo retorna conflito sem sobrescrevê-lo.
+- A recepção não lê arquivo nem prontuário: `chart` responde `NotFound`, `charts_for_patient` é vazio e `open_chart` é recusado.
+- Com dois arquivos pessoais, um profissional não lê o prontuário do outro para o mesmo paciente.
+- `open_chart` repetido devolve o mesmo prontuário; a organização B não vê nada da A.
+- Com registro clínico recente, anonimizar o paciente é recusado com o motivo da guarda; passados os 20 anos, é aceito.

@@ -55,7 +55,7 @@
     ],
     "service_api": {
       "classes": [
-        "ArchiveService"
+        "RecordsService"
       ],
       "module": "applications.med_records.service_api"
     },
