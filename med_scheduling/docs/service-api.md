@@ -221,7 +221,7 @@ Professionals of the practice, by name.
 Register a professional of the practice, optionally linked to a member of the organization.
 
 - **Autorização:** alteração no consultório.
-- **Erros:** NotFound sem consultório; Forbidden se só lê; InvalidInput com o nome do campo ou para pessoa que não é membro ativo; Conflict("integrity_conflict") para pessoa já ligada a outro profissional vivo.
+- **Erros:** NotFound sem consultório; Forbidden se só lê; InvalidInput com o nome do campo ou para pessoa que não é membro ativo; Conflict("integrity_conflict") para pessoa já ligada a outro profissional vivo; Conflict("quota_exceeded") acima do limite de profissionais do plano.
 - **Efeitos:** grava o profissional; a mesma chave do mesmo ator devolve o já criado.
 
 #### `remove_block(*, actor, block_id, expected_revision) -> None`
@@ -277,7 +277,7 @@ Replace the whole weekly grid of a schedule, with the schedule's revision as CAS
 Deactivate (or reactivate) a professional, with CAS.
 
 - **Autorização:** alteração no consultório.
-- **Erros:** NotFound; Forbidden; Conflict("stale_revision").
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision"); Conflict("quota_exceeded") ao reativar acima do limite de profissionais do plano.
 - **Efeitos:** grava a situação; um profissional inativo some das listas e não recebe agenda nova.
 
 #### `set_schedule_access(*, actor, schedule_id, writer_group_ids, reader_group_ids, writer_user_ids=(), expected_revision) -> ScheduleInfo`

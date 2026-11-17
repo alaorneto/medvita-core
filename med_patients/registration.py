@@ -303,3 +303,16 @@ def _has_registry(*, actor) -> bool:
     from .service_api import PatientService
 
     return bool(PatientService().registries(actor=actor))
+
+
+def register_quota_metrics() -> None:
+    """The number of active patients: measured for the plans, never limited by this app."""
+    from skeleton.service_api.billing import register_quota_metric
+
+    register_quota_metric("med_patients.active_patients", count_active_patients)
+
+
+def count_active_patients(organization_id) -> int:
+    from .models import Patient
+
+    return Patient.objects.filter(organization_id=organization_id, status="active").count()

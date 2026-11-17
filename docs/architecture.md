@@ -80,3 +80,14 @@ Uma FK entre apps nunca é caminho de leitura: o dado da outra app vem do servi�
 - **Interface:** só as classes de componente do núcleo e o CSS próprio da app; sem `<script>` inline, `style=` ou `on*=`. Título `<tela> · {{ site_name }}`.
 - **Testes:** todo método de serviço com o kit `skeleton.testing.service_api`; toda tabela com o checklist do núcleo; tabela derivada com `skeleton.testing.derived`; registro selado com `skeleton.testing.sealing`; PostgreSQL com a role runtime.
 - **Versão:** ninguém edita `version` dos manifestos nem o changelog.
+
+## Planos e limites
+
+Cada app é um produto contratável; a ligação entre contratação e ativação é do núcleo (`BillingService.entitlement`), e as apps não reimplementam checagem de contrato. Duas métricas de quota são registradas no `ready()` (`register_quota_metric`):
+
+| Métrica | App | Uso |
+|---|---|---|
+| `med_scheduling.active_professionals` | agenda | `register_professional` e a reativação chamam `BillingService.check_quota` antes de gravar; acima do limite do plano, o `Conflict("quota_exceeded")` do núcleo passa adiante |
+| `med_patients.active_patients` | pacientes | só medida; nenhum limite por número de pacientes |
+
+Com a cobrança da plataforma desligada (`SKELETON_BILLING_ENABLED`, o padrão) nada muda. Preços, planos e limites são dados do catálogo da plataforma, nunca código ([guia de implantação](deployment-guide.md#4-planos-e-limites)).

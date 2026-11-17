@@ -46,6 +46,7 @@ PRACTICE_TABLE = "med_scheduling.practice"
 SCHEDULE_TABLE = "med_scheduling.schedule"
 # Container tables the built-in member role gets read and update on (the records decide the rest).
 MEMBER_TABLES = (PRACTICE_TABLE, SCHEDULE_TABLE, "skeleton_calendar.calendar")
+QUOTA_ACTIVE_PROFESSIONALS = "med_scheduling.active_professionals"
 Scalar = str | int | bool | date | None
 
 __all__ = [
@@ -975,7 +976,7 @@ class SchedulingService(ServiceAPI):
         Autorização: alteração no consultório.
         Erros: NotFound sem consultório; Forbidden se só lê; InvalidInput com o nome do campo ou
         para pessoa que não é membro ativo; Conflict("integrity_conflict") para pessoa já ligada a
-        outro profissional vivo.
+        outro profissional vivo; Conflict("quota_exceeded") acima do limite de profissionais do plano.
         Efeitos: grava o profissional; a mesma chave do mesmo ator devolve o já criado.
         """
         from skeleton.service_api.organizations import OrganizationService
@@ -1014,7 +1015,14 @@ class SchedulingService(ServiceAPI):
         return professional_info(row)
 
     def _check_quota(self, actor: Any) -> None:
-        """Hook for the plan limits (epic F); the default allows."""
+        """One more active professional must fit the plan (``med_scheduling.active_professionals``).
+
+        With the platform billing off (the default) or a plan without that limit, nothing is refused;
+        above the limit the core's ``Conflict("quota_exceeded")`` passes through untranslated.
+        """
+        from skeleton.service_api.billing import BillingService
+
+        BillingService().check_quota(actor=actor, metric=QUOTA_ACTIVE_PROFESSIONALS, increment=1)
 
     @service_method(read_only=False, since="0.1.0")
     def update_professional(
@@ -1043,7 +1051,8 @@ class SchedulingService(ServiceAPI):
         """Deactivate (or reactivate) a professional, with CAS.
 
         Autorização: alteração no consultório.
-        Erros: NotFound; Forbidden; Conflict("stale_revision").
+        Erros: NotFound; Forbidden; Conflict("stale_revision"); Conflict("quota_exceeded") ao
+        reativar acima do limite de profissionais do plano.
         Efeitos: grava a situação; um profissional inativo some das listas e não recebe agenda nova.
         """
         row = common.row(actor, Professional, professional_id, field="professional_id", write=True, lock=True)
