@@ -114,6 +114,14 @@ Whether the patient has a live granted consent for the purpose.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
+#### `patient_sections(*, actor) -> tuple[PatientSectionInfo, ...]`
+
+Tabs and shortcuts other apps add to the patient page, in order; only active apps.
+
+- **Autorização:** vínculo ativo do ator; cada aba autoriza a própria página.
+- **Erros:** nenhum além do contrato.
+- **Efeitos:** nenhum.
+
 #### `registries(*, actor) -> tuple[RegistryInfo, ...]`
 
 Patient registries the actor reads, the default one first.
@@ -178,6 +186,14 @@ Create the organization's default patient registry and share it with groups.
 - **Erros:** Forbidden sem a capacidade ou a permissão de tabela; InvalidInput para nome vazio, chave inválida, mais de 20 grupos ou grupo de outra organização; Conflict("already_set_up") quando a organização já tem um cadastro padrão criado com outra chave.
 - **Efeitos:** cria o cadastro (privado, dono o ator), dá ao papel ``member`` leitura e alteração da tabela do cadastro, concede leitura e alteração aos grupos de escrita e leitura aos de leitura; tudo na transação do chamador. A mesma chave do mesmo ator devolve o cadastro já criado, sem repetir concessões.
 
+#### `setup_steps(*, actor) -> tuple[SetupStepInfo, ...]`
+
+The steps of the clinic setup list contributed by the active apps, in order, with their state.
+
+- **Autorização:** a capacidade ``access.manage`` (administrador da organização).
+- **Erros:** Forbidden sem a capacidade.
+- **Efeitos:** nenhum.
+
 #### `summaries(*, actor, patient_ids) -> tuple[PatientSummary, ...]`
 
 Summaries of up to 200 patients, in the order asked; the ones the actor does not read are left out.
@@ -192,6 +208,14 @@ Code, display name, birth date and status of one patient.
 
 - **Autorização:** leitura do cadastro do paciente.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
+#### `timeline(*, actor, patient_id, cursor=None, page_size=20) -> TimelinePage`
+
+The patient timeline: items of the providers of active apps, newest first.
+
+- **Autorização:** leitura do cadastro do paciente (e a de cada provedor).
+- **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível; InvalidInput para cursor ou tamanho de página inválidos.
 - **Efeitos:** nenhum.
 
 #### `update(*, actor, patient_id, changes, expected_revision) -> PatientInfo`
@@ -373,6 +397,26 @@ The fields a person fills in to register a patient; ``full_name`` is the only re
 | `state` | `str` |
 | `notes` | `str` |
 
+### `PatientSection`
+
+A tab or shortcut on the patient page; ``url_name`` receives ``org`` and ``patient_id``.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `url_name` | `str` |
+| `order` | `int` |
+
+### `PatientSectionInfo`
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+
 ### `PatientSummary`
 
 What other apps show of a patient in a list: never contacts, documents or address.
@@ -396,6 +440,51 @@ What other apps show of a patient in a list: never contacts, documents or addres
 | `revision` | `int` |
 | `writable` | `bool` |
 
+### `SetupStep`
+
+A step of the clinic setup list; ``is_done(actor=...)`` says whether it is complete.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `url_name` | `str` |
+| `is_done` | `Callable[..., bool]` |
+| `order` | `int` |
+
+### `SetupStepInfo`
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `done` | `bool` |
+
+### `TimelineEntry`
+
+One item of the patient timeline. ``title`` never carries health data ("Consulta realizada").
+
+| Campo | Tipo |
+|---|---|
+| `at` | `datetime` |
+| `source` | `str` |
+| `kind` | `str` |
+| `title` | `str` |
+| `url_name` | `str` |
+| `url_args` | `tuple[str, ...]` |
+
+### `TimelinePage`
+
+A page of the timeline; ``unavailable`` lists the providers that failed (their items are missing).
+
+| Campo | Tipo |
+|---|---|
+| `items` | `tuple[TimelineEntry, ...]` |
+| `next_cursor` | `str | None` |
+| `unavailable` | `tuple[str, ...]` |
+
 <!-- END GENERATED -->
 
 ## Pontos de extensão
@@ -405,7 +494,13 @@ Funções reexportadas por este módulo, chamadas no `ready()` da app que se plu
 | Função | Para quê |
 |---|---|
 | `register_consent_purpose(ConsentPurpose(code, label, description))` | Finalidade de consentimento LGPD |
-| `register_retention_guard(code, guard)` | Veto à exclusão ou anonimização; `guard(patient_id=...)` devolve o motivo ou `None` e roda no contexto da organização do chamador |
+| `register_retention_guard(code, guard)` | Veto à exclusão ou anonimização; `guard(patient_id=...)` devolve o motivo ou `None` e roda no contexto da organização do chamador. Uma guarda que falha também veta |
+| `register_patient_section(PatientSection(code, label, url_name, order))` | Aba ou atalho na página do paciente; a rota recebe `org` e `patient_id` e autoriza sozinha |
+| `register_timeline_provider(code, provider)` | Itens da linha do tempo: `provider(*, actor, patient_id, before, limit)` devolve até `limit` `TimelineEntry` com `at <= before` (ou os mais recentes, com `before=None`), já autorizados; o título nunca leva dado de saúde |
+| `register_patient_data_provider(code, provider)` | Seção do relatório do titular: `provider(*, actor, patient_id)` devolve pares (rótulo, valor) |
+| `register_setup_step(SetupStep(code, label, url_name, is_done, order))` | Passo da lista "Configuração da clínica"; `is_done(actor=...)` diz se está concluído |
+
+Um provedor que levanta exceção não derruba a página: a falha vai para o log só com o código da contribuição e o tipo do erro, e a linha do tempo lista o provedor em `unavailable`.
 
 ## Eventos publicados
 

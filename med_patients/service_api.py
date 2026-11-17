@@ -27,7 +27,18 @@ from skeleton.service_api import (
 )
 from skeleton.service_api.dto import DEFAULT_PAGE_SIZE
 
-from .extension import ConsentPurpose, register_consent_purpose, register_retention_guard
+from .extension import (
+    ConsentPurpose,
+    PatientSection,
+    SetupStep,
+    TimelineEntry,
+    register_consent_purpose,
+    register_patient_data_provider,
+    register_patient_section,
+    register_retention_guard,
+    register_setup_step,
+    register_timeline_provider,
+)
 from .models import Consent, Patient, PatientCoverage, PatientGuardian, PatientRegistry
 from .policies import (
     REGISTRY_TABLE,
@@ -57,9 +68,19 @@ __all__ = [
     "PatientInput",
     "PatientService",
     "PatientSummary",
+    "PatientSection",
+    "PatientSectionInfo",
     "RegistryInfo",
+    "SetupStep",
+    "SetupStepInfo",
+    "TimelineEntry",
+    "TimelinePage",
     "register_consent_purpose",
+    "register_patient_data_provider",
+    "register_patient_section",
     "register_retention_guard",
+    "register_setup_step",
+    "register_timeline_provider",
 ]
 
 
@@ -315,6 +336,32 @@ class ConsentPurposeInfo:
     description: str
 
 
+@dataclass(frozen=True, slots=True)
+class PatientSectionInfo:
+    code: str
+    label: str
+    url_name: str
+    order: int
+
+
+@dataclass(frozen=True, slots=True)
+class TimelinePage:
+    """A page of the timeline; ``unavailable`` lists the providers that failed (their items are missing)."""
+
+    items: tuple[TimelineEntry, ...]
+    next_cursor: str | None
+    unavailable: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SetupStepInfo:
+    code: str
+    label: str
+    url_name: str
+    order: int
+    done: bool
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -462,6 +509,19 @@ def _publish_consent(actor: Any, row: Consent) -> None:
         record_id=row.pk,
         data=(("patient", str(row.patient_id)), ("purpose", row.purpose), ("status", row.status)),
     )
+
+
+def _timeline_cursor(cursor: object) -> tuple[datetime | None, str]:
+    if cursor is None:
+        return None, ""
+    try:
+        at, source = str(cursor).split("|", 1)
+        parsed = datetime.fromisoformat(at)
+    except ValueError:
+        raise InvalidInput({"cursor": [gettext("Cursor inválido.")]}) from None
+    if parsed.tzinfo is None:
+        raise InvalidInput({"cursor": [gettext("Cursor inválido.")]})
+    return parsed, source
 
 
 # ------------------------------------------------------------------------------------ service
@@ -1093,3 +1153,79 @@ class PatientService(ServiceAPI):
         row.save(update_fields={"status", "revoked_at"})
         _publish_consent(actor, row)
         return consent_info(row)
+
+    # ------------------------------------------------------------------ extension points
+
+    @service_method(read_only=True, since="0.1.0")
+    def patient_sections(self, *, actor: Any) -> tuple[PatientSectionInfo, ...]:
+        """Tabs and shortcuts other apps add to the patient page, in order; only active apps.
+
+        Autorização: vínculo ativo do ator; cada aba autoriza a própria página.
+        Erros: nenhum além do contrato.
+        Efeitos: nenhum.
+        """
+        from .extension import PATIENT_SECTIONS
+
+        rows = [section for _code, section in PATIENT_SECTIONS.active(actor)]
+        return tuple(
+            PatientSectionInfo(row.code, str(row.label), row.url_name, row.order)
+            for row in sorted(rows, key=lambda row: (row.order, row.code))
+        )
+
+    @service_method(read_only=True, since="0.1.0")
+    def timeline(self, *, actor: Any, patient_id: UUID, cursor: str | None = None, page_size: int = 20) -> TimelinePage:
+        """The patient timeline: items of the providers of active apps, newest first.
+
+        Each provider authorizes what it returns. The cursor is the time and source of the last
+        item seen. A provider that fails is listed in ``unavailable`` and logged without data.
+        Autorização: leitura do cadastro do paciente (e a de cada provedor).
+        Erros: NotFound para paciente inexistente, de outra organização ou ilegível; InvalidInput
+        para cursor ou tamanho de página inválidos.
+        Efeitos: nenhum.
+        """
+        from .extension import TIMELINE_PROVIDERS, call_safely
+
+        if type(page_size) is not int or not 1 <= page_size <= 100:
+            raise InvalidInput({"page_size": [gettext("Use de 1 a 100 itens por página.")]})
+        before, after_source = _timeline_cursor(cursor)
+        patient = _readable(actor, patient_id)
+        entries: list[TimelineEntry] = []
+        unavailable = []
+        for code, provider in TIMELINE_PROVIDERS.active(actor):
+            ok, found = call_safely(
+                code, provider, actor=actor, patient_id=patient.pk, before=before, limit=page_size + 1
+            )
+            if not ok or not isinstance(found, tuple):
+                unavailable.append(code)
+                continue
+            for entry in found:
+                if not isinstance(entry, TimelineEntry):
+                    continue
+                if before is not None and (entry.at > before or (entry.at == before and entry.source >= after_source)):
+                    continue
+                entries.append(entry)
+        entries.sort(key=lambda entry: (entry.at, entry.source), reverse=True)
+        page = tuple(entries[:page_size])
+        following = None
+        if len(entries) > page_size:
+            last = page[-1]
+            following = f"{last.at.isoformat()}|{last.source}"
+        return TimelinePage(page, following, tuple(unavailable))
+
+    @service_method(read_only=True, since="0.1.0")
+    def setup_steps(self, *, actor: Any) -> tuple[SetupStepInfo, ...]:
+        """The steps of the clinic setup list contributed by the active apps, in order, with their state.
+
+        Autorização: a capacidade ``access.manage`` (administrador da organização).
+        Erros: Forbidden sem a capacidade.
+        Efeitos: nenhum.
+        """
+        from .extension import SETUP_STEPS, call_safely
+
+        _require_access_manager(actor)
+        steps = sorted((step for _code, step in SETUP_STEPS.active(actor)), key=lambda step: (step.order, step.code))
+        result = []
+        for step in steps:
+            ok, done = call_safely(step.code, step.is_done, actor=actor)
+            result.append(SetupStepInfo(step.code, str(step.label), step.url_name, step.order, bool(ok and done)))
+        return tuple(result)

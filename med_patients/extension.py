@@ -10,12 +10,16 @@ called in ``ready()`` of the app that plugs in. Every registry:
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _CODE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 # Frames of this app's own plumbing: the caller is the first frame outside them.
@@ -88,9 +92,46 @@ class ConsentPurpose:
     description: Any = ""
 
 
+@dataclass(frozen=True)
+class PatientSection:
+    """A tab or shortcut on the patient page; ``url_name`` receives ``org`` and ``patient_id``."""
+
+    code: str
+    label: Any
+    url_name: str
+    order: int = 100
+
+
+@dataclass(frozen=True, slots=True)
+class TimelineEntry:
+    """One item of the patient timeline. ``title`` never carries health data ("Consulta realizada")."""
+
+    at: datetime
+    source: str
+    kind: str
+    title: str
+    url_name: str = ""
+    url_args: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class SetupStep:
+    """A step of the clinic setup list; ``is_done(actor=...)`` says whether it is complete."""
+
+    code: str
+    label: Any
+    url_name: str
+    is_done: Callable[..., bool]
+    order: int = 100
+
+
 CONSENT_PURPOSES = Registry("consent purpose")
 RETENTION_GUARDS = Registry("retention guard")
-REGISTRIES = [CONSENT_PURPOSES, RETENTION_GUARDS]
+PATIENT_SECTIONS = Registry("patient section")
+TIMELINE_PROVIDERS = Registry("timeline provider")
+DATA_PROVIDERS = Registry("patient data provider")
+SETUP_STEPS = Registry("setup step")
+REGISTRIES = [CONSENT_PURPOSES, RETENTION_GUARDS, PATIENT_SECTIONS, TIMELINE_PROVIDERS, DATA_PROVIDERS, SETUP_STEPS]
 
 
 def register_consent_purpose(purpose: ConsentPurpose) -> ConsentPurpose:
@@ -111,12 +152,63 @@ def register_retention_guard(code: str, guard: Callable[..., str | None]) -> Cal
     return RETENTION_GUARDS.add(code, guard, caller=_caller_label())
 
 
+def register_patient_section(section: PatientSection) -> PatientSection:
+    """Add a tab or shortcut to the patient page."""
+    if not isinstance(section, PatientSection):
+        raise TypeError("register_patient_section takes a PatientSection.")
+    return PATIENT_SECTIONS.add(section.code, section, caller=_caller_label())
+
+
+def register_timeline_provider(code: str, provider: Callable[..., tuple[TimelineEntry, ...]]) -> Callable[..., Any]:
+    """Add items to the patient timeline.
+
+    ``provider(*, actor, patient_id, before, limit)`` returns at most ``limit`` entries with
+    ``at <= before`` (``before`` is ``None`` on the first page), newest first. It authorizes with
+    its own service and returns ``()`` when the actor reads nothing.
+    """
+    if not callable(provider):
+        raise TypeError("register_timeline_provider takes a callable.")
+    return TIMELINE_PROVIDERS.add(code, provider, caller=_caller_label())
+
+
+def register_patient_data_provider(
+    code: str, provider: Callable[..., tuple[tuple[str, str], ...]]
+) -> Callable[..., Any]:
+    """Add a section to the data subject report: ``provider(*, actor, patient_id)`` returns (label, value) pairs."""
+    if not callable(provider):
+        raise TypeError("register_patient_data_provider takes a callable.")
+    return DATA_PROVIDERS.add(code, provider, caller=_caller_label())
+
+
+def register_setup_step(step: SetupStep) -> SetupStep:
+    """Add a step to the clinic setup list."""
+    if not isinstance(step, SetupStep):
+        raise TypeError("register_setup_step takes a SetupStep.")
+    return SETUP_STEPS.add(step.code, step, caller=_caller_label())
+
+
+def call_safely(code: str, function: Callable[..., Any], **arguments: Any) -> tuple[bool, Any]:
+    """Run a contribution; a failure is logged (by code and error type only) and reported as ``(False, None)``."""
+    try:
+        return True, function(**arguments)
+    except Exception as exc:  # noqa: BLE001 - one app's failure never breaks the patient page
+        logger.warning("med_patients.contribution_failed", extra={"contribution": code, "error": type(exc).__name__})
+        return False, None
+
+
 def retention_vetoes(*, actor: Any, patient: Any) -> list[str]:
-    """The reasons the guards of active apps give to keep the patient (empty: nothing vetoes)."""
+    """The reasons the guards of active apps give to keep the patient (empty: nothing vetoes).
+
+    A guard that fails vetoes too: keeping a patient by mistake is reversible, erasing it is not.
+    """
+    from django.utils.translation import gettext
+
     reasons = []
-    for _code, guard in RETENTION_GUARDS.active(actor):
-        reason = guard(patient_id=patient.pk)
-        if reason:
+    for code, guard in RETENTION_GUARDS.active(actor):
+        ok, reason = call_safely(code, guard, patient_id=patient.pk)
+        if not ok:
+            reasons.append(gettext("Não foi possível confirmar a retenção ({code}).").format(code=code))
+        elif reason:
             reasons.append(str(reason))
     return reasons
 
