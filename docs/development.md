@@ -56,7 +56,7 @@ python -m skeleton.testing.database provision --database med_skeleton_test
 
 Para rodar em paralelo (`-n N`), provisione também um banco por worker: `med_gw0_skeleton_test` até `med_gw<N-1>_skeleton_test`. A fixture `skeleton_db` do `conftest.py` da raiz escolhe o banco do worker sozinha.
 
-Sem PostgreSQL instalado, o `tools/dev_postgres.py` de um clone do Skeleton sobe um servidor descartável (sem Docker) com `local_skeleton_test` e um banco por worker (`--workers 8`); `python tools/dev_postgres.py env` mostra as URLs a copiar para o `.env`.
+Sem PostgreSQL instalado, o script `dev_postgres.py` da pasta `tools` de um clone do Skeleton sobe um servidor descartável (sem Docker) com `local_skeleton_test` e um banco por worker (`--workers 8`); `python tools/dev_postgres.py env` mostra as URLs a copiar para o `.env`.
 
 A fixture migra o schema uma vez por worker e, antes de cada teste, o recria a partir de um `pg_dump` dele. Sem `pg_dump`, ou com `MED_TEST_SCHEMA_TEMPLATE=0`, cada teste migra do zero, como a fixture do núcleo.
 
@@ -95,4 +95,4 @@ Ninguém edita `version` dos manifestos nem o `CHANGELOG.md`: a automação do `
 | `packages` | `package doctor <pacote> --git-ref HEAD` dos quatro pacotes |
 | `CI` | agregador: falha se qualquer job falhar. É o check que o ruleset da `main` exige, ao lado de "Verificação do PR" |
 
-Trocar o núcleo é uma mudança própria: suba `SKELETON_REF` (ou, com release, troque pelo wheel da release) junto com `compatibility.skeleton` dos manifestos. O job de publicação dos pacotes assinados não existe ainda: ele nasce com a primeira release (`docs/releasing.md`).
+Trocar o núcleo é uma mudança própria: suba `SKELETON_REF` (ou, com release, troque pelo wheel da release) junto com `compatibility.skeleton` dos manifestos. O job de publicação dos pacotes assinados não existe ainda: ele nasce com a primeira release, junto com o guia de publicação.

@@ -1,6 +1,6 @@
 # Agenda médica
 
-Especificação inicial gerada por `skeleton_startapp`. Substitua cada parágrafo pelo comportamento real da app antes do primeiro release; o check E012 verifica apenas a presença das seções, não a qualidade do conteúdo. Veja [apps e instalação](../../../docs/concepts.md#apps-pacotes-e-deployment) e o roteiro de [extensão](../../../docs/extending.md).
+Especificação inicial gerada por `skeleton_startapp`. Substitua cada parágrafo pelo comportamento real da app antes do primeiro release; o check E012 verifica apenas a presença das seções, não a qualidade do conteúdo. Veja [apps e instalação](https://github.com/alaorneto/skeleton/blob/f38c9a02166d63e402d2c7708e616ae842441665/docs/concepts.md#apps-pacotes-e-deployment) e o roteiro de [extensão](https://github.com/alaorneto/skeleton/blob/f38c9a02166d63e402d2c7708e616ae842441665/docs/extending.md).
 
 ## Contract
 `med_scheduling` é instalada globalmente e ativada por organização; instalar o código não concede permissões. A app nasce indisponível e desativada: a plataforma concede a disponibilidade e cada organização ativa explicitamente (`default_enabled` é obsoleto e fica `false`).

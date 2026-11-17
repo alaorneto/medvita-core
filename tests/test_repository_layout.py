@@ -51,3 +51,6 @@ def test_each_package_carries_license_and_export_rules(app):
     rules = (package / ".gitattributes").read_text(encoding="utf-8").splitlines()
     assert ".gitattributes export-ignore" in rules
     assert "AGENTS.md export-ignore" in rules
+    agents = package / "AGENTS.md"
+    assert agents.is_file(), f"{app} has no AGENTS.md"
+    assert "../AGENTS.md" in agents.read_text(encoding="utf-8")
