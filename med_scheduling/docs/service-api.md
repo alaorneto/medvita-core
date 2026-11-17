@@ -592,6 +592,14 @@ Payload: `code`, `schedule`, `patient` (o `sysid`, em texto), `appointment_type`
 
 `med_scheduling.patient_arrived`: ao profissional da agenda, na chegada do paciente; payload `code` e `starts_at`.
 
+## Contribuições à página do paciente
+
+Registradas no `ready()` pelos pontos de extensão de `med_patients`: aba `med_scheduling.appointments`, provider de linha do tempo e de relatório do titular com o mesmo código, e o passo de configuração `med_scheduling.practice`.
+
+## API REST
+
+As rotas de `/api/v1/o/<org>/apps/med_scheduling/` estão em `docs/spec.md` (seção "API REST"); cada uma chama um método desta classe.
+
 ## Histórico de versões
 | Versão | Mudança |
 |---|---|

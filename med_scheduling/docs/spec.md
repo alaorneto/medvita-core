@@ -113,6 +113,44 @@ Outras apps põem botões na consulta com `register_appointment_action(Appointme
 4. Saem os que já passaram e os além de `booking_horizon_days`.
 5. Horário de verão: o horário gerado é do relógio local; um horário que não existe (o relógio pula) é descartado, e um ambíguo (o relógio volta) usa a primeira ocorrência.
 
+### Páginas
+
+Em `/o/<org>/apps/med_scheduling/` (nomes `med_scheduling:<nome>`); toda leitura e escrita passa pelo `SchedulingService` e pelo `PatientService`, e as horas aparecem no relógio do consultório.
+
+| Nome | Página |
+|---|---|
+| `day` | Agenda do dia: uma coluna por agenda legível, consultas com a situação e os horários livres |
+| `week` | Semana de uma agenda |
+| `book` | Marcar: busca de paciente, agenda, tipo, dia, horário livre ou encaixe, pagamento e observação |
+| `appointment` | Consulta: dados, situação, mudanças permitidas, ações de outras apps, remarcar e cancelar |
+| `reception` | Recepção do dia: aguardando, em atendimento e próximos; atualiza a cada minuto sem script |
+| `waitlist` | Lista de espera: entradas, incluir e tirar |
+| `settings` | Dados do consultório, profissionais, salas e tipos |
+| `schedules`, `schedule` | Agendas, grade semanal e bloqueios |
+| `setup` | Configuração inicial (administradores) |
+| `patient_section` | Aba "Consultas" da página do paciente |
+
+Agenda ou consulta que o ator não lê responde 404. Quem lê a agenda e não lê o paciente vê "Paciente não disponível". A cor do tipo é uma classe do CSS da app, nunca `style=`.
+
+### Integração com a página do paciente
+
+No `ready()`: a aba "Consultas" (`register_patient_section`, ordem 20), a linha do tempo ("Consulta agendada", "Consulta realizada", "Falta", "Consulta cancelada", sem observação), o relatório do titular (data, código e situação de cada consulta legível) e o passo "Agenda médica" da lista de configuração. Cada contribuição só mostra consultas de agendas que o ator lê.
+
+### API REST
+
+Em `/api/v1/o/<org>/apps/med_scheduling/`:
+
+| Método e caminho | O que faz |
+|---|---|
+| `GET schedules/` | Agendas legíveis (`ScheduleInfo`) |
+| `GET schedules/<id>/slots/?start=&end=&type=` | Horários livres (`Slot`), datas `AAAA-MM-DD`, até 62 dias |
+| `GET appointments/?schedule=&patient=&start=&end=&status=&cursor=&page_size=` | Consultas (`AppointmentInfo`, sem observação) |
+| `POST appointments/` | Marca; exige `Idempotency-Key`; campos `schedule`, `patient`, `appointment_type`, `starts_at` (ISO 8601 com fuso) e opcionais `duration_minutes`, `fit_in`, `notes`, `payment_kind`, `room`; devolve 201 com `ETag` |
+| `GET appointments/<id>/` | Detalhe (`AppointmentDetail`, com a observação), com `ETag` |
+| `POST appointments/<id>/<mudança>/` | `confirm`, `check-in`, `start`, `complete`, `no-show`, `cancel` (`reason`, `note`) e `reschedule` (`starts_at`, `schedule`); exigem `If-Match` com a revisão |
+
+Campo fora da lista é 400; sem revisão é 400; revisão vencida é 409; agenda sem acesso ou de outra organização é 404. Sem exclusão pela API.
+
 ## Acceptance
 
 - Só o administrador configura o consultório; a configuração é idempotente pela chave e única por organização.
@@ -120,3 +158,7 @@ Outras apps põem botões na consulta com `register_appointment_action(Appointme
 - Nome, número do conselho e CPF do profissional saem `[REDACTED]` na auditoria.
 - Um grupo removido por `set_schedule_access` perde o acesso à agenda e ao calendário dela.
 - Com o `skeleton_calendar` desativado, a agenda médica fica indisponível.
+- Pelas páginas, a recepção marca, registra a chegada, remarca e cancela; revisão vencida mostra a mensagem de conflito.
+- O título do evento no calendário nunca leva o nome do paciente; quem lê a agenda e não o paciente vê só o código.
+- A agenda do dia faz o mesmo número de consultas ao banco com 1 ou 7 consultas.
+- A API nunca devolve a observação numa lista e recusa campos de sistema.
