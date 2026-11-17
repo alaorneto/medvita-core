@@ -224,3 +224,46 @@ def register_charges() -> None:
                 owner_app=APP_LABEL,
             )
         )
+
+
+def register_payments() -> None:
+    from skeleton.events.registry import EventType, register_event_type
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import Payment
+
+    register(
+        TableSpec(
+            model=Payment,
+            description=_("Pagamentos das contas, recebidos numa sessão de caixa e baixados no livro."),
+            label=_("Pagamentos"),
+            scope="organization",
+            read_fields=(
+                "charge",
+                "session",
+                "method",
+                "amount",
+                "received_at",
+                "installments",
+                "authorization_code",
+                "received_by",
+                "status",
+                "reversed_at",
+                "reverse_reason",
+                "ledger_settlement",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="charge",
+        )
+    )
+    for name in ("registered", "reversed"):
+        register_event_type(
+            EventType(
+                code=f"{APP_LABEL}.payment_{name}",
+                table_key="med_finance.payment",
+                payload_fields=("charge", "method", "amount", "status"),
+                owner_app=APP_LABEL,
+            )
+        )

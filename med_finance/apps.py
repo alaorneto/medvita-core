@@ -20,4 +20,5 @@ class MedFinanceConfig(AppConfig):
         registration.register_account_keys()
         registration.register_cash_tables()
         registration.register_charges()
+        registration.register_payments()
         registration.register_contributions()

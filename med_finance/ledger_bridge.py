@@ -116,12 +116,11 @@ def settle(actor: Any, *, title_id: UUID, desk: Any, method: str, amount: int, o
 
 
 def reverse_settlement(actor: Any, *, title_id: UUID, settlement_id: UUID, on: date, reason: str) -> None:
+    """Reverse a settlement; the ledger checks the revision of the title."""
     ledger = _ledger()
-    settlement = next(
-        item for item in ledger.settlements(actor=actor, title_id=title_id) if item.sysid == settlement_id
-    )
+    title = ledger.title(actor=actor, title_id=title_id)
     ledger.reverse_settlement(
-        actor=actor, settlement_id=settlement_id, date=on, expected_revision=settlement.revision, reason=reason
+        actor=actor, settlement_id=settlement_id, date=on, expected_revision=title.revision, reason=reason
     )
 
 

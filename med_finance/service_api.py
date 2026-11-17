@@ -30,7 +30,7 @@ from skeleton.service_api import (
 
 from . import common
 from .extension import ChargeOrigin, register_charge_origin
-from .models import CashDesk, CashMovement, CashSession, Charge, ChargeItem, PriceItem, PriceList
+from .models import CashDesk, CashMovement, CashSession, Charge, ChargeItem, Payment, PriceItem, PriceList
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.finance"
@@ -41,6 +41,7 @@ MEMBER_TABLES = (PRICE_LIST_TABLE, DESK_TABLE)
 MAX_AMOUNT = 10**11  # R$ 1 bilhão em centavos: a sanity bound, not a business rule.
 
 __all__ = [
+    "PaymentInfo",
     "ChargeDetail",
     "ChargeInfo",
     "ChargeItemInfo",
@@ -174,13 +175,27 @@ class SessionReport:
 
 
 def _payments_by_method(actor: Any, session: CashSession) -> tuple[MethodTotal, ...]:
-    """Registered (not reversed) payments of the session, by method; none until payments exist."""
-    return ()
+    """Registered (not reversed) payments of the session, by method."""
+    from django.db.models import Count, Sum
+
+    from skeleton.access.policies import authorized_queryset
+
+    rows = (
+        authorized_queryset(Payment, user=actor, action="read")
+        .filter(session=session, status="registered")
+        .values("method")
+        .annotate(total=Sum("amount"), count=Count("sysid"))
+        .order_by("method")
+    )
+    return tuple(MethodTotal(row["method"], row["total"] or 0, row["count"]) for row in rows)
 
 
 def _cash_payments(session: CashSession) -> int:
-    """Cash payments of the session that were not reversed (0 until payments exist)."""
-    return 0
+    """Cash payments of the session that were not reversed."""
+    from django.db.models import Sum
+
+    total = Payment.objects.filter(session=session, method="cash", status="registered").aggregate(total=Sum("amount"))
+    return int(total["total"] or 0)
 
 
 def _expected_cash(session: CashSession) -> int:
@@ -315,8 +330,66 @@ def _publish_charge(actor: Any, suffix: str, row: Charge) -> None:
 
 
 def _has_active_payments(charge: Charge) -> bool:
-    """Whether the charge has a registered (not reversed) payment; none until payments exist."""
+    """Whether the charge has a registered (not reversed) payment."""
+    return Payment.objects.filter(charge=charge, status="registered").exists()
+
+
+@dataclass(frozen=True, slots=True)
+class PaymentInfo:
+    sysid: UUID
+    charge_id: UUID
+    session_id: UUID
+    method: str
+    amount: int
+    received_at: datetime
+    installments: int
+    authorization_code: str
+    received_by_id: UUID
+    status: str
+    reversed_at: datetime | None
+    reverse_reason: str
+    ledger_settlement_id: UUID | None
+    revision: int
+
+
+def payment_info(row: Payment) -> PaymentInfo:
+    return PaymentInfo(
+        row.pk,
+        row.charge_id,
+        row.session_id,
+        row.method,
+        row.amount,
+        as_utc(row.received_at),
+        row.installments,
+        row.authorization_code,
+        row.received_by_id,
+        row.status,
+        as_utc(row.reversed_at) if row.reversed_at else None,
+        row.reverse_reason,
+        row.ledger_settlement,
+        row.revision,
+    )
+
+
+def _publish_payment(actor: Any, suffix: str, row: Payment) -> None:
+    from skeleton.service_api.events import EventService
+
+    EventService().publish(
+        actor=actor,
+        event_type=f"med_finance.payment_{suffix}",
+        record_id=row.pk,
+        data=(("charge", str(row.charge_id)), ("method", row.method), ("amount", row.amount), ("status", row.status)),
+    )
+
+
+def _has_live_receipt(payment: Payment) -> bool:
+    """Whether the payment has a receipt that was not voided (none until receipts exist)."""
     return False
+
+
+def _issue_receipt(actor: Any, payment: Payment, *, key: str) -> None:
+    """Issue the receipt of a payment (nothing until receipts exist)."""
+    return None
 
 
 def _clean_payer(name: object, document: object) -> tuple[str, str]:
@@ -1191,3 +1264,146 @@ class FinanceService(ServiceAPI):
             patient_id=as_uuid(patient_id, field="patient_id"), status__in=("open", "partially_paid")
         )
         return int(rows.aggregate(total=Sum(F("total") - F("paid_total")))["total"] or 0)
+
+    # ------------------------------------------------------------------ payments
+
+    @service_method(read_only=False, since="0.1.0")
+    def register_payment(
+        self,
+        *,
+        actor: Any,
+        charge_id: UUID,
+        method: str,
+        amount: int,
+        expected_revision: int,
+        idempotency_key: str,
+        installments: int = 1,
+        authorization_code: str = "",
+        issue_receipt: bool = True,
+    ) -> PaymentInfo:
+        """Receive a payment of a charge in the open session of its desk and settle the title in the ledger.
+
+        Autorização: alteração no caixa da conta.
+        Erros: NotFound; Forbidden; InvalidInput para forma, valor acima do saldo, parcelas (mais de
+        uma só no crédito) ou código de autorização inválidos; Conflict("not_open") para conta em
+        rascunho, paga ou cancelada; Conflict("no_open_session"); Conflict("stale_revision") com a
+        revisão da conta; Conflict("ledger_rejected").
+        Efeitos: grava o pagamento, a baixa no livro, o total pago e a situação da conta; publica
+        ``payment_registered`` e, ao quitar, ``charge_paid``; com ``issue_receipt``, emite o recibo
+        na mesma transação. A mesma chave devolve o já registrado.
+        """
+        from skeleton.access.policies import require_parent_action
+
+        from . import ledger_bridge
+
+        key = common.key(idempotency_key)
+        if method not in Payment.Method.values:
+            raise InvalidInput({"method": [gettext("Forma de pagamento desconhecida.")]})
+        value = _amount(amount, positive=True)
+        if type(installments) is not int or not 1 <= installments <= 24:
+            raise InvalidInput({"installments": [gettext("Use de 1 a 24 parcelas.")]})
+        if installments > 1 and method != Payment.Method.CREDIT_CARD:
+            raise InvalidInput({"installments": [gettext("Só o cartão de crédito é parcelado.")]})
+        if not isinstance(authorization_code, str) or len(authorization_code) > 40:
+            raise InvalidInput({"authorization_code": [gettext("Use até 40 caracteres.")]})
+        sysid = common.deterministic_id("payment", actor, key)
+        existing = Payment.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return payment_info(existing)
+        charge = _charge(actor, charge_id, write=True, lock=True)
+        common.check_revision(charge, expected_revision)
+        if charge.status not in (Charge.Status.OPEN, Charge.Status.PARTIALLY_PAID):
+            raise Conflict("not_open", gettext("Só uma conta em aberto recebe pagamento."))
+        if value > charge.total - charge.paid_total:
+            raise InvalidInput({"amount": [gettext("O valor passa o saldo da conta.")]})
+        session = CashSession.objects.filter(desk_id=charge.desk_id, status="open").select_for_update().first()
+        if session is None:
+            raise Conflict("no_open_session", gettext("Abra o caixa antes de receber."))
+        require_parent_action(Payment, charge, user=actor, action="create")
+        payment = Payment(
+            sysid=sysid,
+            organization_id=charge.organization_id,
+            charge=charge,
+            session=session,
+            method=method,
+            amount=value,
+            received_at=timezone.now(),
+            installments=installments,
+            authorization_code=authorization_code.strip(),
+            received_by_id=actor.pk,
+        )
+        payment.save()
+        with _ledger_errors():
+            payment.ledger_settlement = ledger_bridge.settle(
+                actor,
+                title_id=charge.ledger_title,
+                desk=charge.desk,
+                method=method,
+                amount=value,
+                on=timezone.localdate(),
+                idempotency_key=f"med_finance:payment:{payment.pk}",
+            )
+        payment.save(update_fields={"ledger_settlement"})
+        charge.paid_total += value
+        charge.status = Charge.Status.PAID if charge.paid_total == charge.total else Charge.Status.PARTIALLY_PAID
+        charge.save(update_fields={"paid_total", "status"})
+        _publish_payment(actor, "registered", payment)
+        if charge.status == Charge.Status.PAID:
+            _publish_charge(actor, "paid", charge)
+        if issue_receipt:
+            _issue_receipt(actor, payment, key=f"payment-{payment.pk}")
+        return payment_info(payment)
+
+    @service_method(read_only=False, since="0.1.0")
+    def reverse_payment(self, *, actor: Any, payment_id: UUID, reason: str, expected_revision: int) -> PaymentInfo:
+        """Reverse a payment: the settlement is reversed in the ledger and the charge is open again.
+
+        Autorização: alteração no caixa da conta.
+        Erros: NotFound; Forbidden; InvalidInput sem motivo; Conflict("reversed"),
+        Conflict("receipt_not_voided") com recibo vivo, Conflict("stale_revision") com a revisão do
+        pagamento, Conflict("ledger_rejected").
+        Efeitos: grava o estorno, estorna a baixa, recalcula a conta e publica ``payment_reversed``.
+        Um estorno de sessão já fechada não muda o esperado gravado no fechamento.
+        """
+        from . import ledger_bridge
+
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 200:
+            raise InvalidInput({"reason": [gettext("Informe o motivo (até 200 caracteres).")]})
+        payment = common.row(actor, Payment, payment_id, field="payment_id", write=True, lock=True)
+        common.check_revision(payment, expected_revision)
+        if payment.status != Payment.Status.REGISTERED:
+            raise Conflict("reversed", gettext("O pagamento já foi estornado."))
+        if _has_live_receipt(payment):
+            raise Conflict("receipt_not_voided", gettext("Anule o recibo antes de estornar o pagamento."))
+        charge = Charge.objects.select_for_update().get(pk=payment.charge_id)
+        with _ledger_errors():
+            ledger_bridge.reverse_settlement(
+                actor,
+                title_id=charge.ledger_title,
+                settlement_id=payment.ledger_settlement,
+                on=timezone.localdate(),
+                reason=reason.strip(),
+            )
+        common.apply_changes(
+            payment,
+            {"status": Payment.Status.REVERSED, "reversed_at": timezone.now(), "reverse_reason": reason.strip()},
+        )
+        charge.paid_total -= payment.amount
+        charge.status = Charge.Status.PARTIALLY_PAID if charge.paid_total else Charge.Status.OPEN
+        charge.save(update_fields={"paid_total", "status"})
+        _publish_payment(actor, "reversed", payment)
+        return payment_info(payment)
+
+    @service_method(read_only=True, since="0.1.0")
+    def payments(self, *, actor: Any, charge_id: UUID) -> tuple[PaymentInfo, ...]:
+        """The payments of a charge, oldest first.
+
+        Autorização: leitura do caixa.
+        Erros: NotFound para conta ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        charge = _charge(actor, charge_id)
+        rows = authorized_queryset(Payment, user=actor, action="read").filter(charge=charge)
+        return tuple(payment_info(row) for row in rows.order_by("received_at", "sysid"))

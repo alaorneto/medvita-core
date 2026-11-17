@@ -128,6 +128,14 @@ What the patient still owes in the open and partially paid charges the actor rea
 - **Erros:** InvalidInput para identificador inválido.
 - **Efeitos:** nenhum.
 
+#### `payments(*, actor, charge_id) -> tuple[PaymentInfo, ...]`
+
+The payments of a charge, oldest first.
+
+- **Autorização:** leitura do caixa.
+- **Erros:** NotFound para conta ilegível.
+- **Efeitos:** nenhum.
+
 #### `price_for(*, actor, code, price_list_id=None) -> PriceItemInfo | None`
 
 The active item of a code (the appointment type's billing code), or ``None``.
@@ -152,6 +160,14 @@ The price lists the actor reads, the default first.
 - **Erros:** nenhum além do contrato.
 - **Efeitos:** nenhum.
 
+#### `register_payment(*, actor, charge_id, method, amount, expected_revision, idempotency_key, installments=1, authorization_code='', issue_receipt=True) -> PaymentInfo`
+
+Receive a payment of a charge in the open session of its desk and settle the title in the ledger.
+
+- **Autorização:** alteração no caixa da conta.
+- **Erros:** NotFound; Forbidden; InvalidInput para forma, valor acima do saldo, parcelas (mais de uma só no crédito) ou código de autorização inválidos; Conflict("not_open") para conta em rascunho, paga ou cancelada; Conflict("no_open_session"); Conflict("stale_revision") com a revisão da conta; Conflict("ledger_rejected").
+- **Efeitos:** grava o pagamento, a baixa no livro, o total pago e a situação da conta; publica ``payment_registered`` e, ao quitar, ``charge_paid``; com ``issue_receipt``, emite o recibo na mesma transação. A mesma chave devolve o já registrado.
+
 #### `remove_item(*, actor, charge_id, item_id, expected_revision) -> ChargeDetail`
 
 Remove a line of a draft charge, with CAS on the charge.
@@ -159,6 +175,14 @@ Remove a line of a draft charge, with CAS on the charge.
 - **Autorização:** alteração no caixa.
 - **Erros:** NotFound; Forbidden; Conflict("not_draft") ou Conflict("stale_revision").
 - **Efeitos:** exclusão lógica do item e novo total.
+
+#### `reverse_payment(*, actor, payment_id, reason, expected_revision) -> PaymentInfo`
+
+Reverse a payment: the settlement is reversed in the ledger and the charge is open again.
+
+- **Autorização:** alteração no caixa da conta.
+- **Erros:** NotFound; Forbidden; InvalidInput sem motivo; Conflict("reversed"), Conflict("receipt_not_voided") com recibo vivo, Conflict("stale_revision") com a revisão do pagamento, Conflict("ledger_rejected").
+- **Efeitos:** grava o estorno, estorna a baixa, recalcula a conta e publica ``payment_reversed``. Um estorno de sessão já fechada não muda o esperado gravado no fechamento.
 
 #### `session_report(*, actor, session_id) -> SessionReport`
 
@@ -289,6 +313,25 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 | `reason` | `str` |
 | `at` | `datetime` |
 | `ledger_entry_id` | `UUID | None` |
+
+### `PaymentInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `charge_id` | `UUID` |
+| `session_id` | `UUID` |
+| `method` | `str` |
+| `amount` | `int` |
+| `received_at` | `datetime` |
+| `installments` | `int` |
+| `authorization_code` | `str` |
+| `received_by_id` | `UUID` |
+| `status` | `str` |
+| `reversed_at` | `datetime | None` |
+| `reverse_reason` | `str` |
+| `ledger_settlement_id` | `UUID | None` |
+| `revision` | `int` |
 
 ### `PriceItemInfo`
 

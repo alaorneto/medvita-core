@@ -145,13 +145,30 @@ def _item(desk):
     return row
 
 
+@register_child("payment")
+def _payment(desk):
+    from applications.med_finance.models import Payment
+
+    row = Payment(
+        organization=desk.organization,
+        charge=make_charge(desk),
+        session=make_session(desk),
+        method="cash",
+        amount=100,
+        received_at=datetime(2026, 1, 1, 12, tzinfo=UTC),
+        received_by=desk.owner,
+    )
+    row.save()
+    return row
+
+
 def _model(name):
     from django.apps import apps
 
     return apps.get_model("med_finance", name)
 
 
-@pytest.mark.parametrize("table", ["cashsession", "cashmovement", "charge", "chargeitem"])
+@pytest.mark.parametrize("table", ["cashsession", "cashmovement", "charge", "chargeitem", "payment"])
 def test_desk_tables_follow_the_desk(skeleton_db, table):
     for label in APPS:
         open_app(label)

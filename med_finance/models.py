@@ -200,3 +200,50 @@ class ChargeItem(OrganizationRecord):
             models.CheckConstraint(condition=Q(quantity__gte=1), name="med_finance_item_quantity"),
         ]
         ordering = ("created_at", "sysid")
+
+
+class Payment(OrganizationRecord):
+    """A payment of a charge received in an open cash session; a settlement of the title in the ledger."""
+
+    class Method(models.TextChoices):
+        CASH = "cash", gettext_lazy("Dinheiro")
+        PIX = "pix", gettext_lazy("Pix")
+        DEBIT_CARD = "debit_card", gettext_lazy("Cartão de débito")
+        CREDIT_CARD = "credit_card", gettext_lazy("Cartão de crédito")
+        BANK_TRANSFER = "bank_transfer", gettext_lazy("Transferência")
+        OTHER = "other", gettext_lazy("Outro")
+
+    class Status(models.TextChoices):
+        REGISTERED = "registered", gettext_lazy("Registrado")
+        REVERSED = "reversed", gettext_lazy("Estornado")
+
+    charge = models.ForeignKey(Charge, on_delete=models.PROTECT, related_name="+")
+    session = models.ForeignKey(CashSession, on_delete=models.PROTECT, related_name="+")
+    method = models.CharField(max_length=16, choices=Method.choices)
+    amount = models.PositiveBigIntegerField()
+    received_at = models.DateTimeField()
+    installments = models.PositiveSmallIntegerField(default=1)
+    authorization_code = models.CharField(max_length=40, blank=True)
+    received_by = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, related_name="+")
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.REGISTERED)
+    reversed_at = models.DateTimeField(null=True, blank=True)
+    reverse_reason = models.CharField(max_length=200, blank=True)
+    ledger_settlement = models.UUIDField(null=True, blank=True)
+    immutable_fields = (
+        "charge_id",
+        "session_id",
+        "method",
+        "amount",
+        "received_at",
+        "installments",
+        "received_by_id",
+    )
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(condition=Q(amount__gte=1), name="med_finance_payment_amount"),
+            models.CheckConstraint(
+                condition=Q(installments__gte=1, installments__lte=24), name="med_finance_payment_installments"
+            ),
+        ]
+        ordering = ("received_at", "sysid")

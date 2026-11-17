@@ -37,6 +37,8 @@ Valores sempre em inteiros de centavos.
 
 **`ChargeItem`** (derivada da conta): `price_item`, `code`, `description`, `quantity`, `unit_amount`, `discount_amount` (até o valor do item), `total`. Muda só com a conta em rascunho.
 
+**`Payment`** (derivada da conta): `session` (a sessão aberta do caixa da conta), `method` (dinheiro, Pix, débito, crédito, transferência, outro), `amount`, `received_at`, `installments` (mais de uma só no crédito), `authorization_code`, `received_by` (imutáveis), `status` (registrado, estornado), `reversed_at`, `reverse_reason`, `ledger_settlement` (a baixa no livro).
+
 ### Preços
 
 `price_items` lista os itens (da tabela padrão, sem `price_list_id`); `price_for(code)` devolve o item ativo do código ou `None`. `add_price_item` exige alteração na tabela; código repetido é `Conflict`. `update_price_item` muda descrição, valor ou atividade, com CAS; o código nunca muda.
@@ -58,6 +60,12 @@ Valores sempre em inteiros de centavos.
 - `patient_balance` soma o que o paciente deve nas contas em aberto que o ator lê.
 - Eventos `charge_confirmed`, `charge_paid`, `charge_cancelled`: `code`, `desk`, `patient`, `status`, `total`, `origin_app`, `origin_key`.
 
+### Pagamentos
+
+- `register_payment` usa a revisão da **conta** como CAS (dois recebimentos simultâneos: um vence), exige conta em aberto, valor até o saldo (troco é do operador) e a sessão aberta do caixa da conta (`Conflict("no_open_session")`). Baixa o título no livro na conta do caixa daquela forma de pagamento (dinheiro, Pix a compensar, cartões a receber, banco), atualiza o total pago e a situação, publica `payment_registered` e, ao quitar, `charge_paid`; com `issue_receipt`, emite o recibo na mesma transação.
+- `reverse_payment` exige motivo e o recibo anulado, estorna a baixa no livro (que volta o saldo do título), reabre a conta (parcialmente paga ou em aberto) e publica `payment_reversed`. O estorno de uma sessão já fechada não muda o esperado gravado no fechamento.
+- Eventos `payment_registered` e `payment_reversed`: `charge`, `method`, `amount`, `status`.
+
 ## Acceptance
 
 - O `setup` prepara o livro com as chaves do financeiro vinculadas, é idempotente pela chave e só o administrador o faz; com o livro desativado, nada é criado.
@@ -65,3 +73,4 @@ Valores sempre em inteiros de centavos.
 - Valor negativo, fracionário ou em texto é recusado.
 - Abrir, suprir, sangrar e fechar conferem o esperado e a diferença; cada movimento tem um lançamento no livro.
 - O título da conta confirmada não leva nome nem documento do pagador; a mesma origem devolve a mesma conta.
+- Pagamento parcial e depois o restante quitam a conta e o título; o estorno reabre os dois.
