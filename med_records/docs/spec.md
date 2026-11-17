@@ -113,6 +113,34 @@ Tipos de documento básicos (`register_document_kind`): atestado, declaração d
 
 O prontuário é guardado por 20 anos depois do último registro (Lei 13.787/2018, constante `RETENTION_YEARS` em `retention.py`). A guarda registrada em `med_patients` (`med_records.retention`) veta excluir ou anonimizar o paciente enquanto houver prontuário com registro nesse prazo; resta a restrição de tratamento. A guarda roda no contexto da organização de quem pediu, sem abrir outro.
 
+### Páginas
+
+Em `/o/<org>/apps/med_records/` (nomes `med_records:<nome>`); toda leitura e escrita passa pelo `RecordsService`. As páginas clínicas respondem `Cache-Control: no-store`; o título nunca leva o nome do paciente; o texto clínico é escapado, com as quebras de linha por CSS.
+
+| Nome | Página |
+|---|---|
+| `home`, `setup` | Arquivos clínicos legíveis; configuração inicial (administradores) |
+| `patient_section` | Aba "Prontuário" do paciente: escolha do arquivo, abrir prontuário, alergias em destaque, medicamentos, atendimentos, documentos, anexos, novo atendimento e novo documento |
+| `attend` | Entrada pela consulta: abre o prontuário e retoma (ou inicia) o rascunho da consulta |
+| `encounter`, `encounter_print` | Leitura do atendimento: seções, selo ("sem assinatura digital ICP-Brasil"), adendos, anexos; versão de impressão |
+| `encounter_edit` | Editor do rascunho: um cartão por seção com o próprio botão, busca de CID-10 por GET, anexos, salvar como modelo, assinar e descartar; funciona sem JavaScript |
+| `addendum` | Cria o rascunho de um adendo |
+| `lists` | Alergias e medicamentos, com inclusão e mudança de situação |
+| `document_edit`, `document`, `document_print`, `document_replace` | Rascunho, leitura, impressão (dados do consultório, código, resumo do selo e o aviso) e substituição do documento |
+| `templates` | Modelos do arquivo e pessoais; novo modelo de documento |
+| `access_log` | Trilha de leitura (dono do arquivo e administrador) |
+
+### API REST
+
+Em `/api/v1/o/<org>/apps/med_records/`, só leitura (a escrita clínica é só pelas páginas), sempre com `Cache-Control: no-store`:
+
+| Método e caminho | O que faz |
+|---|---|
+| `GET charts/?patient=` | Prontuários do paciente nos arquivos legíveis (`ChartInfo`) |
+| `GET charts/<id>/encounters/?cursor=&page_size=` | Cabeçalhos dos atendimentos (`EncounterHeader`, sem conteúdo) |
+| `GET encounters/<id>/` | Atendimento com as seções (`EncounterInfo`); grava a trilha |
+| `GET documents/<id>/` | Documento com o texto (`DocumentInfo`); grava a trilha |
+
 ## Acceptance
 
 - A recepção não lê arquivo nem prontuário: `chart` responde `NotFound`, `charts_for_patient` é vazio e `open_chart` é recusado.
@@ -121,3 +149,6 @@ O prontuário é guardado por 20 anos depois do último registro (Lei 13.787/201
 - Com registro clínico recente, anonimizar o paciente é recusado com o motivo da guarda; passados os 20 anos, é aceito.
 - Assinado, o atendimento recusa seção nova, exclusão e anexo; `verify_encounter` confirma o selo e acusa conteúdo diferente do selado.
 - O evento `encounter_signed` não leva conteúdo clínico.
+- Pelas páginas, o profissional abre o prontuário, inicia um atendimento, salva seções, assina, vê o selo, escreve um adendo, emite e imprime um atestado.
+- A recepção recebe 404 em todas as páginas clínicas e não vê a aba "Prontuário".
+- Texto com `<script>` digitado numa seção sai escapado na leitura e na impressão.

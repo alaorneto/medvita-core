@@ -1,5 +1,6 @@
 {% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Prontuário" %} · {{ site_name }}{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Prontuário" %}</p><h1>{% translate "Arquivos clínicos" %}</h1><p class="page-description">{% translate "Quem lê um arquivo clínico lê os prontuários dele." %}</p></div></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Prontuário" %}</p><h1>{% translate "Arquivos clínicos" %}</h1><p class="page-description">{% translate "Quem lê um arquivo clínico lê os prontuários dele. O prontuário de cada paciente fica na página do paciente." %}</p></div>
+<nav class="toolbar" aria-label="{% translate "Ações" %}">{% if archives %}<a class="btn btn-secondary" href="{% url 'med_records:templates' organization_id %}">{% translate "Modelos" %}</a>{% endif %}{% if manager and not archives %}<a class="btn btn-primary" href="{% url 'med_records:setup' organization_id %}">{% translate "Configurar o prontuário" %}</a>{% endif %}</nav></div>
 <ul>{% for item in archives %}<li>{{ item.name }}{% if item.is_default %} <span class="badge badge-neutral">{% translate "Padrão" %}</span>{% endif %}</li>{% empty %}<li>{% translate "Nenhum arquivo clínico que você possa ler." %}</li>{% endfor %}</ul>
 {% endblock %}

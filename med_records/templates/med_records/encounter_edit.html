@@ -1,0 +1,28 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{{ header.code }} · {% translate "Rascunho" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_records/med_records.css' %}">{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% if patient %}<a href="{% url 'med_records:patient_section' organization_id header.patient_id %}">{{ patient.code }}</a>{% endif %} · {{ header.code }}</p><h1>{% if patient %}{{ patient.display_name }}{% else %}{% translate "Paciente não disponível" %}{% endif %}</h1><p class="page-description">{% if header.kind == "addendum" %}{% translate "Adendo em rascunho: só você o altera até assinar." %}{% else %}{% translate "Atendimento em rascunho: só você o altera até assinar. Salve cada seção no próprio botão." %}{% endif %}</p></div></div>
+{% for card in cards %}
+<section class="card section-card" aria-labelledby="card-{{ forloop.counter }}"><h2 id="card-{{ forloop.counter }}" class="section-heading">{{ card.kind.label }}</h2>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="section"><input type="hidden" name="section_type" value="{{ card.kind.code }}"><input type="hidden" name="position" value="{{ card.position }}"><input type="hidden" name="revision" value="{{ header.revision }}">
+{% include "skeleton/web/components/form-fields.html" with form=card.form hide_marks=True %}
+<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Salvar seção" %}</button></div></form>
+{% if card.section %}<form method="post" class="mt-2">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="section_id" value="{{ card.section.sysid }}"><input type="hidden" name="revision" value="{{ header.revision }}"><button type="submit" class="btn btn-secondary">{% translate "Remover seção" %}</button></form>{% endif %}
+</section>
+{% endfor %}
+{% if header.kind != "addendum" %}
+<form method="get" class="filter-bar" aria-label="{% translate "Acrescentar seção" %}"><div class="field"><label for="add">{% translate "Acrescentar seção" %}</label><select id="add" name="add">{% for kind in types %}<option value="{{ kind.code }}">{{ kind.label }}</option>{% endfor %}</select></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Acrescentar" %}</button></div></form>
+<form method="get" class="filter-bar" aria-label="{% translate "Buscar CID-10" %}"><div class="field"><label for="cid">{% translate "Buscar CID-10 (código ou palavras)" %}</label><input id="cid" name="cid" value="{{ query }}" maxlength="100"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Buscar" %}</button></div></form>
+{% if query %}<ul class="mb-4">{% for item in icd %}<li><span class="seal-digest">{{ item.code }}</span> {{ item.description }}</li>{% empty %}<li>{% translate "Nenhum código encontrado (o catálogo pode não estar carregado: digite código e descrição)." %}</li>{% endfor %}</ul>{% endif %}
+{% endif %}
+<section class="card mb-4" aria-labelledby="attach-heading"><h2 id="attach-heading" class="section-heading">{% translate "Anexos" %}</h2>
+<ul class="mb-2">{% for item in attachments %}<li><a href="{% url 'med_records:attachment' organization_id item.sysid %}?encounter={{ header.sysid }}">{{ item.filename }}</a></li>{% empty %}<li>—</li>{% endfor %}</ul>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}<input type="hidden" name="action" value="attach"><input type="hidden" name="revision" value="{{ header.revision }}"><label for="file">{% translate "Arquivo (PDF, JPEG, PNG)" %}</label> <input id="file" type="file" name="file" accept="application/pdf,image/jpeg,image/png"> <button type="submit" class="btn btn-secondary">{% translate "Anexar" %}</button></form></section>
+{% if header.kind != "addendum" and info.sections %}
+<form method="post" class="filter-bar">{% csrf_token %}<input type="hidden" name="action" value="template"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}"><div class="field"><label for="template_name">{% translate "Salvar as seções como modelo" %}</label><input id="template_name" name="template_name" maxlength="120"></div><div class="field"><label><input type="checkbox" name="personal"> {% translate "Só para mim" %}</label></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Salvar modelo" %}</button></div></form>
+{% endif %}
+<div class="toolbar mt-6">
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="sign"><input type="hidden" name="revision" value="{{ header.revision }}"><button type="submit" class="btn btn-primary">{% translate "Assinar (não muda mais)" %}</button></form>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="discard"><input type="hidden" name="revision" value="{{ header.revision }}"><button type="submit" class="btn btn-danger">{% translate "Descartar rascunho" %}</button></form>
+</div>
+{% endblock %}

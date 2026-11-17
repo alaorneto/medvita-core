@@ -1,0 +1,35 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Prontuário" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_records/med_records.css' %}">{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:list' organization_id %}">{% translate "Pacientes" %}</a> · {{ patient.code }}</p><h1>{{ patient.display_name }}</h1><p class="page-description">{{ archive.name }}</p></div>
+{% if chart %}<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_records:lists' organization_id chart.sysid %}">{% translate "Alergias e medicamentos" %}</a></nav>{% endif %}</div>
+<nav class="link-tabs" aria-label="{% translate "Seções do paciente" %}">{% for tab in tabs %}<a href="{{ tab.url }}"{% if tab.current %} aria-current="page"{% endif %}>{{ tab.label }}</a>{% endfor %}</nav>
+{% if archives|length > 1 %}<form method="get" class="filter-bar"><div class="field"><label for="archive">{% translate "Arquivo clínico" %}</label><select id="archive" name="archive">{% for item in archives %}<option value="{{ item.sysid }}"{% if item.sysid == archive.sysid %} selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Abrir" %}</button></div></form>{% endif %}
+{% if not chart %}
+<div class="empty-state"><p>{% translate "Este paciente ainda não tem prontuário neste arquivo." %}</p>
+{% if archive.writable %}<form method="post" action="{% url 'med_records:chart_open' organization_id patient.sysid %}">{% csrf_token %}<input type="hidden" name="archive" value="{{ archive.sysid }}"><button type="submit" class="btn btn-primary">{% translate "Abrir prontuário" %}</button></form>{% endif %}</div>
+{% else %}
+{% if summary.allergies %}<div class="allergy-alert" role="note"><strong>{% translate "Alergias:" %}</strong> {% for item in summary.allergies %}{{ item.substance }}{% if item.severity == "severe" %} ({% translate "grave" %}){% endif %}{% if not forloop.last %}; {% endif %}{% endfor %}</div>{% endif %}
+{% if summary.medications %}<p class="mb-4"><strong>{% translate "Medicamentos em uso:" %}</strong> {% for item in summary.medications %}{{ item.name }}{% if item.dose %} {{ item.dose }}{% endif %}{% if not forloop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+{% if chart.writable %}
+<div class="day-columns mb-6">
+<form method="post" action="{% url 'med_records:encounter_new' organization_id chart.sysid %}" class="card">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}-e"><h2 class="section-heading">{% translate "Novo atendimento" %}</h2>{% include "skeleton/web/components/form-fields.html" with form=encounter_form hide_marks=True %}<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Iniciar" %}</button></div></form>
+<form method="post" action="{% url 'med_records:document_new' organization_id chart.sysid %}" class="card">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}-d"><h2 class="section-heading">{% translate "Novo documento" %}</h2>{% include "skeleton/web/components/form-fields.html" with form=document_form hide_marks=True %}<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Redigir" %}</button></div></form>
+</div>
+{% endif %}
+<h2 class="section-heading">{% translate "Atendimentos" %}</h2>
+<div class="table-scroll mb-6"><table><caption class="sr-only">{% translate "Atendimentos" %}</caption>
+<thead><tr><th scope="col" class="col-date">{% translate "Data" %}</th><th scope="col">{% translate "Código" %}</th><th scope="col">{% translate "Profissional" %}</th><th scope="col">{% translate "Situação" %}</th></tr></thead>
+<tbody>{% for item in encounters %}<tr><td class="col-date"><a href="{% url 'med_records:encounter' organization_id item.sysid %}">{{ item.occurred_at|date:"SHORT_DATETIME_FORMAT" }}</a></td><td>{{ item.code }}</td><td>{{ item.author_name|default:"—" }}</td><td>{% if item.signed %}<span class="badge badge-success">{% if item.kind == "addendum" %}{% translate "Adendo assinado" %}{% else %}{% translate "Assinado" %}{% endif %}</span>{% else %}<span class="badge badge-warning">{% translate "Rascunho" %}</span>{% endif %}</td></tr>
+{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=4 message=_("Nenhum atendimento.") %}{% endfor %}</tbody></table></div>
+<h2 class="section-heading">{% translate "Documentos" %}</h2>
+<div class="table-scroll mb-6"><table><caption class="sr-only">{% translate "Documentos" %}</caption>
+<thead><tr><th scope="col">{% translate "Código" %}</th><th scope="col">{% translate "Título" %}</th><th scope="col">{% translate "Situação" %}</th></tr></thead>
+<tbody>{% for item in documents %}<tr><td><a href="{% url 'med_records:document' organization_id item.sysid %}">{{ item.code }}</a></td><td>{{ item.title }}</td><td>{% if item.replaced_by_code %}<span class="badge badge-neutral">{% blocktranslate with code=item.replaced_by_code %}Substituído por {{ code }}{% endblocktranslate %}</span>{% elif item.issued %}<span class="badge badge-success">{% translate "Emitido" %}</span>{% else %}<span class="badge badge-warning">{% translate "Rascunho" %}</span>{% endif %}</td></tr>
+{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=3 message=_("Nenhum documento.") %}{% endfor %}</tbody></table></div>
+<h2 class="section-heading">{% translate "Anexos do prontuário" %}</h2>
+<ul class="mb-4">{% for item in attachments %}<li><a href="{% url 'med_records:attachment' organization_id item.sysid %}?chart={{ chart.sysid }}">{{ item.filename }}</a> · {{ item.created_at|date:"SHORT_DATE_FORMAT" }}</li>{% empty %}<li>—</li>{% endfor %}</ul>
+{% if chart.writable %}<form method="post" enctype="multipart/form-data" action="{% url 'med_records:chart_attach' organization_id chart.sysid %}" class="filter-bar">{% csrf_token %}<div class="field"><label for="file">{% translate "Exame ou documento externo (PDF, JPEG, PNG)" %}</label><input id="file" type="file" name="file" accept="application/pdf,image/jpeg,image/png"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Anexar" %}</button></div></form>{% endif %}
+<p class="mt-4"><a href="{% url 'med_records:access_log' organization_id chart.sysid %}">{% translate "Trilha de leitura (donos do arquivo e administradores)" %}</a></p>
+{% endif %}
+{% endblock %}

@@ -1804,17 +1804,17 @@ class RecordsService(ServiceAPI):
         return _document_info(actor, document)
 
     @service_method(read_only=True, since="0.1.0")
-    def document(self, *, actor: Any, document_id: UUID) -> DocumentInfo:
-        """One document with its text; the read is recorded in the trail.
+    def document(self, *, actor: Any, document_id: UUID, printing: bool = False) -> DocumentInfo:
+        """One document with its text; the read (or the print, with ``printing``) is recorded in the trail.
 
         Autorização: leitura do arquivo do prontuário.
         Erros: NotFound para documento inexistente, de outra organização ou ilegível.
-        Efeitos: registra a leitura na trilha do prontuário.
+        Efeitos: registra a leitura ou a impressão na trilha do prontuário.
         """
         from .trail import record_access
 
         document = _document(actor, document_id)
-        record_access(actor, document.chart, "view_document", document)
+        record_access(actor, document.chart, "print_document" if printing else "view_document", document)
         return _document_info(actor, document)
 
     @service_method(read_only=True, since="0.1.0")

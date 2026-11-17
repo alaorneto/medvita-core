@@ -144,13 +144,13 @@ Discard the actor's draft encounter with its sections.
 - **Erros:** NotFound; Forbidden; Conflict("signed") para atendimento assinado; Conflict("stale_revision").
 - **Efeitos:** exclusão lógica das seções e do atendimento.
 
-#### `document(*, actor, document_id) -> DocumentInfo`
+#### `document(*, actor, document_id, printing=False) -> DocumentInfo`
 
-One document with its text; the read is recorded in the trail.
+One document with its text; the read (or the print, with ``printing``) is recorded in the trail.
 
 - **Autorização:** leitura do arquivo do prontuário.
 - **Erros:** NotFound para documento inexistente, de outra organização ou ilegível.
-- **Efeitos:** registra a leitura na trilha do prontuário.
+- **Efeitos:** registra a leitura ou a impressão na trilha do prontuário.
 
 #### `documents(*, actor, chart_id) -> tuple[DocumentHeader, ...]`
 
@@ -566,9 +566,26 @@ One section of an encounter template: ``data`` are ``(field, value)`` pairs.
 
 <!-- END GENERATED -->
 
+## Eventos publicados
+
+| Tipo | Quando | Payload |
+|---|---|---|
+| `med_records.encounter_signed` | `sign_encounter` | `code`, `chart`, `patient`, `kind`, `occurred_at`, `seal_digest` |
+| `med_records.document_issued` | `issue_document` | `code`, `chart`, `patient`, `kind`, `seal_digest` |
+
+Nunca conteúdo clínico, título de documento nem nome do paciente.
+
+## Pontos de extensão
+
+`register_section_type(SectionType(...))` e `register_document_kind(DocumentKind(...))`, reexportadas por este módulo e chamadas no `ready()` da app que se pluga (código `<app_label>.<nome>` da própria app; uma versão nova de um tipo de seção convive com as antigas).
+
 ## Contribuições a outras apps
 
-Registradas no `ready()`: a guarda de retenção `med_records.retention` e o passo de configuração `med_records.archives` de `med_patients`.
+Registradas no `ready()`: a guarda de retenção `med_records.retention`, o passo de configuração `med_records.archives`, a aba `med_records.chart` (com `visible`), a linha do tempo e o relatório do titular `med_records.records` de `med_patients`, e a ação `med_records.attend` das consultas de `med_scheduling`.
+
+## API REST
+
+As rotas de `/api/v1/o/<org>/apps/med_records/` estão em `docs/spec.md` (seção "API REST").
 
 ## Histórico de versões
 | Versão | Mudança |

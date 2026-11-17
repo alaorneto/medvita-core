@@ -28,3 +28,13 @@ Mesmo ambiente.
 - Contrato de tabela derivada do núcleo para `Professional`, `Room`, `AppointmentType`, `AvailabilityRule`, `ScheduleBlock` e `WaitlistEntry`; `Appointment` por testes próprios de autorização, isolamento A/B e observação (o preparo do kit não cria paciente).
 - `med_scheduling/tests/unit/test_slots.py` e `test_transitions.py` (sem banco); páginas e API em `test_views.py` e `test_api.py`, com varredura de script inline, `style=` e `on*`.
 - `python -m django check --fail-level WARNING`, `makemigrations --check`, `tools/service_reference.py --check` e `tools/sync_leaves.py --check` → limpos.
+
+## Epic D: `med_records` (2026-11-17)
+
+Mesmo ambiente.
+
+- `python -m pytest -q -n 4` → suíte inteira verde (número final no PR do epic).
+- Contrato de tabela derivada do núcleo, em `tests/test_derived_contracts.py` (a raiz monta o paciente que as tabelas exigem), para `PatientChart`, `Encounter`, `EncounterSection`, `Allergy`, `Medication`, `EntryTemplate`, `ClinicalDocument` e `AccessLog`, e também para `Appointment` da agenda.
+- Contrato de selo do núcleo (`assert_sealed_contract`) para `Encounter` (com as seções) e `ClinicalDocument`.
+- Validação de seções e troca de marcadores sem banco (`med_records/tests/unit`); páginas e API em `test_views.py` e `test_api.py`, com varredura de script inline, `style=`, `on*`, título sem o nome do paciente e `Cache-Control: no-store`.
+- `python -m django check --fail-level WARNING`, `makemigrations --check`, `tools/service_reference.py --check` e `tools/sync_leaves.py --check` → limpos.

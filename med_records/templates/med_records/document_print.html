@@ -1,0 +1,12 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{{ header.code }} · {% translate "Impressão" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_records/med_records.css' %}">{% endblock %}
+{% block content %}
+<article class="print-page">
+{% if practice %}<header class="mb-6"><p><strong>{{ practice.legal_name|default:practice.name }}</strong></p><p>{% if practice.address %}{{ practice.address }}{% endif %}{% if practice.city %} · {{ practice.city }}/{{ practice.state }}{% endif %}{% if practice.phone %} · {{ practice.phone }}{% endif %}</p></header>{% endif %}
+<h1>{{ header.title }}</h1>
+<div class="clinical-text mb-6">{{ info.body }}</div>
+<p>{{ header.author_name }} · {{ header.author_council }}</p>
+<p>{{ header.issued_at|date:"SHORT_DATE_FORMAT" }}</p>
+<footer class="mt-6 helptext">{% translate "Documento" %} {{ header.code }} · {% translate "Resumo SHA-256:" %} <span class="seal-digest">{{ header.seal_digest }}</span><br>{% translate "Sem assinatura digital ICP-Brasil." %}{% if info.notice %}<br>{{ info.notice }}{% endif %}</footer>
+</article>
+{% endblock %}

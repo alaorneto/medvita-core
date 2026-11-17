@@ -1,0 +1,7 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Configurar o prontuário" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Prontuário" %}</p><h1>{% translate "Configurar o prontuário" %}</h1><p class="page-description">{% translate "Escolha se a clínica tem um prontuário único ou um por profissional. A recepção não recebe acesso ao conteúdo clínico." %}</p></div></div>
+<form method="post" class="card max-w-3xl">{% csrf_token %}
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Configurar" %}</button></div></form>
+{% endblock %}
