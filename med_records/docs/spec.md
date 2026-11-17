@@ -35,6 +35,10 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 
 **`Icd10Code`** (`SystemRecord` global, não exposta): `code` (único), `description`, `is_category`, `search_text` (normalizado). Sem dado de organização; escrita só pelo comando `load_icd10`.
 
+**`EntryTemplate`** (derivada do arquivo): `name`, `specialty`, `kind` (atendimento ou documento), `sections` (seções validadas pelo tipo), `document_kind` e `body` (para documento), `author` (preenchido: modelo pessoal, só o autor vê e altera), `is_active`.
+
+**`ClinicalDocument`** (derivada do prontuário, selável): `code` (`D` + 8 dígitos da sequência `med_records.document`), `kind` (tipo registrado), `title` e `body` (`sensitive_fields`), `issued_at`, `author`, `author_name` e `author_council` (fotografia na emissão), `encounter` (opcional), `replaces` (documento substituído). O selo congela código, tipo, título, texto, emissão e autor; o resumo cobre as referências.
+
 ### Prontuário
 
 `open_chart` obtém ou cria o prontuário do paciente: exige alteração no arquivo e leitura do paciente. Sem `archive_id` usa o arquivo padrão que o ator altera, ou o único; com vários e nenhum padrão, pede o arquivo. `chart` e `charts_for_patient` não devolvem conteúdo clínico.
@@ -58,6 +62,14 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 ### Alergias, medicamentos e resumo
 
 `allergies` lista as ativas primeiro (as graves antes); `medications`, as em uso primeiro. Alterar a situação é `update_allergy` / `update_medication` com CAS; a auditoria guarda o histórico com o conteúdo redigido. `chart_summary` reúne as alergias ativas, os medicamentos em uso e os cinco últimos cabeçalhos de atendimento. Toda leitura dessas listas grava a trilha.
+
+### Modelos e documentos
+
+- `create_template` grava um modelo de atendimento (seções validadas) ou de documento (texto com marcadores) no arquivo; `personal=True` o deixa só para o autor. `update_template` altera ou desativa (`active=False`), com CAS. `start_encounter(template_id=...)` cria as seções do modelo; `draft_document(template_id=...)` usa o texto dele.
+- `draft_document` cria o rascunho com o texto do modelo ou do tipo, trocando os marcadores pelo nome de exibição do paciente, a data no fuso do consultório e o nome do profissional. Só o autor altera (`update_document`).
+- `issue_document`: só o autor, com texto e ficha de profissional com conselho; grava a emissão e o autor, sela e publica `med_records.document_issued` (sem título nem texto). Emitido, não muda.
+- `replace_document` cria um rascunho com o mesmo conteúdo e `replaces`; emitido o novo, o antigo aparece "substituído por <código>" e continua íntegro (`verify_document`).
+- A receita simples traz o aviso de que não serve para medicamentos sujeitos a controle especial.
 
 ### CID-10
 

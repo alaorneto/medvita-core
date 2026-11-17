@@ -207,3 +207,76 @@ def register_icd10() -> None:
             expose_api=False,
         )
     )
+
+
+DOCUMENT_SEQUENCE = "med_records.document"
+
+
+def register_documents() -> None:
+    from skeleton.events.registry import EventType, register_event_type
+    from skeleton.sequences.registry import SequenceSpec, register_sequence
+    from skeleton.system.registry import SealPolicy, TableSpec, register
+
+    from .models import ClinicalDocument, EntryTemplate
+
+    register(
+        TableSpec(
+            model=EntryTemplate,
+            description=_("Modelos de atendimento e de documento do arquivo clínico; com autor, são pessoais."),
+            label=_("Modelos"),
+            scope="organization",
+            read_fields=(
+                "archive",
+                "name",
+                "specialty",
+                "kind",
+                "sections",
+                "document_kind",
+                "body",
+                "author",
+                "is_active",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="archive",
+        )
+    )
+    register(
+        TableSpec(
+            model=ClinicalDocument,
+            description=_("Documentos clínicos simples; o texto é dado de saúde e o documento emitido é selado."),
+            label=_("Documentos clínicos"),
+            scope="organization",
+            read_fields=(
+                "chart",
+                "patient",
+                "code",
+                "kind",
+                "title",
+                "body",
+                "issued_at",
+                "author",
+                "author_name",
+                "author_council",
+                "encounter",
+                "replaces",
+                "seal_digest",
+            ),
+            write_fields=(),
+            sensitive_fields=("title", "body"),
+            personal_fields=("author_name", "author_council"),
+            expose_api=False,
+            access_parent="chart",
+            seal=SealPolicy(attachments="frozen", comments="frozen"),
+        )
+    )
+    register_sequence(SequenceSpec(key=DOCUMENT_SEQUENCE, period="none", template="D{number:08d}", owner_app=APP_LABEL))
+    register_event_type(
+        EventType(
+            code="med_records.document_issued",
+            table_key="med_records.clinicaldocument",
+            payload_fields=("code", "chart", "patient", "kind", "seal_digest"),
+            owner_app=APP_LABEL,
+        )
+    )

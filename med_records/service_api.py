@@ -29,7 +29,17 @@ from skeleton.service_api import (
 
 from . import common
 from .extension import DocumentKind, SectionField, SectionType, register_document_kind, register_section_type
-from .models import Allergy, Archive, Encounter, EncounterSection, Icd10Code, Medication, PatientChart
+from .models import (
+    Allergy,
+    Archive,
+    ClinicalDocument,
+    Encounter,
+    EncounterSection,
+    EntryTemplate,
+    Icd10Code,
+    Medication,
+    PatientChart,
+)
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.records"
@@ -38,6 +48,10 @@ ARCHIVE_TABLE = "med_records.archive"
 MEMBER_TABLES = (ARCHIVE_TABLE,)
 
 __all__ = [
+    "TemplateSectionInput",
+    "TemplateInfo",
+    "DocumentInfo",
+    "DocumentHeader",
     "APP_ID",
     "AllergyInfo",
     "ArchiveInfo",
@@ -317,6 +331,114 @@ class Icd10Info:
     is_category: bool
 
 
+@dataclass(frozen=True, slots=True)
+class TemplateSectionInput:
+    """One section of an encounter template: ``data`` are ``(field, value)`` pairs."""
+
+    section_type: str
+    text: str = ""
+    data: tuple[tuple[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateInfo:
+    sysid: UUID
+    archive_id: UUID
+    name: str
+    specialty: str
+    kind: str
+    sections_json: str
+    document_kind: str
+    body: str
+    personal: bool
+    is_active: bool
+    revision: int
+
+
+def template_info(row: EntryTemplate) -> TemplateInfo:
+    from skeleton.common.sealing import canonical_bytes
+
+    return TemplateInfo(
+        row.pk,
+        row.archive_id,
+        row.name,
+        row.specialty,
+        row.kind,
+        canonical_bytes(row.sections).decode(),
+        row.document_kind,
+        row.body,
+        row.author_id is not None,
+        row.is_active,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentHeader:
+    """A clinical document without its text: what lists show."""
+
+    sysid: UUID
+    chart_id: UUID
+    patient_id: UUID
+    code: str
+    kind: str
+    title: str
+    issued: bool
+    issued_at: datetime | None
+    author_id: UUID
+    author_name: str
+    author_council: str
+    encounter_id: UUID | None
+    replaces_id: UUID | None
+    replaced_by_code: str
+    seal_digest: str
+    revision: int
+
+
+def document_header(row: ClinicalDocument, *, replaced_by_code: str = "") -> DocumentHeader:
+    return DocumentHeader(
+        row.pk,
+        row.chart_id,
+        row.patient_id,
+        row.code,
+        row.kind,
+        row.title,
+        row.sealed_at is not None,
+        as_utc(row.issued_at) if row.issued_at else None,
+        row.author_id,
+        row.author_name,
+        row.author_council,
+        row.encounter_id,
+        row.replaces_id,
+        replaced_by_code,
+        row.seal_digest,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentInfo:
+    """A clinical document with its text (clinical content: the read is recorded in the trail)."""
+
+    header: DocumentHeader
+    body: str
+    notice: str
+    writable: bool
+
+
+def document_extra(document: ClinicalDocument) -> dict[str, Any]:
+    """What the seal digest covers besides the frozen columns: the immutable references."""
+    return {
+        "references": {
+            "chart": document.chart_id,
+            "patient": document.patient_id,
+            "author": document.author_id,
+            "encounter": document.encounter_id,
+            "replaces": document.replaces_id,
+        }
+    }
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -494,6 +616,138 @@ def _new_encounter(
     encounter.save()
     _touch(encounter)
     return encounter
+
+
+def _visible_templates(actor: Any) -> Any:
+    """Templates of the archives the actor reads: shared ones, and the actor's own personal ones."""
+    from django.db.models import Q
+
+    from skeleton.access.policies import authorized_queryset
+
+    return authorized_queryset(EntryTemplate, user=actor, action="read").filter(
+        Q(author__isnull=True) | Q(author_id=actor.pk)
+    )
+
+
+def _template(actor: Any, template_id: object, *, write: bool = False) -> EntryTemplate:
+    row = common.row(actor, EntryTemplate, template_id, field="template_id", write=write, lock=write)
+    if row.author_id is not None and row.author_id != actor.pk:
+        raise NotFound()
+    return row
+
+
+def _clean_template_sections(actor: Any, sections: object) -> list[dict[str, Any]]:
+    from .extension import SECTION_TYPES, active_section_types
+    from .sections import validate_section
+
+    if not isinstance(sections, tuple) or len(sections) > 30:
+        raise InvalidInput({"sections": [gettext("Informe até 30 seções.")]})
+    active = active_section_types(actor)
+    result = []
+    for item in sections:
+        if not isinstance(item, TemplateSectionInput):
+            raise InvalidInput({"sections": [gettext("Use TemplateSectionInput.")]})
+        kind = SECTION_TYPES.get(item.section_type) if isinstance(item.section_type, str) else None
+        if kind is None or kind not in active:
+            raise InvalidInput({"sections": [gettext("Tipo de seção desconhecido.")]})
+        data, text = validate_section(kind, common.changes_dict(tuple(item.data)) if item.data else {}, item.text)
+        result.append({"section_type": kind.code, "text": text, "data": data})
+    return result
+
+
+def _apply_template(actor: Any, encounter: Encounter, template: EntryTemplate) -> None:
+    from skeleton.access.policies import require_parent_action
+
+    from .extension import SECTION_TYPES
+
+    if template.kind != EntryTemplate.Kind.ENCOUNTER or not template.is_active:
+        raise InvalidInput({"template_id": [gettext("Escolha um modelo de atendimento ativo.")]})
+    positions: dict[str, int] = {}
+    for item in template.sections:
+        kind = SECTION_TYPES.get(item.get("section_type", ""))
+        if kind is None:
+            continue
+        position = positions.get(kind.code, 0)
+        positions[kind.code] = position + 1
+        require_parent_action(EncounterSection, encounter, user=actor, action="create")
+        EncounterSection(
+            organization_id=encounter.organization_id,
+            encounter=encounter,
+            section_type=kind.code,
+            type_version=kind.version,
+            position=position,
+            data=item.get("data") or {},
+            text=item.get("text") or "",
+        ).save()
+
+
+def _document(actor: Any, document_id: object, *, write: bool = False, lock: bool = False) -> ClinicalDocument:
+    return common.row(actor, ClinicalDocument, document_id, field="document_id", write=write, lock=lock)
+
+
+def _own_document_draft(actor: Any, document_id: object, expected_revision: object) -> ClinicalDocument:
+    document = _document(actor, document_id, write=True, lock=True)
+    if document.sealed_at is not None:
+        raise Conflict("issued", gettext("O documento já foi emitido e não muda."))
+    if document.author_id != actor.pk:
+        raise Forbidden(gettext("Só o autor altera o rascunho."))
+    common.check_revision(document, expected_revision)
+    return document
+
+
+def _replaced_by(actor: Any, document: ClinicalDocument) -> str:
+    from skeleton.access.policies import authorized_queryset
+
+    newer = (
+        authorized_queryset(ClinicalDocument, user=actor, action="read")
+        .filter(replaces=document, sealed_at__isnull=False)
+        .order_by("sealed_at")
+        .values_list("code", flat=True)
+        .first()
+    )
+    return newer or ""
+
+
+def _document_info(actor: Any, document: ClinicalDocument) -> DocumentInfo:
+    from .extension import DOCUMENT_KINDS
+
+    kind = DOCUMENT_KINDS.get(document.kind)
+    writable = (
+        document.sealed_at is None
+        and document.author_id == actor.pk
+        and document.chart.archive_id in _writable_ids(actor, Archive)
+    )
+    return DocumentInfo(
+        document_header(document, replaced_by_code=_replaced_by(actor, document)),
+        document.body,
+        str(kind.notice) if kind is not None else "",
+        writable,
+    )
+
+
+def _placeholder_values(actor: Any, chart: PatientChart) -> dict[str, str]:
+    from applications.med_patients.service_api import PatientService
+    from applications.med_scheduling.service_api import SchedulingService
+
+    patient = PatientService().summary(actor=actor, patient_id=chart.patient_id)
+    zone = "America/Sao_Paulo"
+    professional_name = ""
+    scheduling = SchedulingService()
+    try:
+        zone = scheduling.practice(actor=actor).timezone
+    except (NotFound, Forbidden):
+        pass
+    professional = scheduling.my_professional(actor=actor)
+    if professional is not None:
+        professional_name = professional.display_name
+    from zoneinfo import ZoneInfo
+
+    today = timezone.now().astimezone(ZoneInfo(zone)).date()
+    return {
+        "patient_name": patient.display_name,
+        "date": today.strftime("%d/%m/%Y"),
+        "professional_name": professional_name,
+    }
 
 
 # ------------------------------------------------------------------------------------ service
@@ -709,16 +963,17 @@ class RecordsService(ServiceAPI):
         kind: str = "consultation",
         occurred_at: datetime | None = None,
         appointment_id: UUID | None = None,
+        template_id: UUID | None = None,
         idempotency_key: str,
     ) -> EncounterInfo:
         """Start a draft encounter written by the actor; with an arrived appointment, start the attendance.
 
         Autorização: alteração no arquivo do prontuário; com ``appointment_id``, leitura da consulta.
         Erros: NotFound para prontuário ou consulta ilegíveis; Forbidden sem alteração no arquivo;
-        InvalidInput para tipo desconhecido (o adendo nasce por ``add_addendum``), data futura ou
-        consulta de outro paciente.
-        Efeitos: cria o rascunho com o código da sequência e atualiza o último registro do
-        prontuário; com a consulta em "chegou", tenta iniciá-la na agenda (recusa da agenda não
+        InvalidInput para tipo desconhecido (o adendo nasce por ``add_addendum``), data futura,
+        consulta de outro paciente ou modelo que não é de atendimento.
+        Efeitos: cria o rascunho com o código da sequência (e as seções do modelo) e atualiza o
+        último registro do prontuário; com a consulta em "chegou", tenta iniciá-la na agenda (recusa da agenda não
         impede o rascunho). A mesma chave devolve o mesmo rascunho.
         """
         key = common.key(idempotency_key)
@@ -730,6 +985,7 @@ class RecordsService(ServiceAPI):
         if existing is not None:
             return _encounter_info(actor, existing)
         chart = _chart(actor, chart_id, write=True)
+        template = _template(actor, template_id) if template_id is not None else None
         appointment = None
         if appointment_id is not None:
             from applications.med_scheduling.service_api import SchedulingService
@@ -748,6 +1004,8 @@ class RecordsService(ServiceAPI):
             sysid=sysid,
             appointment_id=appointment.sysid if appointment else None,
         )
+        if template is not None:
+            _apply_template(actor, encounter, template)
         if appointment is not None and appointment.status == "arrived":
             try:
                 scheduling.start(actor=actor, appointment_id=appointment.sysid, expected_revision=appointment.revision)
@@ -1215,3 +1473,360 @@ class RecordsService(ServiceAPI):
             for word in fold(text).split()[:5]:
                 rows = rows.filter(search_text__contains=word)
         return tuple(Icd10Info(row.code, row.description, row.is_category) for row in rows.order_by("code")[:limit])
+
+    # ------------------------------------------------------------------ templates
+
+    @service_method(read_only=True, since="0.1.0")
+    def templates(
+        self, *, actor: Any, archive_id: UUID | None = None, kind: str | None = None, active_only: bool = True
+    ) -> tuple[TemplateInfo, ...]:
+        """Templates of the archives the actor reads: the shared ones and the actor's personal ones.
+
+        Autorização: leitura do arquivo; modelos pessoais de outra pessoa nunca aparecem.
+        Erros: InvalidInput para tipo desconhecido ou identificador inválido.
+        Efeitos: nenhum.
+        """
+        rows = _visible_templates(actor)
+        if archive_id is not None:
+            rows = rows.filter(archive_id=as_uuid(archive_id, field="archive_id"))
+        if kind is not None:
+            if kind not in EntryTemplate.Kind.values:
+                raise InvalidInput({"kind": [gettext("Tipo de modelo desconhecido.")]})
+            rows = rows.filter(kind=kind)
+        if active_only:
+            rows = rows.filter(is_active=True)
+        return tuple(template_info(row) for row in rows.order_by("name", "sysid")[:200])
+
+    @service_method(read_only=False, since="0.1.0")
+    def create_template(
+        self,
+        *,
+        actor: Any,
+        name: str,
+        kind: str,
+        archive_id: UUID | None = None,
+        specialty: str = "",
+        sections: tuple[TemplateSectionInput, ...] = (),
+        document_kind: str = "",
+        body: str = "",
+        personal: bool = False,
+        idempotency_key: str,
+    ) -> TemplateInfo:
+        """Create a template of encounter sections or of a document, shared in the archive or personal.
+
+        Autorização: alteração no arquivo (o padrão que o ator altera, sem ``archive_id``).
+        Erros: NotFound; Forbidden; InvalidInput para nome, tipo, seções ou tipo de documento inválidos.
+        Efeitos: grava o modelo; pessoal, só o autor o vê e altera. A mesma chave devolve o já criado.
+        """
+        from skeleton.access.policies import require_parent_action
+
+        from .extension import DOCUMENT_KINDS
+
+        key = common.key(idempotency_key)
+        clean_name = _name(name)
+        if kind not in EntryTemplate.Kind.values:
+            raise InvalidInput({"kind": [gettext("Tipo de modelo desconhecido.")]})
+        if not isinstance(specialty, str) or len(specialty) > 80:
+            raise InvalidInput({"specialty": [gettext("Use até 80 caracteres.")]})
+        clean_sections: list[dict[str, Any]] = []
+        if kind == EntryTemplate.Kind.ENCOUNTER:
+            clean_sections = _clean_template_sections(actor, sections)
+            document_kind, body = "", ""
+        else:
+            if DOCUMENT_KINDS.get(document_kind) is None:
+                raise InvalidInput({"document_kind": [gettext("Tipo de documento desconhecido.")]})
+            if not isinstance(body, str) or len(body) > 20_000:
+                raise InvalidInput({"body": [gettext("Texto longo demais.")]})
+        sysid = common.deterministic_id("template", actor, key)
+        existing = EntryTemplate.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return template_info(existing)
+        archive = (
+            _archive(actor, archive_id, write=True) if archive_id is not None else _default_writable_archive(actor)
+        )
+        require_parent_action(EntryTemplate, archive, user=actor, action="create")
+        row = EntryTemplate(
+            sysid=sysid,
+            organization_id=archive.organization_id,
+            archive=archive,
+            name=clean_name,
+            specialty=specialty.strip(),
+            kind=kind,
+            sections=clean_sections,
+            document_kind=document_kind,
+            body=body,
+            author_id=actor.pk if personal else None,
+        )
+        row.save()
+        return template_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def update_template(
+        self,
+        *,
+        actor: Any,
+        template_id: UUID,
+        expected_revision: int,
+        name: str | None = None,
+        specialty: str | None = None,
+        sections: tuple[TemplateSectionInput, ...] | None = None,
+        body: str | None = None,
+        active: bool | None = None,
+    ) -> TemplateInfo:
+        """Change a template (or deactivate it), with CAS; a personal template only by its author.
+
+        Autorização: alteração no arquivo; modelo pessoal, só o autor.
+        Erros: NotFound (inclusive modelo pessoal de outra pessoa); Forbidden; InvalidInput;
+        Conflict("stale_revision").
+        Efeitos: grava só o que mudou.
+        """
+        row = _template(actor, template_id, write=True)
+        common.check_revision(row, expected_revision)
+        values: dict[str, Any] = {}
+        if name is not None:
+            values["name"] = _name(name)
+        if specialty is not None:
+            if not isinstance(specialty, str) or len(specialty) > 80:
+                raise InvalidInput({"specialty": [gettext("Use até 80 caracteres.")]})
+            values["specialty"] = specialty.strip()
+        if sections is not None:
+            if row.kind != EntryTemplate.Kind.ENCOUNTER:
+                raise InvalidInput({"sections": [gettext("Só modelos de atendimento têm seções.")]})
+            values["sections"] = _clean_template_sections(actor, sections)
+        if body is not None:
+            if row.kind != EntryTemplate.Kind.DOCUMENT or not isinstance(body, str) or len(body) > 20_000:
+                raise InvalidInput({"body": [gettext("Texto inválido para este modelo.")]})
+            values["body"] = body
+        if active is not None:
+            values["is_active"] = bool(active)
+        common.apply_changes(row, values)
+        return template_info(row)
+
+    # ------------------------------------------------------------------ documents
+
+    @service_method(read_only=False, since="0.1.0")
+    def draft_document(
+        self,
+        *,
+        actor: Any,
+        chart_id: UUID,
+        kind: str,
+        title: str = "",
+        body: str | None = None,
+        encounter_id: UUID | None = None,
+        template_id: UUID | None = None,
+        idempotency_key: str,
+    ) -> DocumentInfo:
+        """Start a draft document written by the actor, from the kind's default text or a template.
+
+        Os marcadores {{patient_name}}, {{date}} e {{professional_name}} são trocados literalmente.
+        Autorização: alteração no arquivo do prontuário.
+        Erros: NotFound; Forbidden; InvalidInput para tipo desconhecido, modelo de outro tipo,
+        atendimento de outro prontuário ou texto longo demais.
+        Efeitos: cria o rascunho com o código da sequência e atualiza o último registro do
+        prontuário. A mesma chave devolve o mesmo rascunho.
+        """
+        from skeleton.access.policies import require_parent_action
+        from skeleton.service_api.sequences import SequenceService
+
+        from .documents import render_placeholders
+        from .extension import active_document_kinds
+        from .registration import DOCUMENT_SEQUENCE
+
+        key = common.key(idempotency_key)
+        document_kind = next((item for item in active_document_kinds(actor) if item.code == kind), None)
+        if document_kind is None:
+            raise InvalidInput({"kind": [gettext("Tipo de documento desconhecido.")]})
+        if not isinstance(title, str) or len(title) > 200:
+            raise InvalidInput({"title": [gettext("Use um título de até 200 caracteres.")]})
+        sysid = common.deterministic_id("document", actor, key)
+        existing = ClinicalDocument.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return _document_info(actor, existing)
+        chart = _chart(actor, chart_id, write=True)
+        encounter = None
+        if encounter_id is not None:
+            encounter = _encounter(actor, encounter_id)
+            if encounter.chart_id != chart.pk:
+                raise InvalidInput({"encounter_id": [gettext("O atendimento é de outro prontuário.")]})
+        text = body
+        if text is None and template_id is not None:
+            template = _template(actor, template_id)
+            if template.kind != EntryTemplate.Kind.DOCUMENT or template.document_kind != kind:
+                raise InvalidInput({"template_id": [gettext("Escolha um modelo deste tipo de documento.")]})
+            text = template.body
+        if text is None:
+            text = str(document_kind.default_body)
+        if not isinstance(text, str) or len(text) > 20_000:
+            raise InvalidInput({"body": [gettext("Texto longo demais.")]})
+        text = render_placeholders(text, _placeholder_values(actor, chart))
+        require_parent_action(ClinicalDocument, chart, user=actor, action="create")
+        number = SequenceService().next_number(actor=actor, key=DOCUMENT_SEQUENCE)
+        document = ClinicalDocument(
+            sysid=sysid,
+            organization_id=chart.organization_id,
+            chart=chart,
+            patient_id=chart.patient_id,
+            code=number.formatted,
+            kind=kind,
+            title=title.strip() or str(document_kind.label),
+            body=text,
+            author_id=actor.pk,
+            encounter=encounter,
+        )
+        document.save()
+        _mark_entry(chart)
+        return _document_info(actor, document)
+
+    @service_method(read_only=False, since="0.1.0")
+    def update_document(
+        self, *, actor: Any, document_id: UUID, title: str, body: str, expected_revision: int
+    ) -> DocumentInfo:
+        """Change the title and text of the actor's draft document, with CAS.
+
+        Autorização: alteração no arquivo; só o autor do rascunho.
+        Erros: NotFound; Forbidden; InvalidInput; Conflict("issued") ou Conflict("stale_revision").
+        Efeitos: grava o que mudou.
+        """
+        if not isinstance(title, str) or not title.strip() or len(title) > 200:
+            raise InvalidInput({"title": [gettext("Use um título de até 200 caracteres.")]})
+        if not isinstance(body, str) or len(body) > 20_000:
+            raise InvalidInput({"body": [gettext("Texto longo demais.")]})
+        document = _own_document_draft(actor, document_id, expected_revision)
+        if common.apply_changes(document, {"title": title.strip(), "body": body}):
+            _mark_entry(document.chart)
+        return _document_info(actor, document)
+
+    @service_method(read_only=False, since="0.1.0")
+    def issue_document(self, *, actor: Any, document_id: UUID, expected_revision: int) -> DocumentInfo:
+        """Issue the actor's draft document: photograph the author, seal it and publish ``document_issued``.
+
+        Sem assinatura digital ICP-Brasil: o documento emitido é selado e nunca mais muda.
+        Autorização: alteração no arquivo; só o autor do rascunho.
+        Erros: NotFound; Forbidden; Conflict("empty") sem texto; Conflict("professional_required")
+        sem ficha de profissional com conselho; Conflict("issued") ou Conflict("stale_revision").
+        Efeitos: grava data de emissão, nome e conselho, sela e publica o evento (sem título nem texto).
+        """
+        from applications.med_scheduling.service_api import SchedulingService
+        from skeleton.records.sealing import seal_record
+        from skeleton.service_api.events import EventService
+
+        document = _own_document_draft(actor, document_id, expected_revision)
+        if not document.body.strip():
+            raise Conflict("empty", gettext("O documento não tem texto."))
+        professional = SchedulingService().my_professional(actor=actor)
+        if professional is None or not professional.council_label:
+            raise Conflict("professional_required", gettext("Só um profissional com conselho cadastrado emite."))
+        document.issued_at = timezone.now()
+        document.author_name = professional.display_name
+        document.author_council = professional.council_label
+        document.save(update_fields={"issued_at", "author_name", "author_council"})
+        current = ClinicalDocument.objects.get(pk=document.pk)
+        sealed = seal_record(current, user=actor, expected_revision=current.revision, extra=document_extra(current))
+        EventService().publish(
+            actor=actor,
+            event_type="med_records.document_issued",
+            record_id=sealed.pk,
+            data=(
+                ("code", sealed.code),
+                ("chart", str(sealed.chart_id)),
+                ("patient", str(sealed.patient_id)),
+                ("kind", sealed.kind),
+                ("seal_digest", sealed.seal_digest),
+            ),
+        )
+        return _document_info(actor, sealed)
+
+    @service_method(read_only=False, since="0.1.0")
+    def replace_document(self, *, actor: Any, document_id: UUID, idempotency_key: str) -> DocumentInfo:
+        """Start a draft that replaces an issued document, with the same kind, title and text.
+
+        O documento antigo não muda; depois de emitido o novo, ele aparece como substituído.
+        Autorização: alteração no arquivo do documento.
+        Erros: NotFound; Forbidden; Conflict("not_issued") para documento em rascunho.
+        Efeitos: cria o rascunho com ``replaces``. A mesma chave devolve o mesmo rascunho.
+        """
+        from skeleton.access.policies import require_parent_action
+        from skeleton.service_api.sequences import SequenceService
+
+        from .registration import DOCUMENT_SEQUENCE
+
+        key = common.key(idempotency_key)
+        sysid = common.deterministic_id("replacement", actor, key)
+        existing = ClinicalDocument.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return _document_info(actor, existing)
+        original = _document(actor, document_id, write=True)
+        if original.sealed_at is None:
+            raise Conflict("not_issued", gettext("Só um documento emitido é substituído."))
+        require_parent_action(ClinicalDocument, original.chart, user=actor, action="create")
+        number = SequenceService().next_number(actor=actor, key=DOCUMENT_SEQUENCE)
+        document = ClinicalDocument(
+            sysid=sysid,
+            organization_id=original.organization_id,
+            chart=original.chart,
+            patient_id=original.patient_id,
+            code=number.formatted,
+            kind=original.kind,
+            title=original.title,
+            body=original.body,
+            author_id=actor.pk,
+            encounter=original.encounter,
+            replaces=original,
+        )
+        document.save()
+        _mark_entry(original.chart)
+        return _document_info(actor, document)
+
+    @service_method(read_only=True, since="0.1.0")
+    def document(self, *, actor: Any, document_id: UUID) -> DocumentInfo:
+        """One document with its text; the read is recorded in the trail.
+
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para documento inexistente, de outra organização ou ilegível.
+        Efeitos: registra a leitura na trilha do prontuário.
+        """
+        from .trail import record_access
+
+        document = _document(actor, document_id)
+        record_access(actor, document.chart, "view_document", document)
+        return _document_info(actor, document)
+
+    @service_method(read_only=True, since="0.1.0")
+    def documents(self, *, actor: Any, chart_id: UUID) -> tuple[DocumentHeader, ...]:
+        """Headers of the chart's documents, newest first, without their text.
+
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para prontuário ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        chart = _chart(actor, chart_id)
+        rows = list(
+            authorized_queryset(ClinicalDocument, user=actor, action="read")
+            .filter(chart=chart)
+            .order_by("-created_at", "-sysid")[:200]
+        )
+        replaced = {row.replaces_id: row.code for row in rows if row.replaces_id and row.sealed_at is not None}
+        return tuple(document_header(row, replaced_by_code=replaced.get(row.pk, "")) for row in rows)
+
+    @service_method(read_only=True, since="0.1.0")
+    def verify_document(self, *, actor: Any, document_id: UUID) -> SealCheck:
+        """Recompute the seal of a document from the stored content.
+
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para documento inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.records.sealing import verify_seal
+
+        document = _document(actor, document_id)
+        valid = document.sealed_at is not None and verify_seal(document, extra=document_extra(document))
+        return SealCheck(
+            document.pk,
+            document.sealed_at is not None,
+            valid,
+            document.seal_digest,
+            as_utc(document.sealed_at) if document.sealed_at else None,
+        )

@@ -84,13 +84,18 @@ def test_appointment_follows_the_schedule(skeleton_db):
     )
 
 
-@pytest.mark.parametrize("table", ["patientchart", "encounter", "encountersection", "allergy", "medication"])
+@pytest.mark.parametrize(
+    "table",
+    ["patientchart", "encounter", "encountersection", "allergy", "medication", "entrytemplate", "clinicaldocument"],
+)
 def test_records_tables_follow_the_archive(skeleton_db, table):
     from applications.med_records.models import (
         Allergy,
         Archive,
+        ClinicalDocument,
         Encounter,
         EncounterSection,
+        EntryTemplate,
         Medication,
         PatientChart,
     )
@@ -103,6 +108,8 @@ def test_records_tables_follow_the_archive(skeleton_db, table):
         "encountersection": EncounterSection,
         "allergy": Allergy,
         "medication": Medication,
+        "entrytemplate": EntryTemplate,
+        "clinicaldocument": ClinicalDocument,
     }
     scenario = build_service_scenario(models[table], slug=f"derived-{table}")
 
@@ -154,12 +161,33 @@ def test_records_tables_follow_the_archive(skeleton_db, table):
         row.save()
         return row
 
+    def make_template(archive):
+        row = EntryTemplate(organization=archive.organization, archive=archive, name="Modelo", kind="encounter")
+        row.save()
+        return row
+
+    def make_document(archive):
+        chart = make_chart(archive)
+        row = ClinicalDocument(
+            organization=archive.organization,
+            chart=chart,
+            patient=chart.patient,
+            code=f"D{next(NUMBERS):08d}",
+            kind="med_records.certificate",
+            title="Atestado",
+            author=archive.owner,
+        )
+        row.save()
+        return row
+
     makers = {
         "patientchart": make_chart,
         "encounter": make_encounter,
         "encountersection": make_section,
         "allergy": make_allergy,
         "medication": make_medication,
+        "entrytemplate": make_template,
+        "clinicaldocument": make_document,
     }
     assert_derived_access_contract(
         child_model=models[table], make_anchor=make_archive, make_child=makers[table], scenario=scenario

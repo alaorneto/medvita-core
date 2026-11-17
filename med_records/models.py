@@ -208,3 +208,55 @@ class Icd10Code(SystemRecord):
 
     class Meta(SystemRecord.Meta):
         ordering = ("code",)
+
+
+class EntryTemplate(OrganizationRecord):
+    """A template of encounter sections or of a document; with ``author`` it is personal to that person."""
+
+    class Kind(models.TextChoices):
+        ENCOUNTER = "encounter", gettext_lazy("Atendimento")
+        DOCUMENT = "document", gettext_lazy("Documento")
+
+    archive = models.ForeignKey(Archive, on_delete=models.PROTECT, related_name="+")
+    name = models.CharField(max_length=120)
+    specialty = models.CharField(max_length=80, blank=True)
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    sections = models.JSONField(default=list, blank=True)
+    document_kind = models.CharField(max_length=80, blank=True)
+    body = models.TextField(blank=True)
+    author = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    is_active = models.BooleanField(default=True)
+    immutable_fields = ("archive_id", "kind", "author_id")
+
+    class Meta(OrganizationRecord.Meta):
+        ordering = ("name", "sysid")
+
+
+class ClinicalDocument(SealableMixin, OrganizationRecord):
+    """A simple clinical document (certificate, prescription, request): a draft until issued, then sealed.
+
+    An issued document never changes; a correction is a new document that ``replaces`` it.
+    """
+
+    chart = models.ForeignKey(PatientChart, on_delete=models.PROTECT, related_name="+")
+    patient = models.ForeignKey("med_patients.Patient", on_delete=models.PROTECT, related_name="+")
+    code = models.CharField(max_length=20)
+    kind = models.CharField(max_length=80)
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True)
+    issued_at = models.DateTimeField(null=True, blank=True)
+    author = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, related_name="+")
+    author_name = models.CharField(max_length=200, blank=True)
+    author_council = models.CharField(max_length=60, blank=True)
+    encounter = models.ForeignKey(Encounter, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    replaces = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    # The references are immutable from creation; the seal digest covers them through the extra.
+    seal_fields = ("code", "kind", "title", "body", "issued_at", "author_name", "author_council")
+    immutable_fields = ("chart_id", "patient_id", "author_id", "encounter_id", "replaces_id")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(fields=("organization", "code"), name="med_records_document_code"),
+        ]
+        indexes = [models.Index(fields=("chart", "created_at"), name="med_records_document_chart")]
+        ordering = ("-created_at", "sysid")

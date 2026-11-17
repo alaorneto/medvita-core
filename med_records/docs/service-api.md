@@ -88,6 +88,14 @@ Create one more clinical archive, written by the groups and people informed.
 - **Erros:** Forbidden; InvalidInput para nome ou tipo inválidos, dono que não é membro ativo ou listas longas demais.
 - **Efeitos:** cria o arquivo privado (dono ``owner_user_id`` ou o ator) e concede leitura e alteração aos grupos e pessoas. A mesma chave devolve o já criado.
 
+#### `create_template(*, actor, name, kind, archive_id=None, specialty='', sections=(), document_kind='', body='', personal=False, idempotency_key) -> TemplateInfo`
+
+Create a template of encounter sections or of a document, shared in the archive or personal.
+
+- **Autorização:** alteração no arquivo (o padrão que o ator altera, sem ``archive_id``).
+- **Erros:** NotFound; Forbidden; InvalidInput para nome, tipo, seções ou tipo de documento inválidos.
+- **Efeitos:** grava o modelo; pessoal, só o autor o vê e altera. A mesma chave devolve o já criado.
+
 #### `discard_draft(*, actor, encounter_id, expected_revision) -> None`
 
 Discard the actor's draft encounter with its sections.
@@ -95,6 +103,30 @@ Discard the actor's draft encounter with its sections.
 - **Autorização:** alteração no arquivo; só o autor do rascunho.
 - **Erros:** NotFound; Forbidden; Conflict("signed") para atendimento assinado; Conflict("stale_revision").
 - **Efeitos:** exclusão lógica das seções e do atendimento.
+
+#### `document(*, actor, document_id) -> DocumentInfo`
+
+One document with its text; the read is recorded in the trail.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para documento inexistente, de outra organização ou ilegível.
+- **Efeitos:** registra a leitura na trilha do prontuário.
+
+#### `documents(*, actor, chart_id) -> tuple[DocumentHeader, ...]`
+
+Headers of the chart's documents, newest first, without their text.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para prontuário ilegível.
+- **Efeitos:** nenhum.
+
+#### `draft_document(*, actor, chart_id, kind, title='', body=None, encounter_id=None, template_id=None, idempotency_key) -> DocumentInfo`
+
+Start a draft document written by the actor, from the kind's default text or a template.
+
+- **Autorização:** alteração no arquivo do prontuário.
+- **Erros:** NotFound; Forbidden; InvalidInput para tipo desconhecido, modelo de outro tipo, atendimento de outro prontuário ou texto longo demais.
+- **Efeitos:** cria o rascunho com o código da sequência e atualiza o último registro do prontuário. A mesma chave devolve o mesmo rascunho.
 
 #### `encounter(*, actor, encounter_id) -> EncounterInfo`
 
@@ -111,6 +143,14 @@ Headers of the chart's encounters, newest first, without clinical content.
 - **Autorização:** leitura do arquivo do prontuário.
 - **Erros:** NotFound para prontuário ilegível; InvalidInput para cursor ou tamanho inválidos.
 - **Efeitos:** nenhum.
+
+#### `issue_document(*, actor, document_id, expected_revision) -> DocumentInfo`
+
+Issue the actor's draft document: photograph the author, seal it and publish ``document_issued``.
+
+- **Autorização:** alteração no arquivo; só o autor do rascunho.
+- **Erros:** NotFound; Forbidden; Conflict("empty") sem texto; Conflict("professional_required") sem ficha de profissional com conselho; Conflict("issued") ou Conflict("stale_revision").
+- **Efeitos:** grava data de emissão, nome e conselho, sela e publica o evento (sem título nem texto).
 
 #### `medications(*, actor, chart_id) -> tuple[MedicationInfo, ...]`
 
@@ -135,6 +175,14 @@ Remove one section of the actor's draft.
 - **Autorização:** alteração no arquivo; só o autor do rascunho.
 - **Erros:** NotFound; Forbidden; Conflict("signed") ou Conflict("stale_revision").
 - **Efeitos:** exclusão lógica da seção e nova revisão do atendimento.
+
+#### `replace_document(*, actor, document_id, idempotency_key) -> DocumentInfo`
+
+Start a draft that replaces an issued document, with the same kind, title and text.
+
+- **Autorização:** alteração no arquivo do documento.
+- **Erros:** NotFound; Forbidden; Conflict("not_issued") para documento em rascunho.
+- **Efeitos:** cria o rascunho com ``replaces``. A mesma chave devolve o mesmo rascunho.
 
 #### `save_section(*, actor, encounter_id, section_type, data=(), text='', position=0, expected_revision) -> EncounterInfo`
 
@@ -168,13 +216,21 @@ Sign the actor's draft: photograph the author, seal it and publish ``encounter_s
 - **Erros:** NotFound; Forbidden; Conflict("empty") sem seção com conteúdo; Conflict("professional_required") sem ficha de profissional com conselho na agenda; Conflict("signed") ou Conflict("stale_revision").
 - **Efeitos:** grava nome e conselho do autor, sela o atendimento com as seções e publica o evento.
 
-#### `start_encounter(*, actor, chart_id, kind='consultation', occurred_at=None, appointment_id=None, idempotency_key) -> EncounterInfo`
+#### `start_encounter(*, actor, chart_id, kind='consultation', occurred_at=None, appointment_id=None, template_id=None, idempotency_key) -> EncounterInfo`
 
 Start a draft encounter written by the actor; with an arrived appointment, start the attendance.
 
 - **Autorização:** alteração no arquivo do prontuário; com ``appointment_id``, leitura da consulta.
-- **Erros:** NotFound para prontuário ou consulta ilegíveis; Forbidden sem alteração no arquivo; InvalidInput para tipo desconhecido (o adendo nasce por ``add_addendum``), data futura ou consulta de outro paciente.
-- **Efeitos:** cria o rascunho com o código da sequência e atualiza o último registro do prontuário; com a consulta em "chegou", tenta iniciá-la na agenda (recusa da agenda não impede o rascunho). A mesma chave devolve o mesmo rascunho.
+- **Erros:** NotFound para prontuário ou consulta ilegíveis; Forbidden sem alteração no arquivo; InvalidInput para tipo desconhecido (o adendo nasce por ``add_addendum``), data futura, consulta de outro paciente ou modelo que não é de atendimento.
+- **Efeitos:** cria o rascunho com o código da sequência (e as seções do modelo) e atualiza o último registro do prontuário; com a consulta em "chegou", tenta iniciá-la na agenda (recusa da agenda não impede o rascunho). A mesma chave devolve o mesmo rascunho.
+
+#### `templates(*, actor, archive_id=None, kind=None, active_only=True) -> tuple[TemplateInfo, ...]`
+
+Templates of the archives the actor reads: the shared ones and the actor's personal ones.
+
+- **Autorização:** leitura do arquivo; modelos pessoais de outra pessoa nunca aparecem.
+- **Erros:** InvalidInput para tipo desconhecido ou identificador inválido.
+- **Efeitos:** nenhum.
 
 #### `update_allergy(*, actor, allergy_id, changes, expected_revision) -> AllergyInfo`
 
@@ -184,6 +240,14 @@ Change an allergy (its status, for example), with CAS; the audit keeps the histo
 - **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo; Conflict("stale_revision").
 - **Efeitos:** grava só os campos que mudaram.
 
+#### `update_document(*, actor, document_id, title, body, expected_revision) -> DocumentInfo`
+
+Change the title and text of the actor's draft document, with CAS.
+
+- **Autorização:** alteração no arquivo; só o autor do rascunho.
+- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("issued") ou Conflict("stale_revision").
+- **Efeitos:** grava o que mudou.
+
 #### `update_medication(*, actor, medication_id, changes, expected_revision) -> MedicationInfo`
 
 Change a medication (suspend or end it, for example), with CAS.
@@ -191,6 +255,22 @@ Change a medication (suspend or end it, for example), with CAS.
 - **Autorização:** alteração no arquivo do prontuário.
 - **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo; Conflict("stale_revision").
 - **Efeitos:** grava só os campos que mudaram.
+
+#### `update_template(*, actor, template_id, expected_revision, name=None, specialty=None, sections=None, body=None, active=None) -> TemplateInfo`
+
+Change a template (or deactivate it), with CAS; a personal template only by its author.
+
+- **Autorização:** alteração no arquivo; modelo pessoal, só o autor.
+- **Erros:** NotFound (inclusive modelo pessoal de outra pessoa); Forbidden; InvalidInput; Conflict("stale_revision").
+- **Efeitos:** grava só o que mudou.
+
+#### `verify_document(*, actor, document_id) -> SealCheck`
+
+Recompute the seal of a document from the stored content.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para documento inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
 
 #### `verify_encounter(*, actor, encounter_id) -> SealCheck`
 
@@ -251,6 +331,40 @@ What the chart page shows first (clinical content: the read is recorded in the t
 | `allergies` | `tuple[AllergyInfo, ...]` |
 | `medications` | `tuple[MedicationInfo, ...]` |
 | `latest` | `tuple[EncounterHeader, ...]` |
+
+### `DocumentHeader`
+
+A clinical document without its text: what lists show.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `chart_id` | `UUID` |
+| `patient_id` | `UUID` |
+| `code` | `str` |
+| `kind` | `str` |
+| `title` | `str` |
+| `issued` | `bool` |
+| `issued_at` | `datetime | None` |
+| `author_id` | `UUID` |
+| `author_name` | `str` |
+| `author_council` | `str` |
+| `encounter_id` | `UUID | None` |
+| `replaces_id` | `UUID | None` |
+| `replaced_by_code` | `str` |
+| `seal_digest` | `str` |
+| `revision` | `int` |
+
+### `DocumentInfo`
+
+A clinical document with its text (clinical content: the read is recorded in the trail).
+
+| Campo | Tipo |
+|---|---|
+| `header` | `DocumentHeader` |
+| `body` | `str` |
+| `notice` | `str` |
+| `writable` | `bool` |
 
 ### `DocumentKind`
 
@@ -372,6 +486,32 @@ A structured section of an encounter: its fields, version and whether it takes f
 | `fields` | `tuple[SectionField, ...]` |
 | `version` | `int` |
 | `has_text` | `bool` |
+
+### `TemplateInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `archive_id` | `UUID` |
+| `name` | `str` |
+| `specialty` | `str` |
+| `kind` | `str` |
+| `sections_json` | `str` |
+| `document_kind` | `str` |
+| `body` | `str` |
+| `personal` | `bool` |
+| `is_active` | `bool` |
+| `revision` | `int` |
+
+### `TemplateSectionInput`
+
+One section of an encounter template: ``data`` are ``(field, value)`` pairs.
+
+| Campo | Tipo |
+|---|---|
+| `section_type` | `str` |
+| `text` | `str` |
+| `data` | `tuple[tuple[str, Any], ...]` |
 
 <!-- END GENERATED -->
 
