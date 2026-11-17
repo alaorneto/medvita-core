@@ -25,7 +25,7 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 
 **`PatientChart`** (derivada do arquivo): `archive` e `patient` (imutáveis; um prontuário vivo por arquivo e paciente), `opened_at`, `last_entry_at` (o último registro clínico, base da guarda legal).
 
-**`Encounter`** (derivada do prontuário, selável): `chart`, `patient`, `code` (`E` + 8 dígitos da sequência `med_records.encounter`), `kind` (consulta, retorno, procedimento, contato a distância, anotação, adendo), `occurred_at` (não futura), `author` (a pessoa), `author_name` e `author_council` (fotografia na assinatura; `personal_fields`), `appointment` (opcional), `amends` (só no adendo). Todos em `seal_fields`.
+**`Encounter`** (derivada do prontuário, selável): `chart`, `patient`, `code` (`E` + 8 dígitos da sequência `med_records.encounter`), `kind` (consulta, retorno, procedimento, contato a distância, anotação, adendo), `occurred_at` (não futura), `author` (a pessoa), `author_name` e `author_council` (fotografia na assinatura; `personal_fields`), `appointment` (opcional), `amends` (só no adendo). As referências (`chart`, `patient`, `author`, `appointment`, `amends`) são imutáveis desde a criação; o selo congela `code`, `kind`, `occurred_at`, `author_name` e `author_council`, e o resumo cobre também as referências e as seções.
 
 **`EncounterSection`** (derivada do atendimento, três saltos até o arquivo; `seal_parent` do atendimento): `section_type` e `type_version`, `position`, `data` (JSON) e `text`, ambos em `sensitive_fields`. Uma seção viva por tipo e posição.
 
@@ -40,6 +40,14 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 - `save_section` valida pelo tipo de seção, usa a revisão do **atendimento** como CAS (cada seção salva sobe a revisão) e atualiza `last_entry_at` do prontuário. `remove_section` e `discard_draft` são exclusões lógicas; atendimento assinado responde `Conflict("signed")`.
 - `encounters` devolve só cabeçalhos; `encounter` devolve o conteúdo e registra a leitura na trilha.
 - O conteúdo das seções sai `[REDACTED]` na auditoria.
+
+### Assinatura, adendo e verificação
+
+- `sign_encounter`: só o autor, com pelo menos uma seção preenchida (`Conflict("empty")`) e uma ficha de profissional com conselho na agenda (`Conflict("professional_required")`). Grava `author_name` e `author_council` da ficha, sela o atendimento (`skeleton.records.sealing.seal_record`, com as referências e as seções no `extra`) e publica `med_records.encounter_signed`. Com a consulta vinculada em atendimento, tenta concluí-la; a recusa da agenda não desfaz a assinatura e `appointment_completed` diz o que aconteceu.
+- Depois de assinado, nada muda: seções, exclusão e anexos novos são recusados pelo serviço e pelo guard do banco. **Não há assinatura digital ICP-Brasil**: o selo é o resumo SHA-256 do conteúdo, que uma app de assinatura poderá assinar.
+- `add_addendum`: qualquer profissional que altera o arquivo cria um rascunho `addendum` com texto livre apontando para o original assinado; assina-se pelo mesmo `sign_encounter`. O original nunca muda e lista os adendos assinados.
+- `verify_encounter` recalcula o resumo a partir do conteúdo gravado.
+- A ação "Atender" (`med_records.attend`) aparece nas consultas em "chegou" e "em atendimento".
 
 ### Tipos de seção e de documento
 
@@ -67,3 +75,5 @@ O prontuário é guardado por 20 anos depois do último registro (Lei 13.787/201
 - Com dois arquivos pessoais, um profissional não lê o prontuário do outro para o mesmo paciente.
 - `open_chart` repetido devolve o mesmo prontuário; a organização B não vê nada da A.
 - Com registro clínico recente, anonimizar o paciente é recusado com o motivo da guarda; passados os 20 anos, é aceito.
+- Assinado, o atendimento recusa seção nova, exclusão e anexo; `verify_encounter` confirma o selo e acusa conteúdo diferente do selado.
+- O evento `encounter_signed` não leva conteúdo clínico.

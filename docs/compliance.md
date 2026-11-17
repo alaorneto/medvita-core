@@ -40,6 +40,10 @@ O `med_patients` gera o relatório dos dados de um paciente (cadastro, responsá
 - O relatório automático não traz o conteúdo clínico integral: a cópia do prontuário é entregue pelo profissional, pela impressão dos registros.
 - A anonimização é irreversível e só acontece fora dos prazos de guarda declarados pelas apps.
 
+### Prontuário assinado
+
+O atendimento assinado é selado: o banco recusa qualquer mudança nele e nas suas seções, e a correção é um adendo também selado. O resumo SHA-256 do selo e a data e o autor da assinatura aparecem no registro. Isso garante integridade e autoria dentro do sistema, **não** a assinatura digital com certificado ICP-Brasil que o CFM exige para dispensar o papel (ver abaixo).
+
 ## O que o produto não cobre
 
 - Assinatura digital ICP-Brasil nem nível de garantia NGS2 do prontuário: os registros definitivos são selados (imutáveis, com resumo SHA-256) e trazem o aviso de ausência de assinatura digital.

@@ -16,6 +16,14 @@ Referência de `RecordsService` (`applications.med_records.service_api`). O cont
 
 ### `RecordsService`
 
+#### `add_addendum(*, actor, encounter_id, text, idempotency_key) -> EncounterInfo`
+
+Start a draft addendum (free text) to a signed encounter; it is signed by ``sign_encounter``.
+
+- **Autorização:** alteração no arquivo do atendimento.
+- **Erros:** NotFound; Forbidden; Conflict("not_signed") para atendimento não assinado ou que já é um adendo; InvalidInput para texto vazio ou longo demais.
+- **Efeitos:** cria o rascunho do adendo com uma seção de texto livre.
+
 #### `archives(*, actor) -> tuple[ArchiveInfo, ...]`
 
 The clinical archives the actor reads, the default first.
@@ -104,6 +112,14 @@ Create the first clinical archives of the organization.
 - **Erros:** Forbidden; InvalidInput para modo desconhecido, nome inválido, mais de 20 grupos ou nenhum profissional vinculado; Conflict("already_set_up") com arquivos criados por outra chave.
 - **Efeitos:** cria os arquivos (privados), dá ao papel ``member`` leitura e alteração da tabela de arquivos e concede leitura e alteração aos grupos. A mesma chave devolve o já criado.
 
+#### `sign_encounter(*, actor, encounter_id, expected_revision) -> EncounterInfo`
+
+Sign the actor's draft: photograph the author, seal it and publish ``encounter_signed``.
+
+- **Autorização:** alteração no arquivo; só o autor do rascunho.
+- **Erros:** NotFound; Forbidden; Conflict("empty") sem seção com conteúdo; Conflict("professional_required") sem ficha de profissional com conselho na agenda; Conflict("signed") ou Conflict("stale_revision").
+- **Efeitos:** grava nome e conselho do autor, sela o atendimento com as seções e publica o evento.
+
 #### `start_encounter(*, actor, chart_id, kind='consultation', occurred_at=None, appointment_id=None, idempotency_key) -> EncounterInfo`
 
 Start a draft encounter written by the actor; with an arrived appointment, start the attendance.
@@ -111,6 +127,14 @@ Start a draft encounter written by the actor; with an arrived appointment, start
 - **Autorização:** alteração no arquivo do prontuário; com ``appointment_id``, leitura da consulta.
 - **Erros:** NotFound para prontuário ou consulta ilegíveis; Forbidden sem alteração no arquivo; InvalidInput para tipo desconhecido (o adendo nasce por ``add_addendum``), data futura ou consulta de outro paciente.
 - **Efeitos:** cria o rascunho com o código da sequência e atualiza o último registro do prontuário; com a consulta em "chegou", tenta iniciá-la na agenda (recusa da agenda não impede o rascunho). A mesma chave devolve o mesmo rascunho.
+
+#### `verify_encounter(*, actor, encounter_id) -> SealCheck`
+
+Recompute the seal of an encounter from the stored content and its sections.
+
+- **Autorização:** leitura do arquivo do atendimento.
+- **Erros:** NotFound para atendimento inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
 
 ## DTOs
 
@@ -182,6 +206,19 @@ An encounter with its sections (clinical content: every read is recorded in the 
 | `sections` | `tuple[SectionInfo, ...]` |
 | `addenda` | `tuple[EncounterHeader, ...]` |
 | `writable` | `bool` |
+| `appointment_completed` | `bool` |
+
+### `SealCheck`
+
+Whether a record is signed and whether its stored content still matches the seal.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `signed` | `bool` |
+| `valid` | `bool` |
+| `seal_digest` | `str` |
+| `signed_at` | `datetime | None` |
 
 ### `SectionField`
 

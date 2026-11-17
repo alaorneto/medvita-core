@@ -90,19 +90,10 @@ class Encounter(SealableMixin, OrganizationRecord):
         "med_scheduling.Appointment", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
     amends = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
-    seal_fields = (
-        "chart",
-        "patient",
-        "code",
-        "kind",
-        "occurred_at",
-        "author",
-        "author_name",
-        "author_council",
-        "appointment",
-        "amends",
-    )
-    immutable_fields = ("chart_id", "patient_id", "code", "author_id", "appointment_id", "amends_id")
+    # The references are immutable from creation (immutable_fields); the seal digest covers them
+    # through ``seal_extra`` and the seal freezes the columns a draft may still change.
+    seal_fields = ("code", "kind", "occurred_at", "author_name", "author_council")
+    immutable_fields = ("chart_id", "patient_id", "author_id", "appointment_id", "amends_id")
 
     class Meta(OrganizationRecord.Meta):
         constraints = OrganizationRecord.Meta.constraints + [

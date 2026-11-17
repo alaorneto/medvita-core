@@ -46,6 +46,7 @@ __all__ = [
     "EncounterInfo",
     "RecordsService",
     "SectionField",
+    "SealCheck",
     "SectionInfo",
     "SectionType",
     "register_document_kind",
@@ -164,6 +165,47 @@ class EncounterInfo:
     sections: tuple[SectionInfo, ...]
     addenda: tuple[EncounterHeader, ...]
     writable: bool
+    appointment_completed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SealCheck:
+    """Whether a record is signed and whether its stored content still matches the seal."""
+
+    sysid: UUID
+    signed: bool
+    valid: bool
+    seal_digest: str
+    signed_at: datetime | None
+
+
+def seal_extra(encounter: Encounter) -> dict[str, Any]:
+    """What the seal digest covers besides the frozen columns: the references and the sections.
+
+    The references (chart, patient, author, appointment, amended encounter) are immutable from
+    creation; the sections are frozen by ``seal_parent``. Stable order, no floats.
+    """
+    rows = EncounterSection.objects.filter(encounter_id=encounter.pk).order_by("sysid")
+    return {
+        "references": {
+            "chart": encounter.chart_id,
+            "patient": encounter.patient_id,
+            "author": encounter.author_id,
+            "appointment": encounter.appointment_id,
+            "amends": encounter.amends_id,
+        },
+        "sections": [
+            {
+                "sysid": row.pk,
+                "section_type": row.section_type,
+                "type_version": row.type_version,
+                "position": row.position,
+                "data": row.data,
+                "text": row.text,
+            }
+            for row in rows
+        ]
+    }
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -720,3 +762,121 @@ class RecordsService(ServiceAPI):
         for row in EncounterSection.objects.filter(encounter=encounter):
             row.delete()
         encounter.delete()
+
+    # ------------------------------------------------------------------ signing
+
+    @service_method(read_only=False, since="0.1.0")
+    def sign_encounter(self, *, actor: Any, encounter_id: UUID, expected_revision: int) -> EncounterInfo:
+        """Sign the actor's draft: photograph the author, seal it and publish ``encounter_signed``.
+
+        Sem assinatura digital ICP-Brasil: o selo é o resumo SHA-256 do conteúdo, que nunca mais muda.
+        Com a consulta vinculada em atendimento, tenta concluí-la na agenda; a recusa da agenda não
+        desfaz a assinatura (``appointment_completed`` diz o que aconteceu).
+        Autorização: alteração no arquivo; só o autor do rascunho.
+        Erros: NotFound; Forbidden; Conflict("empty") sem seção com conteúdo;
+        Conflict("professional_required") sem ficha de profissional com conselho na agenda;
+        Conflict("signed") ou Conflict("stale_revision").
+        Efeitos: grava nome e conselho do autor, sela o atendimento com as seções e publica o evento.
+        """
+        from applications.med_scheduling.service_api import SchedulingService
+        from skeleton.records.sealing import seal_record
+        from skeleton.service_api.events import EventService
+
+        encounter = _own_draft(actor, encounter_id, expected_revision)
+        rows = list(EncounterSection.objects.filter(encounter=encounter))
+        if not any(row.data or row.text.strip() for row in rows):
+            raise Conflict("empty", gettext("O atendimento não tem nenhuma seção preenchida."))
+        scheduling = SchedulingService()
+        professional = scheduling.my_professional(actor=actor)
+        if professional is None or not professional.council_label:
+            raise Conflict("professional_required", gettext("Só um profissional com conselho cadastrado assina."))
+        encounter.author_name = professional.display_name
+        encounter.author_council = professional.council_label
+        encounter.save(update_fields={"author_name", "author_council"})
+        current = Encounter.objects.get(pk=encounter.pk)
+        sealed = seal_record(current, user=actor, expected_revision=current.revision, extra=seal_extra(current))
+        EventService().publish(
+            actor=actor,
+            event_type="med_records.encounter_signed",
+            record_id=sealed.pk,
+            data=(
+                ("code", sealed.code),
+                ("chart", str(sealed.chart_id)),
+                ("patient", str(sealed.patient_id)),
+                ("kind", sealed.kind),
+                ("occurred_at", as_utc(sealed.occurred_at).isoformat()),
+                ("seal_digest", sealed.seal_digest),
+            ),
+        )
+        completed = False
+        if sealed.appointment_id is not None:
+            try:
+                appointment = scheduling.appointment(actor=actor, appointment_id=sealed.appointment_id).appointment
+                if appointment.status == "in_progress":
+                    scheduling.complete(
+                        actor=actor, appointment_id=appointment.sysid, expected_revision=appointment.revision
+                    )
+                    completed = True
+            except (Forbidden, Conflict, NotFound):
+                completed = False
+        info = _encounter_info(actor, sealed)
+        return EncounterInfo(info.header, info.sections, info.addenda, info.writable, completed)
+
+    @service_method(read_only=False, since="0.1.0")
+    def add_addendum(self, *, actor: Any, encounter_id: UUID, text: str, idempotency_key: str) -> EncounterInfo:
+        """Start a draft addendum (free text) to a signed encounter; it is signed by ``sign_encounter``.
+
+        Qualquer profissional que altera o arquivo pode acrescentar um adendo; o original nunca muda.
+        Autorização: alteração no arquivo do atendimento.
+        Erros: NotFound; Forbidden; Conflict("not_signed") para atendimento não assinado ou que já
+        é um adendo; InvalidInput para texto vazio ou longo demais.
+        Efeitos: cria o rascunho do adendo com uma seção de texto livre.
+        """
+        from .sections import FREE_TEXT_LIMIT
+
+        key = common.key(idempotency_key)
+        if not isinstance(text, str) or not text.strip() or len(text) > FREE_TEXT_LIMIT:
+            raise InvalidInput({"text": [gettext("Escreva o texto do adendo.")]})
+        sysid = common.deterministic_id("addendum", actor, key)
+        existing = Encounter.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return _encounter_info(actor, existing)
+        original = _encounter(actor, encounter_id, write=True)
+        if original.sealed_at is None or original.kind == Encounter.Kind.ADDENDUM:
+            raise Conflict("not_signed", gettext("Só um atendimento assinado recebe adendo."))
+        addendum = _new_encounter(
+            actor,
+            original.chart,
+            kind=Encounter.Kind.ADDENDUM,
+            occurred_at=timezone.now(),
+            sysid=sysid,
+            amends=original,
+        )
+        EncounterSection(
+            organization_id=addendum.organization_id,
+            encounter=addendum,
+            section_type="med_records.free_text",
+            text=text,
+        ).save()
+        _touch(addendum)
+        return _encounter_info(actor, addendum)
+
+    @service_method(read_only=True, since="0.1.0")
+    def verify_encounter(self, *, actor: Any, encounter_id: UUID) -> SealCheck:
+        """Recompute the seal of an encounter from the stored content and its sections.
+
+        Autorização: leitura do arquivo do atendimento.
+        Erros: NotFound para atendimento inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.records.sealing import verify_seal
+
+        encounter = _encounter(actor, encounter_id)
+        valid = encounter.sealed_at is not None and verify_seal(encounter, extra=seal_extra(encounter))
+        return SealCheck(
+            encounter.pk,
+            encounter.sealed_at is not None,
+            valid,
+            encounter.seal_digest,
+            as_utc(encounter.sealed_at) if encounter.sealed_at else None,
+        )

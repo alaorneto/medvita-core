@@ -55,6 +55,13 @@ def register_contributions() -> None:
     from .retention import retention_guard
 
     register_retention_guard("med_records.retention", retention_guard)
+    from applications.med_scheduling.service_api import AppointmentAction, register_appointment_action
+
+    register_appointment_action(
+        AppointmentAction(
+            "med_records.attend", _("Atender"), "med_records:attend", statuses=("arrived", "in_progress"), order=10
+        )
+    )
     register_setup_step(SetupStep("med_records.archives", _("Prontuário"), "med_records:setup", _has_archive, order=30))
 
 
@@ -102,6 +109,7 @@ def register_encounters() -> None:
                 "author_council",
                 "appointment",
                 "amends",
+                "seal_digest",
             ),
             write_fields=(),
             sensitive_fields=(),
@@ -126,4 +134,14 @@ def register_encounters() -> None:
     )
     register_sequence(
         SequenceSpec(key=ENCOUNTER_SEQUENCE, period="none", template="E{number:08d}", owner_app=APP_LABEL)
+    )
+    from skeleton.events.registry import EventType, register_event_type
+
+    register_event_type(
+        EventType(
+            code="med_records.encounter_signed",
+            table_key="med_records.encounter",
+            payload_fields=("code", "chart", "patient", "kind", "occurred_at", "seal_digest"),
+            owner_app=APP_LABEL,
+        )
     )
