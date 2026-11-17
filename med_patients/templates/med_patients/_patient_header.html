@@ -1,7 +1,7 @@
-{% load i18n skeleton_format %}<div class="page-header"><div class="min-w-0">
+{% load i18n skeleton_format med_patients_labels %}<div class="page-header"><div class="min-w-0">
   <p class="page-eyebrow"><a href="{% url 'med_patients:list' organization_id %}">{% translate "Pacientes" %}</a> · {{ patient.code }}</p>
   <h1>{{ patient.display_name }}</h1>
-  <p class="page-description">{% if age is not None %}{% blocktranslate count years=age %}{{ years }} ano{% plural %}{{ years }} anos{% endblocktranslate %} · {% endif %}{{ patient.status|status_badge }}{% if patient.social_name %} · {% translate "Nome civil:" %} {{ patient.full_name }}{% endif %}</p>
+  <p class="page-description">{% if age is not None %}{% blocktranslate count years=age %}{{ years }} ano{% plural %}{{ years }} anos{% endblocktranslate %} · {% endif %}{% with status_label=patient.status|patient_label:"status" %}{{ patient.status|status_badge:status_label }}{% endwith %}{% if patient.social_name %} · {% translate "Nome civil:" %} {{ patient.full_name }}{% endif %}</p>
   {% if patient.needs_guardian %}<p class="badge badge-warning">{% translate "Menor sem responsável legal cadastrado" %}</p>{% endif %}
   {% if patient.processing_restricted %}<p class="badge badge-danger">{% translate "Tratamento de dados restrito" %}</p>{% endif %}
   {% if patient.anonymized_at %}<p class="badge badge-neutral">{% translate "Paciente anonimizado" %}</p>{% endif %}

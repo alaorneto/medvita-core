@@ -1,10 +1,10 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Responsáveis" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n med_patients_labels %}{% block title %}{% translate "Responsáveis" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
 {% block content %}
 {% include "med_patients/_patient_header.html" %}
 <div class="table-scroll mb-6"><table>
   <caption class="sr-only">{% translate "Responsáveis" %}</caption>
   <thead><tr><th scope="col">{% translate "Nome" %}</th><th scope="col">{% translate "Relação" %}</th><th scope="col">{% translate "Contato" %}</th><th scope="col">{% translate "Papel" %}</th>{% if patient.writable %}<th scope="col"><span class="sr-only">{% translate "Ações" %}</span></th>{% endif %}</tr></thead>
-  <tbody>{% for row in rows %}<tr><td>{{ row.name }}</td><td>{{ row.relationship }}</td><td>{{ row.phone|default:"—" }}{% if row.email %} · {{ row.email }}{% endif %}</td><td>{% if row.is_legal_representative %}<span class="badge badge-brand">{% translate "Representante legal" %}</span>{% endif %}{% if row.is_financial_responsible %} <span class="badge badge-neutral">{% translate "Responsável financeiro" %}</span>{% endif %}</td>
+  <tbody>{% for row in rows %}<tr><td>{{ row.name }}</td><td>{{ row.relationship|patient_label:"relationship" }}</td><td>{{ row.phone|default:"—" }}{% if row.email %} · {{ row.email }}{% endif %}</td><td>{% if row.is_legal_representative %}<span class="badge badge-brand">{% translate "Representante legal" %}</span>{% endif %}{% if row.is_financial_responsible %} <span class="badge badge-neutral">{% translate "Responsável financeiro" %}</span>{% endif %}</td>
   {% if patient.writable %}<td><form method="post" action="{% url 'med_patients:guardian-remove' organization_id patient.sysid row.sysid %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ row.revision }}"><button type="submit" class="btn btn-secondary">{% translate "Remover" %}</button></form></td>{% endif %}</tr>
   {% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=5 message=_("Nenhum responsável cadastrado.") %}{% endfor %}</tbody>
 </table></div>

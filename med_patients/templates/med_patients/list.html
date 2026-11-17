@@ -1,4 +1,4 @@
-{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{% translate "Pacientes" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format med_patients_labels %}{% block title %}{% translate "Pacientes" %} · {{ site_name }}{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Consultório" %}</p><h1>{% translate "Pacientes" %}</h1><p class="page-description">{% translate "Busque por nome, CPF, código ou final do telefone." %}</p></div>
 {% if can_create %}<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_patients:imports' organization_id %}">{% translate "Importar CSV" %}</a><a class="btn btn-primary" href="{% url 'med_patients:create' organization_id %}">{% translate "Novo paciente" %}</a></nav>{% endif %}</div>
@@ -11,7 +11,7 @@
 <div class="table-scroll"><table>
   <caption class="sr-only">{% translate "Pacientes" %}</caption>
   <thead><tr><th scope="col">{% translate "Código" %}</th><th scope="col">{% translate "Nome" %}</th><th scope="col" class="col-date">{% translate "Nascimento" %}</th><th scope="col">{% translate "Situação" %}</th></tr></thead>
-  <tbody>{% for item in page.items %}<tr><td>{{ item.code }}</td><td><a class="cell-primary" href="{% url 'med_patients:detail' organization_id item.sysid %}">{{ item.display_name }}</a></td><td class="col-date">{% if item.birth_date %}<time datetime="{{ item.birth_date|date:'Y-m-d' }}">{{ item.birth_date|date:"SHORT_DATE_FORMAT" }}</time>{% else %}—{% endif %}</td><td>{{ item.status|status_badge }}</td></tr>
+  <tbody>{% for item in page.items %}<tr><td>{{ item.code }}</td><td><a class="cell-primary" href="{% url 'med_patients:detail' organization_id item.sysid %}">{{ item.display_name }}</a></td><td class="col-date">{% if item.birth_date %}<time datetime="{{ item.birth_date|date:'Y-m-d' }}">{{ item.birth_date|date:"SHORT_DATE_FORMAT" }}</time>{% else %}—{% endif %}</td><td>{% with status_label=item.status|patient_label:"status" %}{{ item.status|status_badge:status_label }}{% endwith %}</td></tr>
   {% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=4 message=_("Nenhum paciente encontrado.") %}{% endfor %}</tbody>
 </table></div>
 {% if page.next_cursor %}<nav class="pagination" aria-label="{% translate "Paginação" %}"><div class="pagination-links"><a class="pagination-next" rel="next" href="?q={{ query|urlencode }}&amp;status={{ status }}&amp;cursor={{ page.next_cursor|urlencode }}">{% translate "Próxima página" %}</a></div></nav>{% endif %}

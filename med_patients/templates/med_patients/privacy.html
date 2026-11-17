@@ -1,4 +1,4 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format %}{% block title %}{% translate "Privacidade" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_patients_labels %}{% block title %}{% translate "Privacidade" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_patients/med_patients.css' %}">{% endblock %}
 {% block content %}
 {% include "med_patients/_patient_header.html" %}
@@ -16,7 +16,7 @@
   <dt>{% translate "Endereço" %}</dt><dd>{{ report.patient.street }} {{ report.patient.number }} {{ report.patient.complement }} {{ report.patient.district }} {{ report.patient.city }} {{ report.patient.state }} {{ report.patient.postal_code }}</dd>
 </dl>
 <h3 class="section-heading">{% translate "Responsáveis" %}</h3>
-<ul class="mb-4">{% for row in report.guardians %}<li>{{ row.name }} · {{ row.relationship }}{% if row.phone %} · {{ row.phone }}{% endif %}</li>{% empty %}<li>—</li>{% endfor %}</ul>
+<ul class="mb-4">{% for row in report.guardians %}<li>{{ row.name }} · {{ row.relationship|patient_label:"relationship" }}{% if row.phone %} · {{ row.phone }}{% endif %}</li>{% empty %}<li>—</li>{% endfor %}</ul>
 <h3 class="section-heading">{% translate "Convênios" %}</h3>
 <ul class="mb-4">{% for row in report.coverages %}<li>{{ row.insurer_name }} · {{ row.card_number }}</li>{% empty %}<li>—</li>{% endfor %}</ul>
 <h3 class="section-heading">{% translate "Consentimentos" %}</h3>
