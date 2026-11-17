@@ -73,10 +73,10 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python }}
-      - name: Cliente PostgreSQL da versão do servidor (pg_dump do modelo do schema)
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client-16
-          echo "SKELETON_TEST_PG_DUMP=/usr/lib/postgresql/16/bin/pg_dump" >> "$GITHUB_ENV"
+      - name: Cliente PostgreSQL (pg_dump do modelo do schema)
+        # O cliente da distribuição pode ser mais novo que o servidor: pg_dump lê servidores
+        # antigos, e o conftest descarta o ajuste de sessão que o servidor 16 não conhece.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
       - name: Instalar o núcleo e as ferramentas de teste
         run: |
           python -m pip install "django-skeleton @ git+https://github.com/${SKELETON_REPOSITORY}@${SKELETON_REF}"
