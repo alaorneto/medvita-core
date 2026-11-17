@@ -100,6 +100,14 @@ jobs:
           for package in med_patients med_scheduling med_records med_finance; do
             python -m skeleton.system.packages doctor "${package}" --git-ref HEAD
           done
+      - name: Pacotes de teste sem os arquivos de desenvolvimento
+        # Chave descartável do próprio job: o pacote não é publicado, só conferido.
+        run: |
+          python -m skeleton.system.packages keygen --private-key "${RUNNER_TEMP}/ci.pem" --public-key "${RUNNER_TEMP}/ci.pub.pem"
+          for package in med_patients med_scheduling med_records med_finance; do
+            python -m skeleton.system.packages build --app-root "${package}" --git-ref HEAD               --output "${RUNNER_TEMP}/${package}.skapp" --private-key "${RUNNER_TEMP}/ci.pem"
+            python tools/check_package.py "${RUNNER_TEMP}/${package}.skapp" "${package}"
+          done
 
   # Agregador exigido pelo ruleset da main: falha se qualquer job acima falhar.
   ci:
