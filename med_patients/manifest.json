@@ -52,7 +52,7 @@
     ],
     "service_api": {
       "classes": [
-        "PatientRegistryService"
+        "PatientService"
       ],
       "module": "applications.med_patients.service_api"
     },
