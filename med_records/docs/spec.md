@@ -29,6 +29,22 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 
 `open_chart` obtém ou cria o prontuário do paciente: exige alteração no arquivo e leitura do paciente. Sem `archive_id` usa o arquivo padrão que o ator altera, ou o único; com vários e nenhum padrão, pede o arquivo. `chart` e `charts_for_patient` não devolvem conteúdo clínico.
 
+### Tipos de seção e de documento
+
+Cada seção de um atendimento é de um tipo registrado (`register_section_type`): campos estruturados validados por `validate_section` (chave desconhecida, tipo errado, valor fora da faixa, opção fora da lista e dois diagnósticos principais são recusados; decimais viram texto com ponto) e, quando o tipo aceita, texto livre de até 50.000 caracteres. A seção gravada guarda a versão do tipo; o formulário usa a maior.
+
+| Código | Campos estruturados |
+|---|---|
+| `med_records.anamnesis` | queixa principal, história da doença atual, antecedentes pessoais e familiares, hábitos |
+| `med_records.vitals` | pressão sistólica (30–300 mmHg) e diastólica (20–200), frequências cardíaca (20–300 bpm) e respiratória (4–80), temperatura (30–45 °C), saturação (50–100 %), peso (0,3–500 kg), altura (20–260 cm), glicemia (10–1000 mg/dL); o IMC é calculado na exibição, nunca gravado |
+| `med_records.physical_exam` | só texto |
+| `med_records.assessment` | diagnósticos CID-10 (código, descrição, no máximo um principal) |
+| `med_records.plan` | só texto |
+| `med_records.evolution` | subjetivo, objetivo, avaliação e plano |
+| `med_records.free_text` | só texto |
+
+Tipos de documento básicos (`register_document_kind`): atestado, declaração de comparecimento, receita simples (com o aviso de que não serve para medicamentos sujeitos a controle especial), pedido de exame e encaminhamento. O texto padrão aceita os marcadores `{{patient_name}}`, `{{date}}` e `{{professional_name}}`, trocados por `render_placeholders` sem motor de templates: qualquer outro texto fica literal.
+
 ### Guarda legal
 
 O prontuário é guardado por 20 anos depois do último registro (Lei 13.787/2018, constante `RETENTION_YEARS` em `retention.py`). A guarda registrada em `med_patients` (`med_records.retention`) veta excluir ou anonimizar o paciente enquanto houver prontuário com registro nesse prazo; resta a restrição de tratamento. A guarda roda no contexto da organização de quem pediu, sem abrir outro.

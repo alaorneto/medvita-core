@@ -26,6 +26,7 @@ from skeleton.service_api import (
 )
 
 from . import common
+from .extension import DocumentKind, SectionField, SectionType, register_document_kind, register_section_type
 from .models import Archive, PatientChart
 
 APP_LABEL = common.APP_LABEL
@@ -38,7 +39,12 @@ __all__ = [
     "APP_ID",
     "ArchiveInfo",
     "ChartInfo",
+    "DocumentKind",
     "RecordsService",
+    "SectionField",
+    "SectionType",
+    "register_document_kind",
+    "register_section_type",
 ]
 
 

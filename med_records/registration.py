@@ -62,3 +62,15 @@ def _has_archive(*, actor) -> bool:
     from .service_api import RecordsService
 
     return bool(RecordsService().archives(actor=actor))
+
+
+def register_clinical_types() -> None:
+    """The seven basic section types and the five basic document kinds of the app."""
+    from .documents import BASIC_KINDS
+    from .extension import register_document_kind, register_section_type
+    from .sections import BASIC_TYPES
+
+    for section_type in BASIC_TYPES:
+        register_section_type(section_type)
+    for kind in BASIC_KINDS:
+        register_document_kind(kind)

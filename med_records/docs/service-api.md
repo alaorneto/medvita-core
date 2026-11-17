@@ -91,6 +91,44 @@ A chart without clinical content: which patient, which archive, when it was last
 | `revision` | `int` |
 | `writable` | `bool` |
 
+### `DocumentKind`
+
+A kind of clinical document. ``default_body`` may use {{patient_name}}, {{date}}, {{professional_name}}.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `default_body` | `Any` |
+| `notice` | `Any` |
+
+### `SectionField`
+
+One structured field of a section type. ``choices`` are ``(code, label)`` pairs.
+
+| Campo | Tipo |
+|---|---|
+| `name` | `str` |
+| `label` | `Any` |
+| `kind` | `str` |
+| `required` | `bool` |
+| `unit` | `str` |
+| `min` | `float | None` |
+| `max` | `float | None` |
+| `choices` | `tuple[tuple[str, Any], ...]` |
+
+### `SectionType`
+
+A structured section of an encounter: its fields, version and whether it takes free text.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `fields` | `tuple[SectionField, ...]` |
+| `version` | `int` |
+| `has_text` | `bool` |
+
 <!-- END GENERATED -->
 
 ## Contribuições a outras apps
