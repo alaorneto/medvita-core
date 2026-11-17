@@ -18,4 +18,5 @@ class MedFinanceConfig(AppConfig):
 
         registration.register_price_and_desk_tables()
         registration.register_account_keys()
+        registration.register_cash_tables()
         registration.register_contributions()

@@ -8,9 +8,11 @@ reports; this app is the front desk: prices, charges, payments, cash sessions an
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from django.utils import timezone
 from django.utils.translation import gettext
 
 from skeleton.service_api import (
@@ -18,13 +20,16 @@ from skeleton.service_api import (
     Forbidden,
     InvalidInput,
     NotFound,
+    Page,
     ServiceAPI,
+    as_utc,
     as_uuid,
+    paginate,
     service_method,
 )
 
 from . import common
-from .models import CashDesk, PriceItem, PriceList
+from .models import CashDesk, CashMovement, CashSession, PriceItem, PriceList
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.finance"
@@ -35,6 +40,10 @@ MEMBER_TABLES = (PRICE_LIST_TABLE, DESK_TABLE)
 MAX_AMOUNT = 10**11  # R$ 1 bilhão em centavos: a sanity bound, not a business rule.
 
 __all__ = [
+    "MethodTotal",
+    "MovementInfo",
+    "SessionInfo",
+    "SessionReport",
     "APP_ID",
     "DeskInfo",
     "FinanceService",
@@ -88,6 +97,108 @@ class PriceItemInfo:
 
 def price_item_info(row: PriceItem) -> PriceItemInfo:
     return PriceItemInfo(row.pk, row.price_list_id, row.code, row.description, row.amount, row.is_active, row.revision)
+
+
+@dataclass(frozen=True, slots=True)
+class SessionInfo:
+    sysid: UUID
+    desk_id: UUID
+    opened_by_id: UUID
+    opened_at: datetime
+    opening_amount: int
+    status: str
+    closed_by_id: UUID | None
+    closed_at: datetime | None
+    counted_amount: int | None
+    expected_amount: int | None
+    difference: int | None
+    note: str
+    revision: int
+
+
+def session_info(row: CashSession) -> SessionInfo:
+    return SessionInfo(
+        row.pk,
+        row.desk_id,
+        row.opened_by_id,
+        as_utc(row.opened_at),
+        row.opening_amount,
+        row.status,
+        row.closed_by_id,
+        as_utc(row.closed_at) if row.closed_at else None,
+        row.counted_amount,
+        row.expected_amount,
+        row.difference,
+        row.note,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class MovementInfo:
+    sysid: UUID
+    session_id: UUID
+    kind: str
+    amount: int
+    reason: str
+    at: datetime
+    ledger_entry_id: UUID | None
+
+
+def movement_info(row: CashMovement) -> MovementInfo:
+    return MovementInfo(row.pk, row.session_id, row.kind, row.amount, row.reason, as_utc(row.at), row.ledger_entry)
+
+
+@dataclass(frozen=True, slots=True)
+class MethodTotal:
+    method: str
+    amount: int
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SessionReport:
+    session: SessionInfo
+    by_method: tuple[MethodTotal, ...]
+    supplies: int
+    withdrawals: int
+    expected_cash: int
+    movements: tuple[MovementInfo, ...]
+
+
+def _payments_by_method(actor: Any, session: CashSession) -> tuple[MethodTotal, ...]:
+    """Registered (not reversed) payments of the session, by method; none until payments exist."""
+    return ()
+
+
+def _cash_payments(session: CashSession) -> int:
+    """Cash payments of the session that were not reversed (0 until payments exist)."""
+    return 0
+
+
+def _expected_cash(session: CashSession) -> int:
+    """Opening cash + cash payments + supplies - withdrawals of the session."""
+    from django.db.models import Sum
+
+    totals = {
+        row["kind"]: row["total"]
+        for row in CashMovement.objects.filter(session=session).values("kind").annotate(total=Sum("amount"))
+    }
+    return (
+        session.opening_amount + _cash_payments(session) + (totals.get("supply") or 0) - (totals.get("withdrawal") or 0)
+    )
+
+
+class _ledger_errors:
+    """Turn a refusal of the ledger (period locked, unbound key) into Conflict("ledger_rejected")."""
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, kind: Any, error: Any, traceback: Any) -> bool:
+        if isinstance(error, Conflict) and error.code != "ledger_rejected":
+            raise Conflict("ledger_rejected", gettext("O livro contábil recusou o lançamento.")) from error
+        return False
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -393,3 +504,213 @@ class FinanceService(ServiceAPI):
         common.check_revision(row, expected_revision)
         common.apply_changes(row, clean)
         return price_item_info(row)
+
+    # ------------------------------------------------------------------ cash sessions
+
+    @service_method(read_only=True, since="0.1.0")
+    def current_session(self, *, actor: Any, desk_id: UUID | None = None) -> SessionInfo | None:
+        """The open session of a cash desk (the default one when not informed), or ``None``.
+
+        Autorização: leitura do caixa.
+        Erros: NotFound para caixa ilegível ou sem caixa padrão.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        desk = _default(actor, CashDesk, desk_id, field="desk_id")
+        row = authorized_queryset(CashSession, user=actor, action="read").filter(desk=desk, status="open").first()
+        return session_info(row) if row is not None else None
+
+    @service_method(read_only=False, since="0.1.0")
+    def open_session(
+        self, *, actor: Any, desk_id: UUID | None = None, opening_amount: int = 0, idempotency_key: str
+    ) -> SessionInfo:
+        """Open a session of the cash desk with the cash in the drawer.
+
+        Autorização: alteração no caixa.
+        Erros: NotFound; Forbidden; InvalidInput para valor inválido; Conflict("session_already_open").
+        Efeitos: grava a sessão aberta. A mesma chave devolve a já aberta.
+        """
+        from django.db import IntegrityError, transaction
+
+        from skeleton.access.policies import require_parent_action
+
+        key = common.key(idempotency_key)
+        amount = _amount(opening_amount, "opening_amount")
+        sysid = common.deterministic_id("session", actor, key)
+        existing = CashSession.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return session_info(existing)
+        desk = _default(actor, CashDesk, desk_id, field="desk_id", write=True)
+        require_parent_action(CashSession, desk, user=actor, action="create")
+        if CashSession.objects.filter(desk=desk, status="open").exists():
+            raise Conflict("session_already_open", gettext("Este caixa já tem uma sessão aberta."))
+        row = CashSession(
+            sysid=sysid,
+            organization_id=desk.organization_id,
+            desk=desk,
+            opened_by_id=actor.pk,
+            opened_at=timezone.now(),
+            opening_amount=amount,
+        )
+        try:
+            with transaction.atomic():
+                row.save()
+        except IntegrityError:
+            raise Conflict("session_already_open", gettext("Este caixa já tem uma sessão aberta.")) from None
+        return session_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def add_movement(
+        self, *, actor: Any, session_id: UUID, kind: str, amount: int, reason: str, idempotency_key: str
+    ) -> MovementInfo:
+        """Record a supply or a withdrawal of cash in an open session and post it to the ledger.
+
+        Autorização: alteração no caixa.
+        Erros: NotFound; Forbidden; InvalidInput para tipo, valor ou motivo inválidos;
+        Conflict("session_closed"); Conflict("insufficient_cash") para sangria maior que o dinheiro
+        esperado; Conflict("ledger_rejected") quando o livro recusa (período travado, chave sem conta).
+        Efeitos: grava o movimento e o lançamento no livro (regra ``med_finance.cash_supply`` ou
+        ``cash_withdrawal``). A mesma chave devolve o já gravado.
+        """
+        from skeleton.access.policies import require_parent_action
+
+        from . import ledger_bridge
+
+        key = common.key(idempotency_key)
+        if kind not in CashMovement.Kind.values:
+            raise InvalidInput({"kind": [gettext("Use suprimento ou sangria.")]})
+        value = _amount(amount, positive=True)
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 200:
+            raise InvalidInput({"reason": [gettext("Informe o motivo (até 200 caracteres).")]})
+        sysid = common.deterministic_id("movement", actor, key)
+        existing = CashMovement.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return movement_info(existing)
+        session = common.row(actor, CashSession, session_id, field="session_id", write=True, lock=True)
+        if session.status != CashSession.Status.OPEN:
+            raise Conflict("session_closed", gettext("A sessão do caixa está fechada."))
+        if kind == CashMovement.Kind.WITHDRAWAL and value > _expected_cash(session):
+            raise Conflict("insufficient_cash", gettext("A sangria é maior que o dinheiro esperado no caixa."))
+        require_parent_action(CashMovement, session, user=actor, action="create")
+        row = CashMovement(
+            sysid=sysid,
+            organization_id=session.organization_id,
+            session=session,
+            kind=kind,
+            amount=value,
+            reason=reason.strip(),
+            at=timezone.now(),
+        )
+        row.save()
+        with _ledger_errors():
+            row.ledger_entry = ledger_bridge.post_movement(
+                actor, movement=row, desk=session.desk, idempotency_key=f"med_finance:movement:{row.pk}"
+            )
+        row.save(update_fields={"ledger_entry"})
+        return movement_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def close_session(
+        self, *, actor: Any, session_id: UUID, counted_amount: int, expected_revision: int, note: str = ""
+    ) -> SessionInfo:
+        """Close a session with the counted cash; the difference to the expected cash is recorded.
+
+        Autorização: alteração no caixa, e ser quem abriu a sessão ou ter a gestão de acesso do caixa.
+        Erros: NotFound; Forbidden; InvalidInput; Conflict("session_closed") ou Conflict("stale_revision").
+        Efeitos: grava valor contado, esperado e diferença; a sessão fechada não recebe pagamento nem movimento.
+        """
+        from django.core.exceptions import PermissionDenied
+
+        from skeleton.access.policies import authorized_queryset
+
+        counted = _amount(counted_amount, "counted_amount")
+        if not isinstance(note, str) or len(note) > 300:
+            raise InvalidInput({"note": [gettext("Use até 300 caracteres.")]})
+        session = common.row(actor, CashSession, session_id, field="session_id", write=True, lock=True)
+        common.check_revision(session, expected_revision)
+        if session.status != CashSession.Status.OPEN:
+            raise Conflict("session_closed", gettext("A sessão do caixa já está fechada."))
+        if session.opened_by_id != actor.pk:
+            try:
+                manages = (
+                    authorized_queryset(CashDesk, user=actor, action="manage_access")
+                    .filter(pk=session.desk_id)
+                    .exists()
+                )
+            except PermissionDenied:
+                manages = False
+            if not manages:
+                raise Forbidden(gettext("Fecha o caixa quem o abriu ou quem gere o acesso dele."))
+        expected = _expected_cash(session)
+        common.apply_changes(
+            session,
+            {
+                "status": CashSession.Status.CLOSED,
+                "closed_by_id": actor.pk,
+                "closed_at": timezone.now(),
+                "counted_amount": counted,
+                "expected_amount": expected,
+                "difference": counted - expected,
+                "note": note.strip(),
+            },
+        )
+        return session_info(session)
+
+    @service_method(read_only=True, since="0.1.0")
+    def session_report(self, *, actor: Any, session_id: UUID) -> SessionReport:
+        """Totals of a session: by payment method, supplies, withdrawals and the expected cash.
+
+        Autorização: leitura do caixa.
+        Erros: NotFound para sessão ilegível.
+        Efeitos: nenhum.
+        """
+        from django.db.models import Sum
+
+        from skeleton.access.policies import authorized_queryset
+
+        session = common.row(actor, CashSession, session_id, field="session_id", write=False)
+        movements = authorized_queryset(CashMovement, user=actor, action="read").filter(session=session)
+        totals = {row["kind"]: row["total"] for row in movements.values("kind").annotate(total=Sum("amount"))}
+        return SessionReport(
+            session_info(session),
+            _payments_by_method(actor, session),
+            totals.get("supply", 0) or 0,
+            totals.get("withdrawal", 0) or 0,
+            _expected_cash(session),
+            tuple(movement_info(row) for row in movements.order_by("at", "sysid")),
+        )
+
+    @service_method(read_only=True, since="0.1.0")
+    def sessions(
+        self,
+        *,
+        actor: Any,
+        desk_id: UUID | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> Page[SessionInfo]:
+        """Sessions of a cash desk, newest first.
+
+        Autorização: leitura do caixa.
+        Erros: NotFound; InvalidInput para datas sem fuso, cursor ou tamanho inválidos.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        desk = _default(actor, CashDesk, desk_id, field="desk_id")
+        rows = authorized_queryset(CashSession, user=actor, action="read").filter(desk=desk)
+        for value, name, lookup in ((start, "start", "opened_at__gte"), (end, "end", "opened_at__lt")):
+            if value is not None:
+                if not isinstance(value, datetime) or value.tzinfo is None:
+                    raise InvalidInput({name: [gettext("Informe data e hora com fuso.")]})
+                rows = rows.filter(**{lookup: value})
+        return paginate(
+            rows.order_by("-opened_at", "-sysid"),
+            convert=session_info,
+            cursor=cursor,
+            page_size=page_size,
+            key=("-opened_at", "-sysid"),
+        )

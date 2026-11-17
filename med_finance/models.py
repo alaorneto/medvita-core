@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from django.db import models
 from django.db.models import Q
+from django.utils.translation import gettext_lazy
 
 from skeleton.common.models import OrganizationRecord, SecuredRecord
 
@@ -80,3 +81,54 @@ class CashDesk(SecuredRecord):
 
     def __str__(self) -> str:
         return self.name
+
+
+class CashSession(OrganizationRecord):
+    """One opening of a cash desk, from opening to closing; payments belong to an open session."""
+
+    class Status(models.TextChoices):
+        OPEN = "open", gettext_lazy("Aberto")
+        CLOSED = "closed", gettext_lazy("Fechado")
+
+    desk = models.ForeignKey(CashDesk, on_delete=models.PROTECT, related_name="+")
+    opened_by = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, related_name="+")
+    opened_at = models.DateTimeField()
+    opening_amount = models.PositiveBigIntegerField(default=0)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.OPEN)
+    closed_by = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    closed_at = models.DateTimeField(null=True, blank=True)
+    counted_amount = models.PositiveBigIntegerField(null=True, blank=True)
+    expected_amount = models.BigIntegerField(null=True, blank=True)
+    difference = models.BigIntegerField(null=True, blank=True)
+    note = models.CharField(max_length=300, blank=True)
+    immutable_fields = ("desk_id", "opened_by_id", "opened_at", "opening_amount")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("desk",),
+                condition=Q(status="open", deleted_at__isnull=True),
+                name="med_finance_one_open_session",
+                violation_error_code="unique",
+            ),
+        ]
+        ordering = ("-opened_at", "sysid")
+
+
+class CashMovement(OrganizationRecord):
+    """A supply (cash put in) or a withdrawal (cash taken out) of an open session; posted to the ledger."""
+
+    class Kind(models.TextChoices):
+        SUPPLY = "supply", gettext_lazy("Suprimento")
+        WITHDRAWAL = "withdrawal", gettext_lazy("Sangria")
+
+    session = models.ForeignKey(CashSession, on_delete=models.PROTECT, related_name="+")
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    amount = models.PositiveBigIntegerField()
+    reason = models.CharField(max_length=200)
+    at = models.DateTimeField()
+    ledger_entry = models.UUIDField(null=True, blank=True)
+    immutable_fields = ("session_id", "kind", "amount", "reason", "at")
+
+    class Meta(OrganizationRecord.Meta):
+        ordering = ("at", "sysid")

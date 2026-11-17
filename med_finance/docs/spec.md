@@ -29,12 +29,25 @@ Valores sempre em inteiros de centavos.
 
 **`CashDesk`** (contêiner): `name`, `book` (o livro, imutável), `price_list` (a tabela padrão do caixa), `payment_accounts`, `is_default`.
 
+**`CashSession`** (derivada do caixa): `opened_by`, `opened_at`, `opening_amount` (imutáveis), `status` (aberto, fechado; uma sessão aberta por caixa), `closed_by`, `closed_at`, `counted_amount`, `expected_amount`, `difference`, `note`.
+
+**`CashMovement`** (derivada da sessão, imutável): `kind` (suprimento ou sangria), `amount`, `reason`, `at`, `ledger_entry` (o lançamento no livro).
+
 ### Preços
 
 `price_items` lista os itens (da tabela padrão, sem `price_list_id`); `price_for(code)` devolve o item ativo do código ou `None`. `add_price_item` exige alteração na tabela; código repetido é `Conflict`. `update_price_item` muda descrição, valor ou atividade, com CAS; o código nunca muda.
+
+### Caixa
+
+- `open_session` abre uma sessão do caixa (alteração no caixa); outra aberta é `Conflict("session_already_open")`, também na corrida (restrição única).
+- `add_movement` grava suprimento ou sangria e lança no livro pela regra `med_finance.cash_supply` (débito em dinheiro, crédito em aportes e retiradas) ou `cash_withdrawal` (o inverso), autorizada pelo próprio movimento; sangria maior que o dinheiro esperado é `Conflict("insufficient_cash")`; sessão fechada não recebe movimento.
+- Dinheiro esperado = abertura + pagamentos em dinheiro não estornados + suprimentos − sangrias. `close_session` grava contado, esperado e diferença; a diferença não impede fechar. Fecha quem abriu ou quem gere o acesso do caixa.
+- `session_report` soma por forma de pagamento, suprimentos, sangrias e o esperado.
+- O livro recusando (período travado, chave sem conta) vira `Conflict("ledger_rejected")` e nada fica pela metade.
 
 ## Acceptance
 
 - O `setup` prepara o livro com as chaves do financeiro vinculadas, é idempotente pela chave e só o administrador o faz; com o livro desativado, nada é criado.
 - A recepção consulta preços e não os altera; a organização B não vê os preços da A.
 - Valor negativo, fracionário ou em texto é recusado.
+- Abrir, suprir, sangrar e fechar conferem o esperado e a diferença; cada movimento tem um lançamento no livro.

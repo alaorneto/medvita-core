@@ -88,3 +88,62 @@ def _has_desk(*, actor) -> bool:
     from .service_api import FinanceService
 
     return bool(FinanceService().desks(actor=actor))
+
+
+def register_cash_tables() -> None:
+    from skeleton.contrib.ledger.service_api import Key, PostingRule, RuleLine, register_posting_rule
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import CashMovement, CashSession
+
+    register(
+        TableSpec(
+            model=CashSession,
+            description=_("Sessões de caixa: abertura, fechamento e a diferença contada."),
+            label=_("Sessões de caixa"),
+            scope="organization",
+            read_fields=(
+                "desk",
+                "opened_by",
+                "opened_at",
+                "opening_amount",
+                "status",
+                "closed_by",
+                "closed_at",
+                "counted_amount",
+                "expected_amount",
+                "difference",
+                "note",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="desk",
+        )
+    )
+    register(
+        TableSpec(
+            model=CashMovement,
+            description=_("Suprimentos e sangrias de uma sessão de caixa, lançados no livro."),
+            label=_("Movimentos de caixa"),
+            scope="organization",
+            read_fields=("session", "kind", "amount", "reason", "at", "ledger_entry"),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="session",
+        )
+    )
+    for code, label, debit, credit in (
+        ("cash_supply", "Suprimento de caixa", "med_finance.cash", "med_finance.owner_transfers"),
+        ("cash_withdrawal", "Sangria de caixa", "med_finance.owner_transfers", "med_finance.cash"),
+    ):
+        register_posting_rule(
+            PostingRule(
+                code=f"{APP_LABEL}.{code}",
+                label=label,
+                source_table_key="med_finance.cashmovement",
+                source_action="update",
+                lines=(RuleLine("debit", Key(debit), "amount"), RuleLine("credit", Key(credit), "amount")),
+            )
+        )
