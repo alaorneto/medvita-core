@@ -147,3 +147,80 @@ def register_cash_tables() -> None:
                 lines=(RuleLine("debit", Key(debit), "amount"), RuleLine("credit", Key(credit), "amount")),
             )
         )
+
+
+CHARGE_SEQUENCE = "med_finance.charge"
+CHARGE_EVENTS = ("confirmed", "paid", "cancelled")
+
+
+def register_charges() -> None:
+    from skeleton.events.registry import EventType, register_event_type
+    from skeleton.sequences.registry import SequenceSpec, register_sequence
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import Charge, ChargeItem
+
+    register(
+        TableSpec(
+            model=Charge,
+            description=_("Contas do paciente no caixa; confirmadas viram títulos a receber no livro."),
+            label=_("Contas"),
+            scope="organization",
+            read_fields=(
+                "desk",
+                "code",
+                "patient",
+                "payer_name",
+                "payer_document",
+                "status",
+                "total",
+                "paid_total",
+                "due_date",
+                "origin_app",
+                "origin_key",
+                "appointment",
+                "ledger_title",
+                "note",
+                "confirmed_at",
+                "cancelled_at",
+                "cancel_reason",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            personal_fields=("payer_name", "payer_document"),
+            expose_api=False,
+            access_parent="desk",
+        )
+    )
+    register(
+        TableSpec(
+            model=ChargeItem,
+            description=_("Itens de uma conta."),
+            label=_("Itens de conta"),
+            scope="organization",
+            read_fields=(
+                "charge",
+                "price_item",
+                "code",
+                "description",
+                "quantity",
+                "unit_amount",
+                "discount_amount",
+                "total",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="charge",
+        )
+    )
+    register_sequence(SequenceSpec(key=CHARGE_SEQUENCE, period="none", template="C{number:08d}", owner_app=APP_LABEL))
+    for name in CHARGE_EVENTS:
+        register_event_type(
+            EventType(
+                code=f"{APP_LABEL}.charge_{name}",
+                table_key="med_finance.charge",
+                payload_fields=("code", "desk", "patient", "status", "total", "origin_app", "origin_key"),
+                owner_app=APP_LABEL,
+            )
+        )

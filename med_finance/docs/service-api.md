@@ -16,6 +16,14 @@ Referência de `FinanceService` (`applications.med_finance.service_api`). O cont
 
 ### `FinanceService`
 
+#### `add_item(*, actor, charge_id, item, expected_revision) -> ChargeDetail`
+
+Add a line to a draft charge, with CAS on the charge.
+
+- **Autorização:** alteração no caixa.
+- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("not_draft") ou Conflict("stale_revision").
+- **Efeitos:** grava o item e recalcula o total.
+
 #### `add_movement(*, actor, session_id, kind, amount, reason, idempotency_key) -> MovementInfo`
 
 Record a supply or a withdrawal of cash in an open session and post it to the ledger.
@@ -32,6 +40,38 @@ Add an item to a price list (the default one when not informed).
 - **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo; Conflict("integrity_conflict") para código repetido na tabela.
 - **Efeitos:** grava o item. A mesma chave devolve o já gravado.
 
+#### `cancel_charge(*, actor, charge_id, reason, expected_revision) -> ChargeDetail`
+
+Cancel a charge without registered payments (reverse them first); its title is cancelled.
+
+- **Autorização:** alteração no caixa.
+- **Erros:** NotFound; Forbidden; InvalidInput sem motivo; Conflict("has_payments"), Conflict("cancelled"), Conflict("stale_revision") ou Conflict("ledger_rejected").
+- **Efeitos:** grava a situação e o motivo, cancela o título no livro e publica ``charge_cancelled``.
+
+#### `charge(*, actor, charge_id) -> ChargeDetail`
+
+One charge with its items.
+
+- **Autorização:** leitura do caixa.
+- **Erros:** NotFound para conta inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
+#### `charges(*, actor, patient_id=None, status=None, desk_id=None, start=None, end=None, cursor=None, page_size=50) -> Page[ChargeInfo]`
+
+Charges of the desks the actor reads, newest first, filtered by patient, status, desk or due date.
+
+- **Autorização:** leitura de cada caixa.
+- **Erros:** InvalidInput para situação, datas, cursor ou tamanho inválidos.
+- **Efeitos:** nenhum.
+
+#### `charges_for_origin(*, actor, origin_app, origin_key) -> tuple[ChargeInfo, ...]`
+
+The charge another app created for one of its records (an appointment, for example).
+
+- **Autorização:** leitura do caixa.
+- **Erros:** nenhum além do contrato.
+- **Efeitos:** nenhum.
+
 #### `close_session(*, actor, session_id, counted_amount, expected_revision, note='') -> SessionInfo`
 
 Close a session with the counted cash; the difference to the expected cash is recorded.
@@ -39,6 +79,22 @@ Close a session with the counted cash; the difference to the expected cash is re
 - **Autorização:** alteração no caixa, e ser quem abriu a sessão ou ter a gestão de acesso do caixa.
 - **Erros:** NotFound; Forbidden; InvalidInput; Conflict("session_closed") ou Conflict("stale_revision").
 - **Efeitos:** grava valor contado, esperado e diferença; a sessão fechada não recebe pagamento nem movimento.
+
+#### `confirm_charge(*, actor, charge_id, expected_revision) -> ChargeDetail`
+
+Confirm a draft charge: its items freeze and it becomes a receivable title in the ledger.
+
+- **Autorização:** alteração no caixa (e, pelo livro, alteração na conta, que é a origem do título).
+- **Erros:** NotFound; Forbidden; InvalidInput para total zero; Conflict("not_draft"), Conflict("stale_revision") ou Conflict("ledger_rejected").
+- **Efeitos:** cria o título, grava a situação "em aberto" e publica ``charge_confirmed``.
+
+#### `create_charge(*, actor, patient_id, items, desk_id=None, due_date=None, payer_name='', payer_document='', appointment_id=None, origin_app='', origin_key='', confirm=True, note='', idempotency_key) -> ChargeDetail`
+
+Create a charge of the patient at a desk; confirmed (the default), it becomes a receivable title.
+
+- **Autorização:** alteração no caixa e leitura do paciente (e da consulta, quando informada).
+- **Erros:** NotFound; Forbidden; InvalidInput para itens, valores, pagador, origem não registrada, consulta de outro paciente ou total zero ao confirmar; Conflict("ledger_rejected").
+- **Efeitos:** grava a conta e os itens; ao confirmar, cria o título no livro (sem nome nem documento do paciente, só ``party_ref``) e publica ``charge_confirmed``. A mesma chave devolve a já criada.
 
 #### `current_session(*, actor, desk_id=None) -> SessionInfo | None`
 
@@ -64,6 +120,14 @@ Open a session of the cash desk with the cash in the drawer.
 - **Erros:** NotFound; Forbidden; InvalidInput para valor inválido; Conflict("session_already_open").
 - **Efeitos:** grava a sessão aberta. A mesma chave devolve a já aberta.
 
+#### `patient_balance(*, actor, patient_id) -> int`
+
+What the patient still owes in the open and partially paid charges the actor reads (centavos).
+
+- **Autorização:** leitura de cada caixa.
+- **Erros:** InvalidInput para identificador inválido.
+- **Efeitos:** nenhum.
+
 #### `price_for(*, actor, code, price_list_id=None) -> PriceItemInfo | None`
 
 The active item of a code (the appointment type's billing code), or ``None``.
@@ -87,6 +151,14 @@ The price lists the actor reads, the default first.
 - **Autorização:** leitura de cada tabela de preços.
 - **Erros:** nenhum além do contrato.
 - **Efeitos:** nenhum.
+
+#### `remove_item(*, actor, charge_id, item_id, expected_revision) -> ChargeDetail`
+
+Remove a line of a draft charge, with CAS on the charge.
+
+- **Autorização:** alteração no caixa.
+- **Erros:** NotFound; Forbidden; Conflict("not_draft") ou Conflict("stale_revision").
+- **Efeitos:** exclusão lógica do item e novo total.
 
 #### `session_report(*, actor, session_id) -> SessionReport`
 
@@ -121,6 +193,70 @@ Change the description, amount or activity of a price item, with CAS (the code n
 - **Efeitos:** grava só os campos que mudaram; contas já confirmadas não mudam.
 
 ## DTOs
+
+### `ChargeDetail`
+
+| Campo | Tipo |
+|---|---|
+| `charge` | `ChargeInfo` |
+| `items` | `tuple[ChargeItemInfo, ...]` |
+| `writable` | `bool` |
+
+### `ChargeInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `desk_id` | `UUID` |
+| `code` | `str` |
+| `patient_id` | `UUID` |
+| `payer_name` | `str` |
+| `payer_document` | `str` |
+| `status` | `str` |
+| `total` | `int` |
+| `paid_total` | `int` |
+| `balance` | `int` |
+| `due_date` | `date` |
+| `origin_app` | `str` |
+| `origin_key` | `str` |
+| `appointment_id` | `UUID | None` |
+| `ledger_title_id` | `UUID | None` |
+| `note` | `str` |
+| `confirmed_at` | `datetime | None` |
+| `cancelled_at` | `datetime | None` |
+| `cancel_reason` | `str` |
+| `revision` | `int` |
+
+### `ChargeItemInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `code` | `str` |
+| `description` | `str` |
+| `quantity` | `int` |
+| `unit_amount` | `int` |
+| `discount_amount` | `int` |
+| `total` | `int` |
+
+### `ChargeItemInput`
+
+A line to bill: with ``code`` and no ``unit_amount``, the price comes from the desk's price list.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `description` | `str` |
+| `quantity` | `int` |
+| `unit_amount` | `int | None` |
+| `discount_amount` | `int` |
+
+### `ChargeOrigin`
+
+| Campo | Tipo |
+|---|---|
+| `app_label` | `str` |
+| `label` | `Any` |
 
 ### `DeskInfo`
 

@@ -151,7 +151,7 @@ def _model(name):
     return apps.get_model("med_finance", name)
 
 
-@pytest.mark.parametrize("table", ["cashsession", "cashmovement"])
+@pytest.mark.parametrize("table", ["cashsession", "cashmovement", "charge", "chargeitem"])
 def test_desk_tables_follow_the_desk(skeleton_db, table):
     for label in APPS:
         open_app(label)

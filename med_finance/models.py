@@ -132,3 +132,71 @@ class CashMovement(OrganizationRecord):
 
     class Meta(OrganizationRecord.Meta):
         ordering = ("at", "sysid")
+
+
+class Charge(OrganizationRecord):
+    """The patient's bill at a desk: a draft until confirmed, when it becomes a receivable title in the ledger."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", gettext_lazy("Rascunho")
+        OPEN = "open", gettext_lazy("Em aberto")
+        PARTIALLY_PAID = "partially_paid", gettext_lazy("Parcialmente paga")
+        PAID = "paid", gettext_lazy("Paga")
+        CANCELLED = "cancelled", gettext_lazy("Cancelada")
+
+    desk = models.ForeignKey(CashDesk, on_delete=models.PROTECT, related_name="+")
+    code = models.CharField(max_length=20)
+    patient = models.ForeignKey("med_patients.Patient", on_delete=models.PROTECT, related_name="med_finance_charges")
+    payer_name = models.CharField(max_length=200, blank=True)
+    payer_document = models.CharField(max_length=14, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
+    total = models.PositiveBigIntegerField(default=0)
+    paid_total = models.PositiveBigIntegerField(default=0)
+    due_date = models.DateField()
+    origin_app = models.CharField(max_length=40, blank=True)
+    origin_key = models.CharField(max_length=80, blank=True)
+    appointment = models.ForeignKey(
+        "med_scheduling.Appointment", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    ledger_title = models.UUIDField(null=True, blank=True)
+    note = models.CharField(max_length=300, blank=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.CharField(max_length=200, blank=True)
+    immutable_fields = ("desk_id", "code", "patient_id", "origin_app", "origin_key", "appointment_id")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(fields=("organization", "code"), name="med_finance_charge_code"),
+            models.UniqueConstraint(
+                fields=("organization", "origin_app", "origin_key"),
+                condition=~Q(origin_key=""),
+                name="med_finance_one_charge_per_origin",
+                violation_error_code="unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(payer_document__regex=r"^([0-9]{11}|[0-9]{14})?$"), name="med_finance_payer_document"
+            ),
+        ]
+        indexes = [models.Index(fields=("organization", "patient", "status"), name="med_finance_charge_patient")]
+        ordering = ("-created_at", "sysid")
+
+
+class ChargeItem(OrganizationRecord):
+    """A line of a charge; changes only while the charge is a draft."""
+
+    charge = models.ForeignKey(Charge, on_delete=models.PROTECT, related_name="+")
+    price_item = models.ForeignKey(PriceItem, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    code = models.CharField(max_length=40, blank=True)
+    description = models.CharField(max_length=200)
+    quantity = models.PositiveIntegerField(default=1)
+    unit_amount = models.PositiveBigIntegerField()
+    discount_amount = models.PositiveBigIntegerField(default=0)
+    total = models.PositiveBigIntegerField(default=0)
+    immutable_fields = ("charge_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(condition=Q(quantity__gte=1), name="med_finance_item_quantity"),
+        ]
+        ordering = ("created_at", "sysid")

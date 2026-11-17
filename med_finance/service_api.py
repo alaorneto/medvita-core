@@ -8,7 +8,7 @@ reports; this app is the front desk: prices, charges, payments, cash sessions an
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -29,7 +29,8 @@ from skeleton.service_api import (
 )
 
 from . import common
-from .models import CashDesk, CashMovement, CashSession, PriceItem, PriceList
+from .extension import ChargeOrigin, register_charge_origin
+from .models import CashDesk, CashMovement, CashSession, Charge, ChargeItem, PriceItem, PriceList
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.finance"
@@ -40,6 +41,12 @@ MEMBER_TABLES = (PRICE_LIST_TABLE, DESK_TABLE)
 MAX_AMOUNT = 10**11  # R$ 1 bilhão em centavos: a sanity bound, not a business rule.
 
 __all__ = [
+    "ChargeDetail",
+    "ChargeInfo",
+    "ChargeItemInfo",
+    "ChargeItemInput",
+    "ChargeOrigin",
+    "register_charge_origin",
     "MethodTotal",
     "MovementInfo",
     "SessionInfo",
@@ -201,6 +208,206 @@ class _ledger_errors:
         return False
 
 
+@dataclass(frozen=True, slots=True)
+class ChargeItemInput:
+    """A line to bill: with ``code`` and no ``unit_amount``, the price comes from the desk's price list."""
+
+    code: str = ""
+    description: str = ""
+    quantity: int = 1
+    unit_amount: int | None = None
+    discount_amount: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeItemInfo:
+    sysid: UUID
+    code: str
+    description: str
+    quantity: int
+    unit_amount: int
+    discount_amount: int
+    total: int
+
+
+def charge_item_info(row: ChargeItem) -> ChargeItemInfo:
+    return ChargeItemInfo(
+        row.pk, row.code, row.description, row.quantity, row.unit_amount, row.discount_amount, row.total
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeInfo:
+    sysid: UUID
+    desk_id: UUID
+    code: str
+    patient_id: UUID
+    payer_name: str
+    payer_document: str
+    status: str
+    total: int
+    paid_total: int
+    balance: int
+    due_date: date
+    origin_app: str
+    origin_key: str
+    appointment_id: UUID | None
+    ledger_title_id: UUID | None
+    note: str
+    confirmed_at: datetime | None
+    cancelled_at: datetime | None
+    cancel_reason: str
+    revision: int
+
+
+def charge_info(row: Charge) -> ChargeInfo:
+    return ChargeInfo(
+        row.pk,
+        row.desk_id,
+        row.code,
+        row.patient_id,
+        row.payer_name,
+        row.payer_document,
+        row.status,
+        row.total,
+        row.paid_total,
+        row.total - row.paid_total if row.status in ("open", "partially_paid") else 0,
+        row.due_date,
+        row.origin_app,
+        row.origin_key,
+        row.appointment_id,
+        row.ledger_title,
+        row.note,
+        as_utc(row.confirmed_at) if row.confirmed_at else None,
+        as_utc(row.cancelled_at) if row.cancelled_at else None,
+        row.cancel_reason,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeDetail:
+    charge: ChargeInfo
+    items: tuple[ChargeItemInfo, ...]
+    writable: bool
+
+
+CHARGE_EVENT_PAYLOAD = ("code", "desk", "patient", "status", "total", "origin_app", "origin_key")
+
+
+def _publish_charge(actor: Any, suffix: str, row: Charge) -> None:
+    from skeleton.service_api.events import EventService
+
+    EventService().publish(
+        actor=actor,
+        event_type=f"med_finance.charge_{suffix}",
+        record_id=row.pk,
+        data=(
+            ("code", row.code),
+            ("desk", str(row.desk_id)),
+            ("patient", str(row.patient_id)),
+            ("status", row.status),
+            ("total", row.total),
+            ("origin_app", row.origin_app),
+            ("origin_key", row.origin_key),
+        ),
+    )
+
+
+def _has_active_payments(charge: Charge) -> bool:
+    """Whether the charge has a registered (not reversed) payment; none until payments exist."""
+    return False
+
+
+def _clean_payer(name: object, document: object) -> tuple[str, str]:
+    from .validators import digits, valid_tax_id
+
+    if not isinstance(name, str) or len(name) > 200:
+        raise InvalidInput({"payer_name": [gettext("Use até 200 caracteres.")]})
+    clean = digits(document)
+    if not valid_tax_id(clean):
+        raise InvalidInput({"payer_document": [gettext("Informe um CPF ou CNPJ válido.")]})
+    return name.strip(), clean
+
+
+def _item_rows(actor: Any, charge: Charge, desk: CashDesk, items: object) -> list[ChargeItem]:
+    from skeleton.access.policies import authorized_queryset
+
+    if not isinstance(items, tuple) or not 1 <= len(items) <= 50:
+        raise InvalidInput({"items": [gettext("Informe de 1 a 50 itens.")]})
+    rows = []
+    for item in items:
+        if not isinstance(item, ChargeItemInput):
+            raise InvalidInput({"items": [gettext("Use ChargeItemInput.")]})
+        if type(item.quantity) is not int or not 1 <= item.quantity <= 1000:
+            raise InvalidInput({"quantity": [gettext("Use uma quantidade de 1 a 1000.")]})
+        price = None
+        if item.code:
+            if desk.price_list_id is None:
+                raise InvalidInput({"code": [gettext("O caixa não tem tabela de preços.")]})
+            price = (
+                authorized_queryset(PriceItem, user=actor, action="read")
+                .filter(price_list_id=desk.price_list_id, code=item.code, is_active=True)
+                .first()
+            )
+            if price is None and item.unit_amount is None:
+                raise InvalidInput({"code": [gettext("Código sem preço ativo na tabela do caixa.")]})
+        unit = _amount(item.unit_amount if item.unit_amount is not None else price.amount, "unit_amount")
+        discount = _amount(item.discount_amount, "discount_amount")
+        if discount > unit * item.quantity:
+            raise InvalidInput({"discount_amount": [gettext("O desconto passa o valor do item.")]})
+        description = (item.description or (price.description if price else "")).strip()
+        if not description or len(description) > 200:
+            raise InvalidInput({"description": [gettext("Informe a descrição do item (até 200 caracteres).")]})
+        rows.append(
+            ChargeItem(
+                organization_id=charge.organization_id,
+                charge=charge,
+                price_item=price,
+                code=item.code[:40],
+                description=description,
+                quantity=item.quantity,
+                unit_amount=unit,
+                discount_amount=discount,
+                total=unit * item.quantity - discount,
+            )
+        )
+    return rows
+
+
+def _recalculate(charge: Charge) -> None:
+    from django.db.models import Sum
+
+    total = ChargeItem.objects.filter(charge=charge).aggregate(total=Sum("total"))["total"] or 0
+    if total > MAX_AMOUNT:
+        raise InvalidInput({"items": [gettext("O total passa o limite.")]})
+    charge.total = total
+    charge.save(update_fields={"total"})
+
+
+def _confirm(actor: Any, charge: Charge) -> None:
+    from . import ledger_bridge
+
+    if charge.total <= 0:
+        raise InvalidInput({"items": [gettext("A conta precisa de um total maior que zero.")]})
+    with _ledger_errors():
+        charge.ledger_title = ledger_bridge.create_title(
+            actor,
+            charge=charge,
+            desk=charge.desk,
+            description=gettext("Conta %(code)s") % {"code": charge.code},
+            idempotency_key=f"med_finance:charge:{charge.pk}",
+        )
+    charge.status = Charge.Status.OPEN
+    charge.confirmed_at = timezone.now()
+    charge.save(update_fields={"ledger_title", "status", "confirmed_at"})
+    _publish_charge(actor, "confirmed", charge)
+
+
+def _charge(actor: Any, charge_id: object, *, write: bool = False, lock: bool = False) -> Charge:
+    return common.row(actor, Charge, charge_id, field="charge_id", write=write, lock=lock)
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -288,6 +495,17 @@ def _grant(actor: Any, table: str, record_id: UUID, groups: tuple[UUID, ...], ac
     for group in groups:
         for action in actions:
             access.grant_record_access(actor=actor, table_key=table, record_id=record_id, action=action, group_id=group)
+
+
+def _charge_detail(actor: Any, charge: Charge) -> ChargeDetail:
+    from skeleton.access.policies import authorized_queryset
+
+    items = authorized_queryset(ChargeItem, user=actor, action="read").filter(charge=charge)
+    return ChargeDetail(
+        charge_info(charge),
+        tuple(charge_item_info(row) for row in items.order_by("created_at", "sysid")),
+        charge.desk_id in _writable_ids(actor, CashDesk),
+    )
 
 
 # ------------------------------------------------------------------------------------ service
@@ -714,3 +932,262 @@ class FinanceService(ServiceAPI):
             page_size=page_size,
             key=("-opened_at", "-sysid"),
         )
+
+    # ------------------------------------------------------------------ charges
+
+    @service_method(read_only=False, since="0.1.0")
+    def create_charge(
+        self,
+        *,
+        actor: Any,
+        patient_id: UUID,
+        items: tuple[ChargeItemInput, ...],
+        desk_id: UUID | None = None,
+        due_date: date | None = None,
+        payer_name: str = "",
+        payer_document: str = "",
+        appointment_id: UUID | None = None,
+        origin_app: str = "",
+        origin_key: str = "",
+        confirm: bool = True,
+        note: str = "",
+        idempotency_key: str,
+    ) -> ChargeDetail:
+        """Create a charge of the patient at a desk; confirmed (the default), it becomes a receivable title.
+
+        With ``origin_app`` (a registered charge origin) and ``origin_key``, the same origin returns
+        the same charge.
+        Autorização: alteração no caixa e leitura do paciente (e da consulta, quando informada).
+        Erros: NotFound; Forbidden; InvalidInput para itens, valores, pagador, origem não registrada,
+        consulta de outro paciente ou total zero ao confirmar; Conflict("ledger_rejected").
+        Efeitos: grava a conta e os itens; ao confirmar, cria o título no livro (sem nome nem
+        documento do paciente, só ``party_ref``) e publica ``charge_confirmed``. A mesma chave
+        devolve a já criada.
+        """
+        from applications.med_patients.service_api import PatientService
+        from skeleton.access.policies import require_parent_action
+        from skeleton.service_api.sequences import SequenceService
+
+        from .extension import charge_origin
+        from .registration import CHARGE_SEQUENCE
+
+        key = common.key(idempotency_key)
+        if origin_app or origin_key:
+            if charge_origin(origin_app) is None:
+                raise InvalidInput({"origin_app": [gettext("Origem de conta não registrada.")]})
+            if not isinstance(origin_key, str) or not 1 <= len(origin_key) <= 80:
+                raise InvalidInput({"origin_key": [gettext("Informe a chave da origem (até 80 caracteres).")]})
+            existing = Charge.objects.filter(origin_app=origin_app, origin_key=origin_key).first()
+            if existing is not None:
+                return _charge_detail(actor, existing)
+        sysid = common.deterministic_id("charge", actor, key)
+        existing = Charge.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return _charge_detail(actor, existing)
+        name, document = _clean_payer(payer_name, payer_document)
+        if not isinstance(note, str) or len(note) > 300:
+            raise InvalidInput({"note": [gettext("Use até 300 caracteres.")]})
+        if due_date is not None and not isinstance(due_date, date):
+            raise InvalidInput({"due_date": [gettext("Informe uma data.")]})
+        desk = _default(actor, CashDesk, desk_id, field="desk_id", write=True)
+        require_parent_action(Charge, desk, user=actor, action="create")
+        patient = PatientService().summary(actor=actor, patient_id=as_uuid(patient_id, field="patient_id"))
+        appointment = None
+        if appointment_id is not None:
+            from applications.med_scheduling.service_api import SchedulingService
+
+            appointment = (
+                SchedulingService()
+                .appointment(actor=actor, appointment_id=as_uuid(appointment_id, field="appointment_id"))
+                .appointment
+            )
+            if appointment.patient_id != patient.sysid:
+                raise InvalidInput({"appointment_id": [gettext("A consulta é de outro paciente.")]})
+        number = SequenceService().next_number(actor=actor, key=CHARGE_SEQUENCE)
+        charge = Charge(
+            sysid=sysid,
+            organization_id=desk.organization_id,
+            desk=desk,
+            code=number.formatted,
+            patient_id=patient.sysid,
+            payer_name=name,
+            payer_document=document,
+            due_date=due_date or timezone.localdate(),
+            origin_app=origin_app,
+            origin_key=origin_key,
+            appointment_id=appointment.sysid if appointment else None,
+            note=note.strip(),
+        )
+        charge.save()
+        for row in _item_rows(actor, charge, desk, items):
+            row.save()
+        _recalculate(charge)
+        if confirm:
+            _confirm(actor, charge)
+        return _charge_detail(actor, charge)
+
+    @service_method(read_only=False, since="0.1.0")
+    def add_item(self, *, actor: Any, charge_id: UUID, item: ChargeItemInput, expected_revision: int) -> ChargeDetail:
+        """Add a line to a draft charge, with CAS on the charge.
+
+        Autorização: alteração no caixa.
+        Erros: NotFound; Forbidden; InvalidInput; Conflict("not_draft") ou Conflict("stale_revision").
+        Efeitos: grava o item e recalcula o total.
+        """
+        charge = _charge(actor, charge_id, write=True, lock=True)
+        common.check_revision(charge, expected_revision)
+        if charge.status != Charge.Status.DRAFT:
+            raise Conflict("not_draft", gettext("Só a conta em rascunho muda de itens."))
+        for row in _item_rows(actor, charge, charge.desk, (item,)):
+            row.save()
+        _recalculate(charge)
+        return _charge_detail(actor, charge)
+
+    @service_method(read_only=False, since="0.1.0")
+    def remove_item(self, *, actor: Any, charge_id: UUID, item_id: UUID, expected_revision: int) -> ChargeDetail:
+        """Remove a line of a draft charge, with CAS on the charge.
+
+        Autorização: alteração no caixa.
+        Erros: NotFound; Forbidden; Conflict("not_draft") ou Conflict("stale_revision").
+        Efeitos: exclusão lógica do item e novo total.
+        """
+        charge = _charge(actor, charge_id, write=True, lock=True)
+        common.check_revision(charge, expected_revision)
+        if charge.status != Charge.Status.DRAFT:
+            raise Conflict("not_draft", gettext("Só a conta em rascunho muda de itens."))
+        row = ChargeItem.objects.filter(charge=charge, pk=as_uuid(item_id, field="item_id")).first()
+        if row is None:
+            raise NotFound()
+        row.delete()
+        _recalculate(charge)
+        return _charge_detail(actor, charge)
+
+    @service_method(read_only=False, since="0.1.0")
+    def confirm_charge(self, *, actor: Any, charge_id: UUID, expected_revision: int) -> ChargeDetail:
+        """Confirm a draft charge: its items freeze and it becomes a receivable title in the ledger.
+
+        Autorização: alteração no caixa (e, pelo livro, alteração na conta, que é a origem do título).
+        Erros: NotFound; Forbidden; InvalidInput para total zero; Conflict("not_draft"),
+        Conflict("stale_revision") ou Conflict("ledger_rejected").
+        Efeitos: cria o título, grava a situação "em aberto" e publica ``charge_confirmed``.
+        """
+        charge = _charge(actor, charge_id, write=True, lock=True)
+        common.check_revision(charge, expected_revision)
+        if charge.status != Charge.Status.DRAFT:
+            raise Conflict("not_draft", gettext("A conta já foi confirmada ou cancelada."))
+        _confirm(actor, charge)
+        return _charge_detail(actor, charge)
+
+    @service_method(read_only=False, since="0.1.0")
+    def cancel_charge(self, *, actor: Any, charge_id: UUID, reason: str, expected_revision: int) -> ChargeDetail:
+        """Cancel a charge without registered payments (reverse them first); its title is cancelled.
+
+        Autorização: alteração no caixa.
+        Erros: NotFound; Forbidden; InvalidInput sem motivo; Conflict("has_payments"),
+        Conflict("cancelled"), Conflict("stale_revision") ou Conflict("ledger_rejected").
+        Efeitos: grava a situação e o motivo, cancela o título no livro e publica ``charge_cancelled``.
+        """
+        from . import ledger_bridge
+
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 200:
+            raise InvalidInput({"reason": [gettext("Informe o motivo (até 200 caracteres).")]})
+        charge = _charge(actor, charge_id, write=True, lock=True)
+        common.check_revision(charge, expected_revision)
+        if charge.status in (Charge.Status.CANCELLED, Charge.Status.PAID):
+            raise Conflict("cancelled", gettext("A conta já foi cancelada ou paga."))
+        if _has_active_payments(charge):
+            raise Conflict("has_payments", gettext("Estorne os pagamentos antes de cancelar a conta."))
+        if charge.ledger_title:
+            with _ledger_errors():
+                ledger_bridge.cancel_title(actor, title_id=charge.ledger_title, reason=reason.strip())
+        common.apply_changes(
+            charge,
+            {"status": Charge.Status.CANCELLED, "cancelled_at": timezone.now(), "cancel_reason": reason.strip()},
+        )
+        _publish_charge(actor, "cancelled", charge)
+        return _charge_detail(actor, charge)
+
+    @service_method(read_only=True, since="0.1.0")
+    def charge(self, *, actor: Any, charge_id: UUID) -> ChargeDetail:
+        """One charge with its items.
+
+        Autorização: leitura do caixa.
+        Erros: NotFound para conta inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        return _charge_detail(actor, _charge(actor, charge_id))
+
+    @service_method(read_only=True, since="0.1.0")
+    def charges(
+        self,
+        *,
+        actor: Any,
+        patient_id: UUID | None = None,
+        status: str | None = None,
+        desk_id: UUID | None = None,
+        start: date | None = None,
+        end: date | None = None,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> Page[ChargeInfo]:
+        """Charges of the desks the actor reads, newest first, filtered by patient, status, desk or due date.
+
+        Autorização: leitura de cada caixa.
+        Erros: InvalidInput para situação, datas, cursor ou tamanho inválidos.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        rows = authorized_queryset(Charge, user=actor, action="read")
+        if patient_id is not None:
+            rows = rows.filter(patient_id=as_uuid(patient_id, field="patient_id"))
+        if desk_id is not None:
+            rows = rows.filter(desk_id=as_uuid(desk_id, field="desk_id"))
+        if status is not None:
+            if status not in Charge.Status.values:
+                raise InvalidInput({"status": [gettext("Situação desconhecida.")]})
+            rows = rows.filter(status=status)
+        for value, name, lookup in ((start, "start", "due_date__gte"), (end, "end", "due_date__lte")):
+            if value is not None:
+                if not isinstance(value, date):
+                    raise InvalidInput({name: [gettext("Informe uma data.")]})
+                rows = rows.filter(**{lookup: value})
+        return paginate(
+            rows.order_by("-created_at", "-sysid"),
+            convert=charge_info,
+            cursor=cursor,
+            page_size=page_size,
+            key=("-created_at", "-sysid"),
+        )
+
+    @service_method(read_only=True, since="0.1.0")
+    def charges_for_origin(self, *, actor: Any, origin_app: str, origin_key: str) -> tuple[ChargeInfo, ...]:
+        """The charge another app created for one of its records (an appointment, for example).
+
+        Autorização: leitura do caixa.
+        Erros: nenhum além do contrato.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        rows = authorized_queryset(Charge, user=actor, action="read").filter(
+            origin_app=str(origin_app), origin_key=str(origin_key)
+        )
+        return tuple(charge_info(row) for row in rows[:10])
+
+    @service_method(read_only=True, since="0.1.0")
+    def patient_balance(self, *, actor: Any, patient_id: UUID) -> int:
+        """What the patient still owes in the open and partially paid charges the actor reads (centavos).
+
+        Autorização: leitura de cada caixa.
+        Erros: InvalidInput para identificador inválido.
+        Efeitos: nenhum.
+        """
+        from django.db.models import F, Sum
+
+        from skeleton.access.policies import authorized_queryset
+
+        rows = authorized_queryset(Charge, user=actor, action="read").filter(
+            patient_id=as_uuid(patient_id, field="patient_id"), status__in=("open", "partially_paid")
+        )
+        return int(rows.aggregate(total=Sum(F("total") - F("paid_total")))["total"] or 0)
