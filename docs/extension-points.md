@@ -69,4 +69,12 @@ class MedExampleConfig(AppConfig):
         register_consumer("med_records.encounter_signed", "med_example.note_signed", note_signed_encounter)
 ```
 
-A app de referência executável chega com o epic de integração (`tests/apps/med_example/`).
+A app de referência executável está em [`tests/apps/med_example/`](../tests/apps/med_example/): ela usa **todos** os pontos de extensão (aba com `visible` opcional, linha do tempo, finalidade de consentimento, guarda de retenção, relatório do titular, passo de configuração, ação de consulta, tipo de seção, tipo de documento, origem de conta, consumidores de `appointment_completed` e `encounter_signed`, verificação do selo) sem alterar nenhuma das quatro apps, e os testes dela (`tests/apps/med_example/tests/`) provam cada um com a app ativa e desativada. Ela entra em `SKELETON_DEV_APPS` nos testes e nunca é empacotada.
+
+### Como criar um add-on
+
+1. Crie a app no repositório dela, com `skeleton_startapp`, e declare em `dependencies` do manifesto as apps da suíte que ela usa, com a faixa da versão corrente.
+2. Importe das apps da suíte só o `service_api` (o check E019 recusa o resto) e do núcleo só as superfícies públicas.
+3. No `ready()`, chame os `register_*` que precisar, com códigos `<sua_app>.<nome>`; contribuições só aparecem com a app ativa na organização.
+4. Consumidores de evento rodam em contexto de sistema e precisam ser idempotentes; não há como numerar nem chamar serviços de ator nesse contexto (alaorneto/skeleton#577).
+5. Teste com a fixture `clinic` e os serviços públicos, como `tests/apps/med_example/tests/test_extension_points.py`.

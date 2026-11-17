@@ -59,7 +59,7 @@ jobs:
     env:
       DJANGO_SETTINGS_MODULE: skeleton.testing.host.settings
       SKELETON_DEV_APPS: >-
-        ${{ github.workspace }}/med_patients,${{ github.workspace }}/med_scheduling,${{ github.workspace }}/med_records,${{ github.workspace }}/med_finance
+        ${{ github.workspace }}/med_patients,${{ github.workspace }}/med_scheduling,${{ github.workspace }}/med_records,${{ github.workspace }}/med_finance,${{ github.workspace }}/tests/apps/med_example
       SKELETON_BUNDLED_APPS: calendar,ledger
       SKELETON_TEST_ALLOW_SCHEMA_RESET: "1"
       SKELETON_TEST_ADMIN_DATABASE_URL: postgres://postgres:ci-superuser-only@127.0.0.1:5432/postgres

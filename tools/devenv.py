@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-APPS = ("med_patients", "med_scheduling", "med_records", "med_finance")
+APPS = ("med_patients", "med_scheduling", "med_records", "med_finance", "tests/apps/med_example")
 BUNDLED = ("calendar", "ledger")
 
 
