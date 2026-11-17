@@ -1,0 +1,19 @@
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{% translate "Consentimentos" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% block content %}
+{% include "med_patients/_patient_header.html" %}
+<p class="helptext mb-4">{% translate "O atendimento à saúde não depende de consentimento: ele tem base legal própria. Registre aqui só as finalidades adicionais, como o contato por mensagem." %}</p>
+<div class="table-scroll mb-6"><table>
+  <caption class="sr-only">{% translate "Consentimentos" %}</caption>
+  <thead><tr><th scope="col">{% translate "Finalidade" %}</th><th scope="col">{% translate "Situação" %}</th><th scope="col" class="col-date">{% translate "Concedido em" %}</th><th scope="col">{% translate "Termo" %}</th>{% if patient.writable %}<th scope="col"><span class="sr-only">{% translate "Ações" %}</span></th>{% endif %}</tr></thead>
+  <tbody>{% for row in rows %}{% with consent=row.consent %}<tr><td>{% for code, label in labels.items %}{% if code == consent.purpose %}{{ label }}{% endif %}{% endfor %}</td><td>{{ consent.status|status_badge }}</td><td class="col-date"><time datetime="{{ consent.granted_at|date:'c' }}">{{ consent.granted_at|date:"SHORT_DATETIME_FORMAT" }}</time></td>
+  <td>{% for attachment in row.attachments %}<a href="{% url 'med_patients:attachment' organization_id attachment.sysid %}">{{ attachment.filename }}</a>{% empty %}{% if patient.writable and consent.status == "granted" %}<form method="post" enctype="multipart/form-data" action="{% url 'med_patients:consent-term' organization_id patient.sysid consent.sysid %}">{% csrf_token %}<label class="sr-only" for="term-{{ consent.sysid }}">{% translate "Termo digitalizado" %}</label><input id="term-{{ consent.sysid }}" type="file" name="term" accept="application/pdf,image/jpeg,image/png"> <button type="submit" class="btn btn-secondary">{% translate "Anexar" %}</button></form>{% else %}—{% endif %}{% endfor %}</td>
+  {% if patient.writable %}<td>{% if consent.status == "granted" %}<form method="post" action="{% url 'med_patients:consent-revoke' organization_id patient.sysid consent.sysid %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ consent.revision }}"><button type="submit" class="btn btn-secondary">{% translate "Revogar" %}</button></form>{% endif %}</td>{% endif %}</tr>{% endwith %}
+  {% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=5 message=_("Nenhum consentimento registrado.") %}{% endfor %}</tbody>
+</table></div>
+{% if patient.writable and not patient.anonymized_at %}
+<section class="card max-w-3xl" aria-labelledby="grant-heading"><h2 id="grant-heading">{% translate "Registrar consentimento" %}</h2>
+<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Registrar" %}</button></div></form></section>
+{% endif %}
+{% endblock %}

@@ -47,7 +47,7 @@
         "action": "read",
         "label": "Pacientes",
         "table_key": "med_patients.patientregistry",
-        "url_name": "med_patients:home"
+        "url_name": "med_patients:list"
       }
     ],
     "service_api": {

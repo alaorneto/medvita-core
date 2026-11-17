@@ -88,6 +88,36 @@ Revogar não apaga: a linha fica com a hora da revogação, e conceder de novo c
 
 As linhas que pertencem a um paciente (responsáveis, convênios, consentimentos) não impedem a exclusão lógica dele: a autorização derivada as esconde junto e a restauração do paciente as traz de volta. Registros de outras apps que apontam para o paciente (consultas, prontuários, contas) continuam impedindo a exclusão.
 
+### Telas
+
+Todas em `/o/<org>/apps/med_patients/`, pelo `PatientService`; paciente inexistente, de outra organização ou ilegível responde 404.
+
+| Rota | Tela |
+|---|---|
+| `med_patients:list` | Busca por nome, CPF, código ou final do telefone, filtro de situação e paginação por cursor |
+| `med_patients:create` | Cadastro novo; antes de gravar mostra possíveis duplicatas (mesmo CPF, ou mesmo nome e nascimento) e pede confirmação |
+| `med_patients:detail` | Página do paciente: cabeçalho (nome, idade, código, situação, avisos de responsável e de tratamento restrito), abas e situação do cadastro |
+| `med_patients:edit` | Alteração, com a revisão em campo oculto; conflito mostra a mensagem de CAS |
+| `med_patients:guardians`, `:coverages`, `:consents` | Abas com lista e formulário de inclusão; consentimento aceita o termo digitalizado |
+| `med_patients:timeline` | Linha do tempo das apps ativas |
+| `med_patients:setup` | Configuração inicial (administradores) |
+
+As abas das outras apps (`register_patient_section`) entram depois das próprias, em ordem, e somem com a app desativada. O título da aba do navegador leva o código do paciente, nunca o nome. O termo anexado recebe um nome fixo, porque o nome do arquivo enviado pode trazer o nome da pessoa.
+
+### API REST
+
+Em `/api/v1/o/<org>/apps/med_patients/`:
+
+| Método e caminho | O que faz |
+|---|---|
+| `GET patients/?q=&status=&cursor=&page_size=` | Busca (`PatientSummary`) |
+| `POST patients/` | Cadastra; `Idempotency-Key` opcional; devolve 201 com `ETag` |
+| `GET patients/<id>/` | Lê (`PatientInfo`), com `ETag` |
+| `PATCH patients/<id>/` | Altera campos de `PatientInput`; exige `If-Match` com a revisão; campo fora da lista é 400 |
+| `GET patients/<id>/guardians/`, `GET patients/<id>/coverages/` | Responsáveis e convênios |
+
+Sem exclusão nem anonimização pela API.
+
 ## Acceptance
 
 - Com organizações A e B, ninguém de A obtém paciente de B, nem por UUID conhecido.
