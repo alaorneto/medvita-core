@@ -37,6 +37,8 @@ TEMPLATE_ENV = "MED_TEST_SCHEMA_TEMPLATE"
 _WORKER = re.compile(r"gw(0|[1-9][0-9]{0,2})")
 _RESTRICT = re.compile(r"^\\(un)?restrict [A-Za-z0-9]+$")
 _CREATE_SCHEMA = "CREATE SCHEMA skeleton;"
+# A newer pg_dump than the server writes settings the server does not know; they only tune the restore.
+_NEWER_CLIENT_SETTINGS = ("SET transaction_timeout = 0;",)
 
 
 def _worker_url(url: str, worker: str) -> str:
@@ -137,7 +139,9 @@ def _dump(pair: Any) -> str | None:
     if result.returncode != 0:
         warnings.warn(f"pg_dump failed, every test migrates: {result.stderr.strip()[:200]}", stacklevel=1)
         return None
-    lines = [line for line in result.stdout.splitlines() if not _RESTRICT.match(line)]
+    lines = [
+        line for line in result.stdout.splitlines() if not _RESTRICT.match(line) and line not in _NEWER_CLIENT_SETTINGS
+    ]
     if any(line.startswith("\\") for line in lines) or lines.count(_CREATE_SCHEMA) != 1:
         warnings.warn("Unexpected pg_dump output, every test migrates.", stacklevel=1)
         return None
