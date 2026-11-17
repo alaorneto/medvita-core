@@ -56,6 +56,14 @@ The weekly grid of a schedule, by weekday and start.
 - **Erros:** NotFound para agenda ilegível.
 - **Efeitos:** nenhum.
 
+#### `available_slots(*, actor, schedule_id, start_date, end_date, appointment_type_id=None) -> tuple[Slot, ...]`
+
+Free slots of a schedule between two dates (inclusive, at most 62 days).
+
+- **Autorização:** leitura da agenda.
+- **Erros:** NotFound para agenda ou tipo ilegível; InvalidInput para intervalo invertido ou acima de 62 dias.
+- **Efeitos:** nenhum.
+
 #### `blocks(*, actor, schedule_id, start, end) -> tuple[BlockInfo, ...]`
 
 Blocks of a schedule that overlap a window.
@@ -332,6 +340,14 @@ A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice
 | `is_active` | `bool` |
 | `revision` | `int` |
 | `writable` | `bool` |
+
+### `Slot`
+
+| Campo | Tipo |
+|---|---|
+| `starts_at` | `datetime` |
+| `ends_at` | `datetime` |
+| `schedule_id` | `UUID` |
 
 <!-- END GENERATED -->
 

@@ -53,6 +53,16 @@ O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do
 - Um bloqueio vira evento gerenciado no calendário (título "Bloqueio"); removê-lo remove o evento.
 - O `setup` também dá ao papel `member` leitura e alteração da tabela de calendários do núcleo: quem tem concessão numa agenda precisa enxergar o calendário dela.
 
+### Horários livres
+
+`available_slots(schedule_id, start_date, end_date, appointment_type_id=None)` devolve os horários livres de até 62 dias (`slots.py`, funções puras):
+
+1. As faixas válidas do dia da semana (e do tipo pedido, quando a faixa restringe a um tipo) viram janelas no relógio local do consultório.
+2. Cada janela é cortada em horários de `slot_minutes`; um horário serve se a duração (a do tipo pedido, ou o intervalo da agenda) termina dentro da janela.
+3. Saem os horários que cruzam um bloqueio, uma consulta viva da agenda ou um compromisso do profissional no calendário do núcleo (`free_busy` com os eventos de que ele participa).
+4. Saem os que já passaram e os além de `booking_horizon_days`.
+5. Horário de verão: o horário gerado é do relógio local; um horário que não existe (o relógio pula) é descartado, e um ambíguo (o relógio volta) usa a primeira ocorrência.
+
 ## Acceptance
 
 - Só o administrador configura o consultório; a configuração é idempotente pela chave e única por organização.

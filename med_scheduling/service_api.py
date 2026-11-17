@@ -37,6 +37,7 @@ __all__ = [
     "RoomInfo",
     "ScheduleInfo",
     "SchedulingService",
+    "Slot",
 ]
 
 
@@ -241,6 +242,13 @@ def block_info(row: ScheduleBlock) -> BlockInfo:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class Slot:
+    starts_at: datetime
+    ends_at: datetime
+    schedule_id: UUID
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -362,6 +370,48 @@ def _check_rules(rules: object, practice: Practice, actor: Any) -> list[Availabi
             if second.valid_from <= first_end and first.valid_from <= second_end:
                 raise InvalidInput({"rules": [gettext("Duas faixas da agenda se sobrepõem no mesmo dia.")]})
     return ordered
+
+
+MAX_SLOT_DAYS = 62
+
+
+def _taken(actor: Any, schedule: Schedule, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
+    """Blocks, live appointments and busy intervals of the professional that overlap the window."""
+    from skeleton.access.policies import authorized_queryset
+
+    from . import calendar_bridge
+
+    taken = list(
+        authorized_queryset(ScheduleBlock, user=actor, action="read")
+        .filter(schedule=schedule, starts_at__lt=end, ends_at__gt=start)
+        .values_list("starts_at", "ends_at")
+    )
+    taken += _appointments_taken(actor, schedule, start, end)
+    user_id = schedule.professional.user_id if schedule.professional_id else None
+    if user_id is not None:
+        taken += [
+            (block.starts_at, block.ends_at)
+            for block in calendar_bridge.busy_of_people(actor, user_ids=(user_id,), start=start, end=end)
+        ]
+    return taken
+
+
+def _appointments_taken(
+    actor: Any, schedule: Schedule, start: datetime, end: datetime
+) -> list[tuple[datetime, datetime]]:
+    """Live appointments of the schedule in the window (none before the appointments table exists)."""
+    return []
+
+
+def _day_window(day_start: date, day_end: date, timezone: str) -> tuple[datetime, datetime]:
+    from datetime import time, timedelta
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo(timezone)
+    return (
+        datetime.combine(day_start, time(), tzinfo=zone),
+        datetime.combine(day_end + timedelta(days=1), time(), tzinfo=zone),
+    )
 
 
 # ------------------------------------------------------------------------------------ service
@@ -1097,3 +1147,57 @@ class SchedulingService(ServiceAPI):
         common.check_revision(row, expected_revision)
         row.delete()
         calendar_bridge.remove_event(actor, source_key=f"block:{row.pk}")
+
+    # ------------------------------------------------------------------ free slots
+
+    @service_method(read_only=True, since="0.1.0")
+    def available_slots(
+        self,
+        *,
+        actor: Any,
+        schedule_id: UUID,
+        start_date: date,
+        end_date: date,
+        appointment_type_id: UUID | None = None,
+    ) -> tuple[Slot, ...]:
+        """Free slots of a schedule between two dates (inclusive, at most 62 days).
+
+        A slot is free when it is inside the weekly grid (of the type, when the window restricts
+        it), not in the past, not beyond the booking horizon, and crosses no block, no live
+        appointment of the schedule and no busy interval of the professional in the calendar.
+        Autorização: leitura da agenda.
+        Erros: NotFound para agenda ou tipo ilegível; InvalidInput para intervalo invertido ou acima
+        de 62 dias.
+        Efeitos: nenhum.
+        """
+        from django.utils import timezone as dj_timezone
+
+        from skeleton.access.policies import authorized_queryset
+
+        from .slots import compute_slots, windows_of
+
+        if not isinstance(start_date, date) or not isinstance(end_date, date) or end_date < start_date:
+            raise InvalidInput({"end_date": [gettext("O fim precisa ser depois do início.")]})
+        if (end_date - start_date).days >= MAX_SLOT_DAYS:
+            raise InvalidInput({"end_date": [gettext("Consulte no máximo 62 dias por vez.")]})
+        schedule = _schedule(actor, schedule_id)
+        practice = schedule.practice
+        duration = schedule.slot_minutes
+        if appointment_type_id is not None:
+            kind = common.row(actor, AppointmentType, appointment_type_id, field="appointment_type_id", write=False)
+            duration = kind.duration_minutes
+        rules = authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule=schedule)
+        start, end = _day_window(start_date, end_date, practice.timezone)
+        found = compute_slots(
+            windows=windows_of(rules),
+            taken=_taken(actor, schedule, start, end),
+            start_date=start_date,
+            end_date=end_date,
+            slot_minutes=schedule.slot_minutes,
+            duration_minutes=duration,
+            timezone=practice.timezone,
+            now=dj_timezone.now(),
+            horizon_days=schedule.booking_horizon_days,
+            appointment_type_id=appointment_type_id,
+        )
+        return tuple(Slot(start, end, schedule.pk) for start, end in found)
