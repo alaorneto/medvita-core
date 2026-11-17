@@ -34,6 +34,14 @@ Add a guardian or contact person to a patient.
 - **Erros:** NotFound; Forbidden se só lê; InvalidInput com o nome do campo; Conflict("processing_restricted", "anonymized").
 - **Efeitos:** grava o responsável; a mesma chave do mesmo ator devolve o já criado.
 
+#### `apply_import(*, actor, batch_id, expected_revision) -> ImportStatus`
+
+Create the patients of a validated batch, by jobs of 200 rows, with CAS.
+
+- **Autorização:** alteração no cadastro do lote (conferida de novo por cada job).
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision"); Conflict("import_state") fora de "validado".
+- **Efeitos:** muda a situação para "importando" e enfileira o primeiro job.
+
 #### `consent_purposes(*, actor) -> tuple[ConsentPurposeInfo, ...]`
 
 Consent purposes declared by the apps active in the organization.
@@ -114,6 +122,30 @@ Whether the patient has a live granted consent for the purpose.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
+#### `import_status(*, actor, batch_id) -> ImportStatus`
+
+The state, counts and report of one import.
+
+- **Autorização:** leitura do cadastro do lote.
+- **Erros:** NotFound para lote inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
+#### `imports(*, actor) -> tuple[ImportStatus, ...]`
+
+The 50 most recent imports the actor reads.
+
+- **Autorização:** leitura do cadastro de cada lote.
+- **Erros:** nenhum além do contrato.
+- **Efeitos:** nenhum.
+
+#### `map_import(*, actor, batch_id, mapping, expected_revision) -> ImportStatus`
+
+Say which column feeds which patient field, with CAS, and queue the validation of every row.
+
+- **Autorização:** alteração no cadastro do lote.
+- **Erros:** NotFound; Forbidden; InvalidInput para coluna inexistente, campo que não é de ``PatientInput``, campo repetido ou ``full_name`` sem coluna; Conflict("stale_revision"); Conflict("import_state") fora de "enviado" ou "validado".
+- **Efeitos:** grava o mapeamento e enfileira o job de validação (situação "validando").
+
 #### `patient_sections(*, actor) -> tuple[PatientSectionInfo, ...]`
 
 Tabs and shortcuts other apps add to the patient page, in order; only active apps.
@@ -193,6 +225,14 @@ The steps of the clinic setup list contributed by the active apps, in order, wit
 - **Autorização:** a capacidade ``access.manage`` (administrador da organização).
 - **Erros:** Forbidden sem a capacidade.
 - **Efeitos:** nenhum.
+
+#### `start_import(*, actor, stream, registry_id=None, idempotency_key) -> ImportStatus`
+
+Upload a patient CSV into a registry; nothing is created until the batch is mapped and applied.
+
+- **Autorização:** alteração no cadastro (o padrão quando não informado).
+- **Erros:** NotFound para cadastro ilegível; Forbidden se só lê; InvalidInput("file") para arquivo acima de 10 MB, com mais de 20.000 linhas, vazio, sem cabeçalho ou que não é CSV (antes de gravar qualquer coisa).
+- **Efeitos:** grava o lote (com o texto do arquivo, apagado quando o lote termina) e anexa o arquivo original; a mesma chave do mesmo ator devolve o lote já criado.
 
 #### `summaries(*, actor, patient_ids) -> tuple[PatientSummary, ...]`
 
@@ -332,6 +372,30 @@ A purpose of data processing a patient may consent to (beyond care itself).
 | `is_legal_representative` | `bool` |
 | `is_financial_responsible` | `bool` |
 | `notes` | `str` |
+
+### `ImportStatus`
+
+A CSV import: counts and a report of (row, error code); never the cells.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `registry_id` | `UUID` |
+| `status` | `str` |
+| `filename` | `str` |
+| `columns` | `tuple[str, ...]` |
+| `mapping` | `tuple[tuple[str, str], ...]` |
+| `total_rows` | `int` |
+| `valid_rows` | `int` |
+| `applied_rows` | `int` |
+| `created_rows` | `int` |
+| `skipped_rows` | `int` |
+| `error_rows` | `int` |
+| `report` | `tuple[tuple[int, str], ...]` |
+| `error_code` | `str` |
+| `revision` | `int` |
+| `created_at` | `datetime` |
+| `finished_at` | `datetime | None` |
 
 ### `PatientInfo`
 

@@ -26,3 +26,6 @@ class MedPatientsConfig(AppConfig):
         from .registration import register_consents
 
         register_consents()
+        from .registration import register_imports
+
+        register_imports()

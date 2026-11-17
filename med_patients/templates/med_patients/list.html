@@ -1,7 +1,7 @@
 {% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{% translate "Pacientes" %} · {{ site_name }}{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Consultório" %}</p><h1>{% translate "Pacientes" %}</h1><p class="page-description">{% translate "Busque por nome, CPF, código ou final do telefone." %}</p></div>
-{% if can_create %}<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-primary" href="{% url 'med_patients:create' organization_id %}">{% translate "Novo paciente" %}</a></nav>{% endif %}</div>
+{% if can_create %}<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_patients:imports' organization_id %}">{% translate "Importar CSV" %}</a><a class="btn btn-primary" href="{% url 'med_patients:create' organization_id %}">{% translate "Novo paciente" %}</a></nav>{% endif %}</div>
 {% if not has_registry %}<div class="empty-state"><p>{% translate "O cadastro de pacientes ainda não foi configurado nesta organização." %}</p><p><a href="{% url 'med_patients:setup' organization_id %}">{% translate "Configurar (administradores)" %}</a></p></div>{% else %}
 <form method="get" class="filter-bar" aria-label="{% translate "Filtros" %}">
   <div class="field"><label for="q">{% translate "Buscar" %}</label><input id="q" name="q" value="{{ query }}" maxlength="200" autocomplete="off"></div>

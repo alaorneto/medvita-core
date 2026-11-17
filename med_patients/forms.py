@@ -110,3 +110,28 @@ def apply_service_errors(form: forms.Form, error) -> None:
         target = field if field in form.fields else None
         for text in texts:
             form.add_error(target, text)
+
+
+class ImportUploadForm(forms.Form):
+    file = forms.FileField(label=_("Arquivo CSV (UTF-8 ou Windows-1252, separado por vírgula ou ponto e vírgula)"))
+
+
+class ImportMappingForm(forms.Form):
+    """One select per column of the file: which patient field it feeds (or none)."""
+
+    def __init__(self, *args, columns=(), mapping=None, fields=(), **kwargs):
+        super().__init__(*args, **kwargs)
+        choices = [("", _("Não importar")), *fields]
+        mapping = mapping or {}
+        self.columns = list(columns)
+        for index, column in enumerate(self.columns):
+            self.fields[f"column_{index}"] = forms.ChoiceField(
+                label=column, choices=choices, required=False, initial=mapping.get(column, "")
+            )
+
+    def mapping(self):
+        return tuple(
+            (column, self.cleaned_data.get(f"column_{index}") or "")
+            for index, column in enumerate(self.columns)
+            if self.cleaned_data.get(f"column_{index}")
+        )

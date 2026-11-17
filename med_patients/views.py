@@ -49,6 +49,7 @@ def conflict_text(error: Conflict) -> str:
         "already_set_up": gettext("A organização já tem um cadastro de pacientes."),
         "retention": gettext("A guarda legal impede excluir este paciente."),
         "live_references": gettext("O paciente ainda é usado por outra app e não pode ser excluído."),
+        "import_state": gettext("A importação já está em outra etapa."),
     }
     return texts.get(error.code, gettext("A operação conflita com o estado atual."))
 
@@ -643,3 +644,135 @@ class CoveragesAPI(TenantAPI):
     def get(self, request, organization_id, patient_id):
         rows = _service().coverages(actor=request.user, patient_id=patient_id)
         return Response({"results": [_dto_json(row) for row in rows]})
+
+
+# ------------------------------------------------------------------------------------ import
+
+IMPORT_FIELDS = (
+    ("full_name", gettext("Nome completo")),
+    ("social_name", gettext("Nome social")),
+    ("birth_date", gettext("Data de nascimento (AAAA-MM-DD)")),
+    ("sex", gettext("Sexo")),
+    ("cpf", gettext("CPF")),
+    ("national_health_card", gettext("Cartão Nacional de Saúde")),
+    ("identity_document", gettext("Documento de identidade")),
+    ("mother_name", gettext("Nome da mãe")),
+    ("phone", gettext("Telefone")),
+    ("phone_secondary", gettext("Outro telefone")),
+    ("email", gettext("Email")),
+    ("postal_code", gettext("CEP")),
+    ("street", gettext("Logradouro")),
+    ("number", gettext("Número")),
+    ("complement", gettext("Complemento")),
+    ("district", gettext("Bairro")),
+    ("city", gettext("Cidade")),
+    ("state", gettext("UF")),
+    ("notes", gettext("Observações")),
+)
+
+
+@tenant_page()
+def imports(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    form = patient_forms.ImportUploadForm(request.POST or None, request.FILES or None)
+    status = 200
+    if request.method == "POST":
+        status = 400
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    batch = _service().start_import(
+                        actor=request.user, stream=form.cleaned_data["file"], idempotency_key=_key(request)
+                    )
+            except (Forbidden, NotFound):
+                raise Http404 from None
+            except InvalidInput as error:
+                patient_forms.apply_service_errors(form, error)
+            else:
+                return redirect("med_patients:import", organization_id, batch.sysid)
+    try:
+        rows = _service().imports(actor=request.user)
+    except (Forbidden, NotFound):
+        raise Http404 from None
+    return render(
+        request,
+        "med_patients/imports.html",
+        {"organization_id": organization_id, "form": form, "rows": rows, "idempotency_key": _key(request)},
+        status=status,
+    )
+
+
+@tenant_page()
+def import_detail(request: HttpRequest, organization_id: UUID, batch_id: UUID) -> HttpResponse:
+    try:
+        batch = _service().import_status(actor=request.user, batch_id=batch_id)
+    except (Forbidden, NotFound, InvalidInput):
+        raise Http404 from None
+    form = patient_forms.ImportMappingForm(
+        request.POST or None, columns=batch.columns, mapping=dict(batch.mapping), fields=IMPORT_FIELDS
+    )
+    status = 200
+    if request.method == "POST":
+        status = 400
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    _service().map_import(
+                        actor=request.user,
+                        batch_id=batch_id,
+                        mapping=form.mapping(),
+                        expected_revision=_revision(request),
+                    )
+            except (Forbidden, NotFound):
+                raise Http404 from None
+            except InvalidInput as error:
+                patient_forms.apply_service_errors(form, error)
+            except Conflict as error:
+                form.add_error(None, conflict_text(error))
+            else:
+                messages.success(request, gettext("Mapeamento salvo. A validação das linhas está na fila."))
+                return redirect("med_patients:import", organization_id, batch_id)
+    return render(
+        request,
+        "med_patients/import.html",
+        {
+            "organization_id": organization_id,
+            "batch": batch,
+            "form": form,
+            "mappable": batch.status in ("uploaded", "validated"),
+        },
+        status=status,
+    )
+
+
+@require_POST
+@tenant_page()
+def import_apply(request: HttpRequest, organization_id: UUID, batch_id: UUID) -> HttpResponse:
+    try:
+        with transaction.atomic():
+            _service().apply_import(actor=request.user, batch_id=batch_id, expected_revision=_revision(request))
+    except (Forbidden, NotFound):
+        raise Http404 from None
+    except Conflict as error:
+        messages.error(request, conflict_text(error))
+    else:
+        messages.success(request, gettext("Importação iniciada. Acompanhe o andamento nesta página."))
+    return redirect("med_patients:import", organization_id, batch_id)
+
+
+@tenant_page()
+def import_report(request: HttpRequest, organization_id: UUID, batch_id: UUID) -> HttpResponse:
+    import csv
+
+    from .importer import safe_cell
+
+    try:
+        batch = _service().import_status(actor=request.user, batch_id=batch_id)
+    except (Forbidden, NotFound, InvalidInput):
+        raise Http404 from None
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="relatorio-importacao.csv"'
+    writer = csv.writer(response)
+    writer.writerow([gettext("linha"), gettext("código")])
+    for row, code in batch.report:
+        writer.writerow([row, safe_cell(code)])
+    return response

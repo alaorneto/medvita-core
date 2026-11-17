@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields
 from datetime import date, datetime
-from typing import Any
+from typing import Any, BinaryIO
 from uuid import UUID
 
 from django.utils.translation import gettext
@@ -39,7 +39,7 @@ from .extension import (
     register_setup_step,
     register_timeline_provider,
 )
-from .models import Consent, Patient, PatientCoverage, PatientGuardian, PatientRegistry
+from .models import Consent, ImportBatch, Patient, PatientCoverage, PatientGuardian, PatientRegistry
 from .policies import (
     REGISTRY_TABLE,
     ids_allowed,
@@ -64,6 +64,7 @@ __all__ = [
     "CoverageInput",
     "GuardianInfo",
     "GuardianInput",
+    "ImportStatus",
     "PatientInfo",
     "PatientInput",
     "PatientService",
@@ -360,6 +361,51 @@ class SetupStepInfo:
     url_name: str
     order: int
     done: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ImportStatus:
+    """A CSV import: counts and a report of (row, error code); never the cells."""
+
+    sysid: UUID
+    registry_id: UUID
+    status: str
+    filename: str
+    columns: tuple[str, ...]
+    mapping: tuple[tuple[str, str], ...]
+    total_rows: int
+    valid_rows: int
+    applied_rows: int
+    created_rows: int
+    skipped_rows: int
+    error_rows: int
+    report: tuple[tuple[int, str], ...]
+    error_code: str
+    revision: int
+    created_at: datetime
+    finished_at: datetime | None
+
+
+def import_status(batch: ImportBatch) -> ImportStatus:
+    return ImportStatus(
+        sysid=batch.pk,
+        registry_id=batch.registry_id,
+        status=batch.status,
+        filename=batch.filename,
+        columns=tuple(batch.columns),
+        mapping=tuple(sorted((str(column), str(field)) for column, field in dict(batch.mapping).items())),
+        total_rows=batch.total_rows,
+        valid_rows=batch.valid_rows,
+        applied_rows=batch.applied_rows,
+        created_rows=batch.created_rows,
+        skipped_rows=batch.skipped_rows,
+        error_rows=batch.error_rows,
+        report=tuple((int(row), str(code)) for row, code in batch.report),
+        error_code=batch.error_code,
+        revision=batch.revision,
+        created_at=as_utc(batch.created_at),
+        finished_at=as_utc(batch.finished_at) if batch.finished_at else None,
+    )
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -1229,3 +1275,155 @@ class PatientService(ServiceAPI):
             ok, done = call_safely(step.code, step.is_done, actor=actor)
             result.append(SetupStepInfo(step.code, str(step.label), step.url_name, step.order, bool(ok and done)))
         return tuple(result)
+
+    # ------------------------------------------------------------------ CSV import
+
+    @service_method(read_only=False, since="0.1.0")
+    def start_import(
+        self, *, actor: Any, stream: BinaryIO, registry_id: UUID | None = None, idempotency_key: str
+    ) -> ImportStatus:
+        """Upload a patient CSV into a registry; nothing is created until the batch is mapped and applied.
+
+        Autorização: alteração no cadastro (o padrão quando não informado).
+        Erros: NotFound para cadastro ilegível; Forbidden se só lê; InvalidInput("file") para arquivo
+        acima de 10 MB, com mais de 20.000 linhas, vazio, sem cabeçalho ou que não é CSV (antes de
+        gravar qualquer coisa).
+        Efeitos: grava o lote (com o texto do arquivo, apagado quando o lote termina) e anexa o
+        arquivo original; a mesma chave do mesmo ator devolve o lote já criado.
+        """
+        import io
+
+        from skeleton.service_api.files import FileService
+
+        from .importer import MAX_BYTES, ImportFileError, parse
+        from .services import deterministic_id
+
+        key = _key(idempotency_key)
+        registry = _default_writable_registry(actor, registry_id)
+        sysid = deterministic_id("import", actor, key)
+        existing = ImportBatch.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return import_status(existing)
+        raw = stream.read(MAX_BYTES + 1) if hasattr(stream, "read") else b""
+        if not isinstance(raw, bytes):
+            raise InvalidInput({"file": [gettext("Envie o arquivo em bytes.")]})
+        try:
+            parsed = parse(raw)
+        except ImportFileError as error:
+            messages = {
+                "too_large": gettext("O arquivo passa de 10 MB."),
+                "too_many_rows": gettext("O arquivo passa de 20.000 linhas."),
+                "empty": gettext("O arquivo não tem linhas de dados."),
+                "bad_header": gettext("A primeira linha precisa ter os nomes das colunas, sem repetição."),
+            }
+            raise InvalidInput(
+                {"file": [messages.get(error.code, gettext("O arquivo não é um CSV válido."))]}
+            ) from None
+        batch = ImportBatch(
+            sysid=sysid,
+            organization_id=registry.organization_id,
+            registry=registry,
+            filename="pacientes.csv",
+            encoding=parsed.encoding,
+            delimiter=parsed.delimiter,
+            columns=list(parsed.columns),
+            content=parsed.text,
+            total_rows=parsed.total_rows,
+        )
+        batch.save()
+        FileService().attach(
+            actor=actor,
+            table_key="med_patients.importbatch",
+            record_id=batch.pk,
+            filename="pacientes.csv",
+            stream=io.BytesIO(raw),
+            content_type="text/csv",
+        )
+        return import_status(batch)
+
+    @service_method(read_only=False, since="0.1.0")
+    def map_import(
+        self, *, actor: Any, batch_id: UUID, mapping: tuple[tuple[str, str], ...], expected_revision: int
+    ) -> ImportStatus:
+        """Say which column feeds which patient field, with CAS, and queue the validation of every row.
+
+        Autorização: alteração no cadastro do lote.
+        Erros: NotFound; Forbidden; InvalidInput para coluna inexistente, campo que não é de
+        ``PatientInput``, campo repetido ou ``full_name`` sem coluna; Conflict("stale_revision");
+        Conflict("import_state") fora de "enviado" ou "validado".
+        Efeitos: grava o mapeamento e enfileira o job de validação (situação "validando").
+        """
+        from . import jobs
+
+        batch = _row(actor, ImportBatch, batch_id, field="batch_id", write=True)
+        _check_revision(batch, expected_revision)
+        if batch.status not in (ImportBatch.Status.UPLOADED, ImportBatch.Status.VALIDATED):
+            raise Conflict("import_state")
+        if not isinstance(mapping, tuple) or not all(isinstance(item, tuple) and len(item) == 2 for item in mapping):
+            raise InvalidInput({"mapping": [gettext("Use pares (coluna, campo).")]})
+        chosen = {str(column): str(field) for column, field in mapping if str(field)}
+        errors: dict[str, list[str]] = {}
+        allowed = set(PatientInput.__dataclass_fields__)
+        for column, field in chosen.items():
+            if column not in batch.columns:
+                errors.setdefault("mapping", []).append(gettext("Coluna inexistente no arquivo."))
+            if field not in allowed:
+                errors.setdefault("mapping", []).append(gettext("Campo que o cadastro não aceita."))
+        if len(set(chosen.values())) != len(chosen):
+            errors.setdefault("mapping", []).append(gettext("Cada campo recebe uma coluna só."))
+        if "full_name" not in chosen.values():
+            errors["full_name"] = [gettext("Escolha a coluna do nome completo.")]
+        if errors:
+            raise InvalidInput(errors)
+        batch.mapping = chosen
+        batch.status = ImportBatch.Status.VALIDATING
+        batch.report = []
+        batch.save(update_fields={"mapping", "status", "report"})
+        jobs.enqueue(actor, jobs.VALIDATE_JOB, batch, step=batch.revision)
+        return import_status(batch)
+
+    @service_method(read_only=False, since="0.1.0")
+    def apply_import(self, *, actor: Any, batch_id: UUID, expected_revision: int) -> ImportStatus:
+        """Create the patients of a validated batch, by jobs of 200 rows, with CAS.
+
+        Rows with a CPF already in a live patient are skipped (never overwritten); invalid rows
+        are counted as errors.
+        Autorização: alteração no cadastro do lote (conferida de novo por cada job).
+        Erros: NotFound; Forbidden; Conflict("stale_revision"); Conflict("import_state") fora de
+        "validado".
+        Efeitos: muda a situação para "importando" e enfileira o primeiro job.
+        """
+        from . import jobs
+
+        batch = _row(actor, ImportBatch, batch_id, field="batch_id", write=True)
+        _check_revision(batch, expected_revision)
+        if batch.status != ImportBatch.Status.VALIDATED:
+            raise Conflict("import_state")
+        batch.status = ImportBatch.Status.IMPORTING
+        batch.applied_rows = batch.created_rows = batch.skipped_rows = batch.error_rows = 0
+        batch.save(update_fields={"status", "applied_rows", "created_rows", "skipped_rows", "error_rows"})
+        jobs.enqueue(actor, jobs.APPLY_JOB, batch, step=0)
+        return import_status(batch)
+
+    @service_method(read_only=True, since="0.1.0")
+    def import_status(self, *, actor: Any, batch_id: UUID) -> ImportStatus:
+        """The state, counts and report of one import.
+
+        Autorização: leitura do cadastro do lote.
+        Erros: NotFound para lote inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        return import_status(_row(actor, ImportBatch, batch_id, field="batch_id", write=False))
+
+    @service_method(read_only=True, since="0.1.0")
+    def imports(self, *, actor: Any) -> tuple[ImportStatus, ...]:
+        """The 50 most recent imports the actor reads.
+
+        Autorização: leitura do cadastro de cada lote.
+        Erros: nenhum além do contrato.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        rows = authorized_queryset(ImportBatch, user=actor, action="read").order_by("-created_at", "sysid")[:50]
+        return tuple(import_status(row) for row in rows)

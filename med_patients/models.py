@@ -237,3 +237,47 @@ class Consent(OrganizationRecord):
             ),
         ]
         ordering = ("-granted_at", "sysid")
+
+
+class ImportBatch(OrganizationRecord):
+    """A CSV import of patients into a registry: uploaded, mapped and validated, then applied by jobs.
+
+    ``content`` holds the decoded file while the jobs need it and is emptied when the batch ends;
+    ``report`` keeps only row numbers and error codes, never a cell.
+    """
+
+    class Status(models.TextChoices):
+        UPLOADED = "uploaded", gettext_lazy("Enviado")
+        VALIDATING = "validating", gettext_lazy("Validando")
+        VALIDATED = "validated", gettext_lazy("Validado")
+        IMPORTING = "importing", gettext_lazy("Importando")
+        COMPLETED = "completed", gettext_lazy("Concluído")
+        FAILED = "failed", gettext_lazy("Falhou")
+
+    registry = models.ForeignKey(PatientRegistry, on_delete=models.PROTECT, related_name="+")
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.UPLOADED)
+    filename = models.CharField(max_length=200)
+    encoding = models.CharField(max_length=12)
+    delimiter = models.CharField(max_length=1)
+    columns = models.JSONField(default=list, blank=True)
+    mapping = models.JSONField(default=dict, blank=True)
+    content = models.TextField(blank=True)
+    total_rows = models.PositiveIntegerField(default=0)
+    valid_rows = models.PositiveIntegerField(default=0)
+    applied_rows = models.PositiveIntegerField(default=0)
+    created_rows = models.PositiveIntegerField(default=0)
+    skipped_rows = models.PositiveIntegerField(default=0)
+    error_rows = models.PositiveIntegerField(default=0)
+    report = models.JSONField(default=list, blank=True)
+    error_code = models.CharField(max_length=40, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    immutable_fields = ("registry_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(
+                condition=Q(status__in=("uploaded", "validating", "validated", "importing", "completed", "failed")),
+                name="med_patients_import_status",
+            ),
+        ]
+        ordering = ("-created_at", "sysid")

@@ -152,3 +152,25 @@ def test_setup_page_is_for_administrators(clinic):
 
 def test_bad_filters_answer_400(ready):
     assert client_for(ready.a.reception).get(url(ready, "list") + "?status=lost").status_code == 400
+
+
+def test_import_pages(ready, tmp_path):
+    from django.conf import settings
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.test import override_settings
+
+    storage = {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": str(tmp_path / "files"), "base_url": None},
+    }
+    client = client_for(ready.a.reception)
+    with override_settings(STORAGES={**settings.STORAGES, "skeleton_files": storage}):
+        upload = SimpleUploadedFile("lista com nome.csv", b"Nome;CPF\nAna Import;\n", content_type="text/csv")
+        response = client.post(url(ready, "imports"), {"file": upload})
+        assert response.status_code == 302
+        page = client.get(response["Location"])
+        html = assert_safe(page)
+        assert "Nome" in html and "lista com nome" not in html
+        assert_safe(client.get(url(ready, "imports")))
+        refused = client.post(url(ready, "imports"), {"file": SimpleUploadedFile("x.csv", b"Nome\n")})
+        assert refused.status_code == 400

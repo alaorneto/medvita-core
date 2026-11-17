@@ -225,3 +225,64 @@ def register_consents() -> None:
             description=_("Contato por telefone, mensagem e email para assuntos do atendimento."),
         )
     )
+
+
+IMPORT_TYPES = ("text/csv", "text/plain")
+IMPORT_MAX_BYTES = 10 * 1024 * 1024
+
+
+def register_imports() -> None:
+    from django.utils.translation import gettext_lazy as _
+
+    from skeleton.jobs.registry import JobType, register_job_type
+    from skeleton.system.registry import AttachmentPolicy, TableSpec, register
+
+    from . import jobs
+    from .models import ImportBatch
+
+    register(
+        TableSpec(
+            model=ImportBatch,
+            description=_("Importações de pacientes por CSV; a autorização vem do cadastro."),
+            label=_("Importações de pacientes"),
+            scope="organization",
+            read_fields=(
+                "registry",
+                "status",
+                "filename",
+                "columns",
+                "mapping",
+                "total_rows",
+                "valid_rows",
+                "applied_rows",
+                "created_rows",
+                "skipped_rows",
+                "error_rows",
+                "report",
+                "error_code",
+                "finished_at",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            # The decoded file carries the patients' data until the batch ends.
+            personal_fields=("content",),
+            expose_api=False,
+            access_parent="registry",
+            attachments=AttachmentPolicy(max_bytes=IMPORT_MAX_BYTES, types=IMPORT_TYPES),
+        )
+    )
+    for code, handler in (
+        (jobs.VALIDATE_JOB, jobs.validate_batch),
+        (jobs.APPLY_JOB, jobs.apply_batch),
+    ):
+        register_job_type(
+            JobType(
+                code=code,
+                handler=handler,
+                payload_schema={"batch_id": "uuid"},
+                run_as="actor",
+                max_attempts=3,
+                timeout_s=600,
+                owner_app=APP_LABEL,
+            )
+        )

@@ -88,6 +88,19 @@ Revogar não apaga: a linha fica com a hora da revogação, e conceder de novo c
 
 As linhas que pertencem a um paciente (responsáveis, convênios, consentimentos) não impedem a exclusão lógica dele: a autorização derivada as esconde junto e a restauração do paciente as traz de volta. Registros de outras apps que apontam para o paciente (consultas, prontuários, contas) continuam impedindo a exclusão.
 
+### Importação por CSV
+
+O cadastro aceita uma lista de pacientes em CSV (exemplo com dados fictícios em `docs/examples/patients.csv`):
+
+| Regra | Comportamento |
+|---|---|
+| Arquivo | UTF-8 (com ou sem BOM) ou Windows-1252; separador `,` ou `;`, decidido pela primeira linha; até 10 MB e 20.000 linhas de dados; a primeira linha tem os nomes das colunas, sem repetição |
+| Mapeamento | Na tela, cada coluna vai para um campo de `PatientInput` (ou não é importada); `full_name` é obrigatório e cada campo recebe uma coluna só |
+| Conferência | Um job valida cada linha com as regras do cadastro e mostra o relatório: linha inválida (`invalid_<campo>`) ou CPF já cadastrado ou repetido no arquivo (`duplicate_cpf`) |
+| Aplicação | Jobs de 200 linhas, cada um na própria transação, como quem enviou o arquivo; CPF já cadastrado é pulado, nunca sobrescrito; cada paciente nasce pelo mesmo caminho do cadastro manual (mesma sequência, mesmos eventos) com uma chave derivada do lote e da linha, então repetir um lote não duplica |
+| Permissão | Se quem enviou perdeu a escrita no cadastro, o lote termina em `failed` com o código `forbidden` |
+| Dados | O relatório guarda só o número da linha e o código, nunca o valor de uma célula; célula é sempre texto (o relatório baixado neutraliza fórmula com `'`); o texto do arquivo fica no lote só até ele terminar; o arquivo original fica anexo ao lote, com nome fixo, e segue a retenção de anexos do núcleo |
+
 ### Telas
 
 Todas em `/o/<org>/apps/med_patients/`, pelo `PatientService`; paciente inexistente, de outra organização ou ilegível responde 404.
@@ -100,6 +113,7 @@ Todas em `/o/<org>/apps/med_patients/`, pelo `PatientService`; paciente inexiste
 | `med_patients:edit` | Alteração, com a revisão em campo oculto; conflito mostra a mensagem de CAS |
 | `med_patients:guardians`, `:coverages`, `:consents` | Abas com lista e formulário de inclusão; consentimento aceita o termo digitalizado |
 | `med_patients:timeline` | Linha do tempo das apps ativas |
+| `med_patients:imports`, `:import` | Envio, mapeamento das colunas, conferência, aplicação e relatório da importação |
 | `med_patients:setup` | Configuração inicial (administradores) |
 
 As abas das outras apps (`register_patient_section`) entram depois das próprias, em ordem, e somem com a app desativada. O título da aba do navegador leva o código do paciente, nunca o nome. O termo anexado recebe um nome fixo, porque o nome do arquivo enviado pode trazer o nome da pessoa.
