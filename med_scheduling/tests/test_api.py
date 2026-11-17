@@ -97,10 +97,28 @@ def test_system_fields_are_refused(ready, subtests):
             assert response.status_code == 400
 
 
-def test_authorization_and_isolation(ready):
+def test_authorization_and_isolation(ready, subtests):
     appointment = book(ready, 9)
     outsider = client_for(ready.b.reception)
-    assert outsider.get(api(ready, "appointment", appointment.sysid, organization=ready.org_b)).status_code == 404
+    reception = client_for(ready.a.reception)
+    monday = f"?start={ready.monday:%Y-%m-%d}"
+    for name, args, query in (
+        ("slots", (ready.schedule.sysid,), monday),
+        ("appointment", (appointment.sysid,), ""),
+    ):
+        with subtests.test(route=name):
+            assert reception.get(api(ready, name, *args) + query).status_code == 200
+            assert outsider.get(api(ready, name, *args, organization=ready.org_b) + query).status_code == 404
+            assert client_for(ready.a.finance).get(api(ready, name, *args) + query).status_code == 404
+    for name in ("schedules", "appointments"):
+        with subtests.test(route=name):
+            assert outsider.get(api(ready, name, organization=ready.org_b)).json()["results"] == []
+    outside_transition = post(
+        outsider,
+        api(ready, "transition", appointment.sysid, "confirm", organization=ready.org_b),
+        HTTP_IF_MATCH=f'"{appointment.revision}"',
+    )
+    assert outside_transition.status_code == 404
     finance = client_for(ready.a.finance)
     assert finance.get(api(ready, "appointment", appointment.sysid)).status_code == 404
     assert finance.get(api(ready, "appointments")).json()["results"] == []
@@ -111,4 +129,5 @@ def test_authorization_and_isolation(ready):
     )
     assert denied.status_code == 404
     with ready.app_disabled("med_scheduling"):
-        assert client_for(ready.a.reception).get(api(ready, "appointments")).status_code in (403, 404, 503)
+        for name, args in (("schedules", ()), ("appointments", ()), ("appointment", (appointment.sysid,))):
+            assert reception.get(api(ready, name, *args)).status_code in (403, 404, 503)
