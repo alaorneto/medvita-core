@@ -48,6 +48,14 @@ One appointment with its notes and the times of each state.
 - **Erros:** NotFound para consulta inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
+#### `appointment_actions(*, actor, appointment_id) -> tuple[AppointmentActionInfo, ...]`
+
+Actions other apps registered for the current state of an appointment, in order.
+
+- **Autorização:** leitura da agenda (cada ação autoriza a própria página).
+- **Erros:** NotFound para consulta ilegível.
+- **Efeitos:** nenhum.
+
 #### `appointment_types(*, actor, active_only=True) -> tuple[AppointmentTypeInfo, ...]`
 
 Kinds of appointment of the practice.
@@ -104,6 +112,30 @@ Cancel an appointment (scheduled, confirmed or arrived), with CAS.
 - **Erros:** NotFound; Forbidden; InvalidInput para motivo desconhecido ou observação acima de 200 caracteres; Conflict("stale_revision", "invalid_transition").
 - **Efeitos:** grava a situação e o motivo, remove o evento do calendário e publica ``med_scheduling.appointment_cancelled``.
 
+#### `check_in(*, actor, appointment_id, expected_revision) -> AppointmentInfo`
+
+Register that the patient arrived, with CAS, and tell the professional.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+- **Efeitos:** grava a situação e a hora, publica ``med_scheduling.appointment_arrived`` e notifica o profissional da agenda (uma vez por consulta; a notificação leva o código, nunca o paciente).
+
+#### `complete(*, actor, appointment_id, expected_revision) -> AppointmentInfo`
+
+Finish an appointment (arrived or in progress), with CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+- **Efeitos:** grava a situação e a hora e publica ``med_scheduling.appointment_completed``.
+
+#### `confirm(*, actor, appointment_id, expected_revision) -> AppointmentInfo`
+
+Confirm a scheduled appointment, with CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+- **Efeitos:** grava a situação e a hora e publica ``med_scheduling.appointment_confirmed``.
+
 #### `create_schedule(*, actor, name, professional_id=None, room_id=None, slot_minutes=30, writer_group_ids=(), reader_group_ids=(), writer_user_ids=(), idempotency_key) -> ScheduleInfo`
 
 Create the schedule of a professional or room, with its shared calendar and the same access.
@@ -119,6 +151,14 @@ The appointments and free slots of one local day, for every schedule the actor r
 - **Autorização:** leitura de cada agenda.
 - **Erros:** InvalidInput para data inválida ou mais de 20 agendas.
 - **Efeitos:** nenhum.
+
+#### `mark_no_show(*, actor, appointment_id, expected_revision) -> AppointmentInfo`
+
+Mark that the patient did not come (only after the start time), with CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+- **Efeitos:** grava a situação, mantém o evento no calendário e publica ``med_scheduling.appointment_no_show``.
 
 #### `my_professional(*, actor) -> ProfessionalInfo | None`
 
@@ -232,6 +272,14 @@ Create the default practice of the organization and share it with groups.
 - **Erros:** Forbidden; InvalidInput para nome vazio, fuso desconhecido, chave inválida ou mais de 20 grupos; Conflict("already_set_up") com um consultório padrão criado por outra chave.
 - **Efeitos:** cria o consultório (privado, dono o ator), dá ao papel ``member`` leitura das tabelas do consultório e das agendas, concede leitura aos grupos de leitura e leitura e alteração aos de gestão. A mesma chave do mesmo ator devolve o já criado.
 
+#### `start(*, actor, appointment_id, expected_revision) -> AppointmentInfo`
+
+Start the care of an arrived patient, with CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+- **Efeitos:** grava a situação e a hora e publica ``med_scheduling.appointment_started``.
+
 #### `update_appointment_type(*, actor, type_id, changes, expected_revision) -> AppointmentTypeInfo`
 
 Change a kind of appointment, with CAS; the code never changes.
@@ -273,6 +321,27 @@ Rename a schedule, change its slot, booking horizon or activity, with CAS.
 - **Efeitos:** grava só os campos que mudaram.
 
 ## DTOs
+
+### `AppointmentAction`
+
+A button on an appointment; ``url_name`` receives ``org`` and ``appointment_id``.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `url_name` | `str` |
+| `statuses` | `tuple[str, ...]` |
+| `order` | `int` |
+
+### `AppointmentActionInfo`
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
 
 ### `AppointmentDetail`
 
@@ -455,6 +524,15 @@ Payload: `code`, `schedule`, `patient` (o `sysid`, em texto), `appointment_type`
 | `med_scheduling.appointment_booked` | `book`, e a consulta nova de uma remarcação para outra agenda |
 | `med_scheduling.appointment_rescheduled` | `reschedule` na mesma agenda |
 | `med_scheduling.appointment_cancelled` | `cancel`, e a consulta antiga de uma remarcação para outra agenda |
+| `med_scheduling.appointment_confirmed`, `_arrived`, `_started`, `_completed`, `_no_show` | `confirm`, `check_in`, `start`, `complete`, `mark_no_show` |
+
+## Pontos de extensão
+
+`register_appointment_action(AppointmentAction(code, label, url_name, statuses, order))`, reexportada por este módulo e chamada no `ready()` da app que se pluga: um botão nas consultas nas situações `statuses`. O código é `<app_label>.<nome>` da própria app; a rota recebe `org` e `appointment_id` e autoriza sozinha.
+
+## Notificações
+
+`med_scheduling.patient_arrived`: ao profissional da agenda, na chegada do paciente; payload `code` e `starts_at`.
 
 ## Histórico de versões
 | Versão | Mudança |

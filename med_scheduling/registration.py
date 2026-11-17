@@ -245,3 +245,21 @@ def register_appointments() -> None:
                 owner_app=APP_LABEL,
             )
         )
+
+
+ARRIVAL_NOTIFICATION = "med_scheduling.patient_arrived"
+
+
+def register_notifications() -> None:
+    from skeleton.notifications.registry import NotificationType, register_notification_type
+
+    register_notification_type(
+        NotificationType(
+            code=ARRIVAL_NOTIFICATION,
+            label="Paciente chegou",  # A plain string: the core inbox returns it as is.
+            payload_fields=("code", "starts_at"),
+            target_table_key="med_scheduling.appointment",
+            owner_app=APP_LABEL,
+            group_key="arrived:{target}",
+        )
+    )

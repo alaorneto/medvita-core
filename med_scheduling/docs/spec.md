@@ -79,6 +79,21 @@ A FK do paciente não é oculta: o banco e o núcleo impedem excluir um paciente
 - `day` devolve, de cada agenda legível, as consultas e os horários livres do dia local, com um número fixo de consultas ao banco.
 - Eventos `med_scheduling.appointment_*` com payload `code`, `schedule`, `patient`, `appointment_type`, `billing_code`, `starts_at`, `ends_at`, `status`.
 
+### Atendimento
+
+A máquina de situações (`transitions.py`) é a única fonte das mudanças:
+
+```text
+scheduled ──confirm──► confirmed ──check_in──► arrived ──start──► in_progress ──complete──► completed
+    │  └───────────check_in────────────────────►┘          └────────────complete──────────►┘
+    ├── mark_no_show ──► no_show       (de scheduled ou confirmed, só depois do início)
+    └── cancel ──► cancelled           (de scheduled, confirmed ou arrived)
+```
+
+`completed`, `no_show` e `cancelled` são finais: erro de situação se corrige com outra consulta. Cada transição grava a hora, usa CAS e publica o evento dela. A chegada (`check_in`) notifica o profissional da agenda, uma vez por consulta; a notificação leva o código e o horário, nunca o paciente.
+
+Outras apps põem botões na consulta com `register_appointment_action(AppointmentAction(code, label, url_name, statuses, order))`; `appointment_actions` devolve os das apps ativas para a situação atual, em ordem.
+
 ### Horários livres
 
 `available_slots(schedule_id, start_date, end_date, appointment_type_id=None)` devolve os horários livres de até 62 dias (`slots.py`, funções puras):

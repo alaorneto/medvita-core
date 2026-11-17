@@ -27,6 +27,7 @@ from skeleton.service_api import (
 )
 
 from . import common
+from .extension import AppointmentAction, register_appointment_action
 from .models import (
     Appointment,
     AppointmentType,
@@ -48,6 +49,8 @@ Scalar = str | int | bool | date | None
 
 __all__ = [
     "APP_ID",
+    "AppointmentAction",
+    "AppointmentActionInfo",
     "AppointmentDetail",
     "AppointmentInfo",
     "AppointmentTypeInfo",
@@ -61,6 +64,7 @@ __all__ = [
     "ScheduleInfo",
     "SchedulingService",
     "Slot",
+    "register_appointment_action",
 ]
 
 
@@ -352,6 +356,14 @@ class DayAgenda:
     schedule: ScheduleInfo
     appointments: tuple[AppointmentInfo, ...]
     free: tuple[Slot, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AppointmentActionInfo:
+    code: str
+    label: str
+    url_name: str
+    order: int
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -685,6 +697,51 @@ def _check_interval(
             busy_room = busy_room.exclude(pk=ignore)
         if busy_room.exists():
             raise Conflict("room_unavailable", gettext("A sala já está ocupada neste horário."))
+
+
+def _transition(actor: Any, appointment_id: object, expected_revision: object, action: str) -> Appointment:
+    """Apply one transition of ``transitions.py`` with CAS, stamp its time and publish its event."""
+    from django.utils import timezone
+
+    from . import transitions
+
+    row = _appointment(actor, appointment_id, write=True, lock=True)
+    common.check_revision(row, expected_revision)
+    try:
+        state = transitions.target(action, row.status)
+    except transitions.InvalidTransition:
+        raise Conflict("invalid_transition", gettext("Esta mudança de situação não é permitida agora.")) from None
+    now = timezone.now()
+    if action == "mark_no_show" and now < row.starts_at:
+        raise Conflict("invalid_transition", gettext("Só é possível marcar falta depois do horário da consulta."))
+    values: dict[str, Any] = {"status": state}
+    stamp = transitions.STAMP_OF.get(action)
+    if stamp is not None:
+        values[stamp] = now
+    common.apply_changes(row, values)
+    _publish(actor, transitions.EVENT_OF[action], row)
+    return row
+
+
+def _notify_arrival(actor: Any, row: Appointment) -> None:
+    from skeleton.service_api.notifications import NotificationService, Recipients
+
+    from .registration import ARRIVAL_NOTIFICATION
+
+    if row.professional_id is None:
+        return
+    person = Professional.objects.filter(pk=row.professional_id).values_list("user_id", flat=True).first()
+    if person is None:
+        return
+    NotificationService().notify(
+        actor=actor,
+        type_code=ARRIVAL_NOTIFICATION,
+        recipients=Recipients(users=(person,)),
+        payload=(("code", row.code), ("starts_at", as_utc(row.starts_at).isoformat())),
+        target_table_key="med_scheduling.appointment",
+        target_id=row.pk,
+        dedupe_key=f"arrived:{row.pk}",
+    )
 
 
 # ------------------------------------------------------------------------------------ service
@@ -1759,3 +1816,74 @@ class SchedulingService(ServiceAPI):
                 )
             )
         return tuple(result)
+
+    # ------------------------------------------------------------------ attendance
+
+    @service_method(read_only=False, since="0.1.0")
+    def confirm(self, *, actor: Any, appointment_id: UUID, expected_revision: int) -> AppointmentInfo:
+        """Confirm a scheduled appointment, with CAS.
+
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+        Efeitos: grava a situação e a hora e publica ``med_scheduling.appointment_confirmed``.
+        """
+        return appointment_info(_transition(actor, appointment_id, expected_revision, "confirm"))
+
+    @service_method(read_only=False, since="0.1.0")
+    def check_in(self, *, actor: Any, appointment_id: UUID, expected_revision: int) -> AppointmentInfo:
+        """Register that the patient arrived, with CAS, and tell the professional.
+
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+        Efeitos: grava a situação e a hora, publica ``med_scheduling.appointment_arrived`` e notifica
+        o profissional da agenda (uma vez por consulta; a notificação leva o código, nunca o paciente).
+        """
+        row = _transition(actor, appointment_id, expected_revision, "check_in")
+        _notify_arrival(actor, row)
+        return appointment_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def start(self, *, actor: Any, appointment_id: UUID, expected_revision: int) -> AppointmentInfo:
+        """Start the care of an arrived patient, with CAS.
+
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+        Efeitos: grava a situação e a hora e publica ``med_scheduling.appointment_started``.
+        """
+        return appointment_info(_transition(actor, appointment_id, expected_revision, "start"))
+
+    @service_method(read_only=False, since="0.1.0")
+    def complete(self, *, actor: Any, appointment_id: UUID, expected_revision: int) -> AppointmentInfo:
+        """Finish an appointment (arrived or in progress), with CAS.
+
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+        Efeitos: grava a situação e a hora e publica ``med_scheduling.appointment_completed``.
+        """
+        return appointment_info(_transition(actor, appointment_id, expected_revision, "complete"))
+
+    @service_method(read_only=False, since="0.1.0")
+    def mark_no_show(self, *, actor: Any, appointment_id: UUID, expected_revision: int) -> AppointmentInfo:
+        """Mark that the patient did not come (only after the start time), with CAS.
+
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
+        Efeitos: grava a situação, mantém o evento no calendário e publica ``med_scheduling.appointment_no_show``.
+        """
+        return appointment_info(_transition(actor, appointment_id, expected_revision, "mark_no_show"))
+
+    @service_method(read_only=True, since="0.1.0")
+    def appointment_actions(self, *, actor: Any, appointment_id: UUID) -> tuple[AppointmentActionInfo, ...]:
+        """Actions other apps registered for the current state of an appointment, in order.
+
+        Autorização: leitura da agenda (cada ação autoriza a própria página).
+        Erros: NotFound para consulta ilegível.
+        Efeitos: nenhum.
+        """
+        from .extension import active_actions
+
+        row = _appointment(actor, appointment_id)
+        return tuple(
+            AppointmentActionInfo(action.code, str(action.label), action.url_name, action.order)
+            for action in active_actions(actor, row.status)
+        )
