@@ -63,6 +63,29 @@ class Clinic:
         return self.a if organization.pk == self.a.pk else self.b
 
     @contextmanager
+    def app_disabled(self, app_label: str, organization: Any | None = None):
+        """Disable ``app_label`` (and the apps that depend on it) in ``organization``, A by default; enable after."""
+        from skeleton.testing.service_api import _set_enabled, acting_as
+
+        side = self.side(organization or self.org_a)
+        with acting_as(side.admin, side.organization, source="test:clinic-disable"):
+            _set_enabled(app_label, side.admin, enabled=False)
+        try:
+            yield
+        finally:
+            with acting_as(side.admin, side.organization, source="test:clinic-enable"):
+                _set_enabled(app_label, side.admin, enabled=True)
+
+    def caller(self, function: Any, user: Any, organization: Any | None = None):
+        """A zero-argument call of ``function(actor)`` in the user's own context (for the kit's asserts)."""
+
+        def call() -> Any:
+            with self.as_user(user, organization) as actor:
+                return function(actor)
+
+        return call
+
+    @contextmanager
     def as_user(self, user: Any, organization: Any | None = None):
         """Request and tenant context of ``user`` in ``organization`` (A by default); yields the actor."""
         from skeleton.testing.service_api import acting_as

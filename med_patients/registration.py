@@ -96,3 +96,23 @@ def register_tables() -> None:
             access_parent="registry",
         )
     )
+
+
+EVENT_PAYLOAD = ("code", "status", "registry")
+PATIENT_EVENTS = ("patient_created", "patient_updated", "patient_status_changed")
+
+
+def register_sequences_and_events() -> None:
+    from skeleton.events.registry import EventType, register_event_type
+    from skeleton.sequences.registry import SequenceSpec, register_sequence
+
+    register_sequence(SequenceSpec(key=PATIENT_SEQUENCE, period="none", template="P{number:06d}", owner_app=APP_LABEL))
+    for name in PATIENT_EVENTS:
+        register_event_type(
+            EventType(
+                code=f"{APP_LABEL}.{name}",
+                table_key="med_patients.patient",
+                payload_fields=EVENT_PAYLOAD,
+                owner_app=APP_LABEL,
+            )
+        )
