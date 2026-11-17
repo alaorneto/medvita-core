@@ -528,6 +528,7 @@ What other apps show of a patient in a list: never contacts, documents or addres
 | `birth_date` | `date | None` |
 | `status` | `str` |
 | `revision` | `int` |
+| `processing_restricted` | `bool` |
 
 ### `RegistryInfo`
 

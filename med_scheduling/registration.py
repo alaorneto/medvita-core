@@ -175,3 +175,73 @@ def register_schedule_tables() -> None:
             access_parent="schedule",
         )
     )
+
+
+APPOINTMENT_SEQUENCE = "med_scheduling.appointment"
+APPOINTMENT_EVENTS = ("booked", "rescheduled", "confirmed", "arrived", "started", "completed", "no_show", "cancelled")
+APPOINTMENT_PAYLOAD = (
+    "code",
+    "schedule",
+    "patient",
+    "appointment_type",
+    "billing_code",
+    "starts_at",
+    "ends_at",
+    "status",
+)
+
+
+def register_appointments() -> None:
+    from skeleton.events.registry import EventType, register_event_type
+    from skeleton.sequences.registry import SequenceSpec, register_sequence
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import Appointment
+
+    register(
+        TableSpec(
+            model=Appointment,
+            description=_("Consultas das agendas; as observações são sensíveis e nunca saem em eventos."),
+            label=_("Consultas"),
+            scope="organization",
+            read_fields=(
+                "schedule",
+                "code",
+                "patient",
+                "appointment_type",
+                "professional",
+                "room",
+                "starts_at",
+                "ends_at",
+                "status",
+                "is_fit_in",
+                "billing_code",
+                "payment_kind",
+                "notes",
+                "confirmed_at",
+                "arrived_at",
+                "started_at",
+                "completed_at",
+                "cancelled_at",
+                "cancel_reason",
+                "cancel_note",
+                "rescheduled_from",
+            ),
+            write_fields=(),
+            sensitive_fields=("notes", "cancel_note"),
+            expose_api=False,
+            access_parent="schedule",
+        )
+    )
+    register_sequence(
+        SequenceSpec(key=APPOINTMENT_SEQUENCE, period="none", template="A{number:07d}", owner_app=APP_LABEL)
+    )
+    for name in APPOINTMENT_EVENTS:
+        register_event_type(
+            EventType(
+                code=f"{APP_LABEL}.appointment_{name}",
+                table_key="med_scheduling.appointment",
+                payload_fields=APPOINTMENT_PAYLOAD,
+                owner_app=APP_LABEL,
+            )
+        )

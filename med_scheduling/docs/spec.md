@@ -53,6 +53,32 @@ O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do
 - Um bloqueio vira evento gerenciado no calendário (título "Bloqueio"); removê-lo remove o evento.
 - O `setup` também dá ao papel `member` leitura e alteração da tabela de calendários do núcleo: quem tem concessão numa agenda precisa enxergar o calendário dela.
 
+**`Appointment`** (derivada da agenda)
+
+| Campo | Regra |
+|---|---|
+| `schedule`, `code`, `patient`, `rescheduled_from` | imutáveis; `code` é `A` + 7 dígitos da sequência `med_scheduling.appointment` |
+| `appointment_type`, `professional`, `room` | o profissional é copiado da agenda na marcação; a sala é a pedida ou a da agenda |
+| `starts_at`, `ends_at` | fim depois do início |
+| `status` | `scheduled`, `confirmed`, `arrived`, `in_progress`, `completed`, `no_show`, `cancelled`; muda só pela máquina de `transitions.py` |
+| `is_fit_in` | encaixe |
+| `billing_code` | cópia do tipo na marcação |
+| `payment_kind` | `private`, `insurance`, `courtesy` |
+| `notes`, `cancel_note` | **sensíveis**: observação da recepção pode conter o motivo da consulta; nunca saem em lista nem em evento |
+| `confirmed_at`, `arrived_at`, `started_at`, `completed_at`, `cancelled_at`, `cancel_reason` | carimbos e motivo |
+
+A FK do paciente não é oculta: o banco e o núcleo impedem excluir um paciente com consulta.
+
+### Consultas
+
+- `book` trava a agenda (`SELECT ... FOR UPDATE`) enquanto confere o intervalo: duas marcações do mesmo horário nunca vencem ambas. Sem encaixe, o intervalo fica dentro da grade (do tipo, quando a faixa restringe), fora de bloqueio e sem cruzar consulta viva da agenda; com encaixe, dispensa a grade e a sobreposição, nunca o bloqueio. Um tipo que exige sala exige a sala, e a sala não pode ter outra consulta viva no intervalo, em qualquer agenda.
+- O paciente precisa estar legível, ativo e sem tratamento restrito.
+- O calendário da agenda recebe o evento gerenciado "<tipo> · <código>", com o profissional como participante: nunca nome, telefone ou observação do paciente.
+- `reschedule` na mesma agenda muda o horário, mantém o código e volta a "agendada" se estava confirmada; para outra agenda, cancela a atual ("remarcada") e marca uma nova que aponta para ela.
+- `cancel` vale para agendada, confirmada ou paciente chegou; remove o evento do calendário.
+- `day` devolve, de cada agenda legível, as consultas e os horários livres do dia local, com um número fixo de consultas ao banco.
+- Eventos `med_scheduling.appointment_*` com payload `code`, `schedule`, `patient`, `appointment_type`, `billing_code`, `starts_at`, `ends_at`, `status`.
+
 ### Horários livres
 
 `available_slots(schedule_id, start_date, end_date, appointment_type_id=None)` devolve os horários livres de até 62 dias (`slots.py`, funções puras):

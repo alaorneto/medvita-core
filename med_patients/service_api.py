@@ -113,11 +113,18 @@ class PatientSummary:
     birth_date: date | None
     status: str
     revision: int
+    processing_restricted: bool = False
 
 
 def patient_summary(patient: Patient) -> PatientSummary:
     return PatientSummary(
-        patient.pk, patient.code, patient.display_name, patient.birth_date, patient.status, patient.revision
+        patient.pk,
+        patient.code,
+        patient.display_name,
+        patient.birth_date,
+        patient.status,
+        patient.revision,
+        patient.processing_restricted,
     )
 
 

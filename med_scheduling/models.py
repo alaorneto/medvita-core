@@ -240,3 +240,82 @@ class ScheduleBlock(OrganizationRecord):
             models.CheckConstraint(condition=Q(starts_at__lt=models.F("ends_at")), name="med_scheduling_block_window"),
         ]
         ordering = ("starts_at", "sysid")
+
+
+class Appointment(OrganizationRecord):
+    """An appointment of a patient in a schedule; its state changes only through ``transitions.py``."""
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", gettext_lazy("Agendada")
+        CONFIRMED = "confirmed", gettext_lazy("Confirmada")
+        ARRIVED = "arrived", gettext_lazy("Paciente chegou")
+        IN_PROGRESS = "in_progress", gettext_lazy("Em atendimento")
+        COMPLETED = "completed", gettext_lazy("Realizada")
+        NO_SHOW = "no_show", gettext_lazy("Falta")
+        CANCELLED = "cancelled", gettext_lazy("Cancelada")
+
+    class PaymentKind(models.TextChoices):
+        PRIVATE = "private", gettext_lazy("Particular")
+        INSURANCE = "insurance", gettext_lazy("Convênio")
+        COURTESY = "courtesy", gettext_lazy("Cortesia")
+
+    class CancelReason(models.TextChoices):
+        PATIENT = "patient", gettext_lazy("Pedido do paciente")
+        PROFESSIONAL = "professional", gettext_lazy("Pedido do profissional")
+        CLINIC = "clinic", gettext_lazy("Pedido da clínica")
+        RESCHEDULED = "rescheduled", gettext_lazy("Remarcada")
+        OTHER = "other", gettext_lazy("Outro")
+
+    schedule = models.ForeignKey(Schedule, on_delete=models.PROTECT, related_name="+")
+    code = models.CharField(max_length=20)
+    patient = models.ForeignKey(
+        "med_patients.Patient", on_delete=models.PROTECT, related_name="med_scheduling_appointments"
+    )
+    appointment_type = models.ForeignKey(AppointmentType, on_delete=models.PROTECT, related_name="+")
+    professional = models.ForeignKey(Professional, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    room = models.ForeignKey(Room, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.SCHEDULED)
+    is_fit_in = models.BooleanField(default=False)
+    billing_code = models.CharField(max_length=40, blank=True)
+    payment_kind = models.CharField(max_length=12, choices=PaymentKind.choices, default=PaymentKind.PRIVATE)
+    notes = models.TextField(blank=True)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    arrived_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancel_reason = models.CharField(max_length=12, choices=CancelReason.choices, blank=True)
+    cancel_note = models.CharField(max_length=200, blank=True)
+    rescheduled_from = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    immutable_fields = ("schedule_id", "code", "patient_id", "rescheduled_from_id")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("organization", "code"), name="med_scheduling_appointment_code", violation_error_code="unique"
+            ),
+            models.CheckConstraint(
+                condition=Q(starts_at__lt=models.F("ends_at")), name="med_scheduling_appointment_window"
+            ),
+            models.CheckConstraint(
+                condition=Q(
+                    status__in=("scheduled", "confirmed", "arrived", "in_progress", "completed", "no_show", "cancelled")
+                ),
+                name="med_scheduling_appointment_status",
+            ),
+            models.CheckConstraint(
+                condition=Q(payment_kind__in=("private", "insurance", "courtesy")),
+                name="med_scheduling_appointment_payment_kind",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=("schedule", "starts_at"), name="med_sched_appt_schedule_start"),
+            models.Index(fields=("patient", "starts_at"), name="med_sched_appt_patient_start"),
+            models.Index(fields=("organization", "status", "starts_at"), name="med_sched_appt_status_start"),
+        ]
+        ordering = ("starts_at", "sysid")
+
+    def __str__(self) -> str:
+        return self.code

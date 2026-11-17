@@ -13,10 +13,30 @@ from uuid import UUID
 
 from django.utils.translation import gettext
 
-from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound, ServiceAPI, as_uuid, service_method
+from skeleton.service_api import (
+    Conflict,
+    Forbidden,
+    InvalidInput,
+    NotFound,
+    Page,
+    ServiceAPI,
+    as_utc,
+    as_uuid,
+    paginate,
+    service_method,
+)
 
 from . import common
-from .models import AppointmentType, AvailabilityRule, Practice, Professional, Room, Schedule, ScheduleBlock
+from .models import (
+    Appointment,
+    AppointmentType,
+    AvailabilityRule,
+    Practice,
+    Professional,
+    Room,
+    Schedule,
+    ScheduleBlock,
+)
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.scheduling"
@@ -28,10 +48,13 @@ Scalar = str | int | bool | date | None
 
 __all__ = [
     "APP_ID",
+    "AppointmentDetail",
+    "AppointmentInfo",
     "AppointmentTypeInfo",
     "AvailabilityRuleInfo",
     "AvailabilityRuleInput",
     "BlockInfo",
+    "DayAgenda",
     "PracticeInfo",
     "ProfessionalInfo",
     "RoomInfo",
@@ -249,6 +272,88 @@ class Slot:
     schedule_id: UUID
 
 
+@dataclass(frozen=True, slots=True)
+class AppointmentInfo:
+    """An appointment as lists show it: never the notes of the reception."""
+
+    sysid: UUID
+    code: str
+    schedule_id: UUID
+    patient_id: UUID
+    appointment_type_id: UUID
+    professional_id: UUID | None
+    room_id: UUID | None
+    starts_at: datetime
+    ends_at: datetime
+    status: str
+    is_fit_in: bool
+    billing_code: str
+    payment_kind: str
+    rescheduled_from_id: UUID | None
+    revision: int
+
+
+def appointment_info(row: Appointment) -> AppointmentInfo:
+    return AppointmentInfo(
+        row.pk,
+        row.code,
+        row.schedule_id,
+        row.patient_id,
+        row.appointment_type_id,
+        row.professional_id,
+        row.room_id,
+        as_utc(row.starts_at),
+        as_utc(row.ends_at),
+        row.status,
+        row.is_fit_in,
+        row.billing_code,
+        row.payment_kind,
+        row.rescheduled_from_id,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class AppointmentDetail:
+    """One appointment with the notes and the history of its state."""
+
+    appointment: AppointmentInfo
+    notes: str
+    confirmed_at: datetime | None
+    arrived_at: datetime | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    cancelled_at: datetime | None
+    cancel_reason: str
+    cancel_note: str
+    writable: bool
+
+
+def appointment_detail(row: Appointment, *, writable: bool) -> AppointmentDetail:
+    def stamp(value: datetime | None) -> datetime | None:
+        return as_utc(value) if value else None
+
+    return AppointmentDetail(
+        appointment_info(row),
+        row.notes,
+        stamp(row.confirmed_at),
+        stamp(row.arrived_at),
+        stamp(row.started_at),
+        stamp(row.completed_at),
+        stamp(row.cancelled_at),
+        row.cancel_reason,
+        row.cancel_note,
+        writable,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DayAgenda:
+    schedule: ScheduleInfo
+    appointments: tuple[AppointmentInfo, ...]
+    free: tuple[Slot, ...]
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -412,6 +517,174 @@ def _day_window(day_start: date, day_end: date, timezone: str) -> tuple[datetime
         datetime.combine(day_start, time(), tzinfo=zone),
         datetime.combine(day_end + timedelta(days=1), time(), tzinfo=zone),
     )
+
+
+def _appointment(actor: Any, appointment_id: object, *, write: bool = False, lock: bool = False) -> Appointment:
+    return common.row(actor, Appointment, appointment_id, field="appointment_id", write=write, lock=lock)
+
+
+def _payload(row: Appointment) -> tuple[tuple[str, str], ...]:
+    return (
+        ("code", row.code),
+        ("schedule", str(row.schedule_id)),
+        ("patient", str(row.patient_id)),
+        ("appointment_type", str(row.appointment_type_id)),
+        ("billing_code", row.billing_code),
+        ("starts_at", as_utc(row.starts_at).isoformat()),
+        ("ends_at", as_utc(row.ends_at).isoformat()),
+        ("status", row.status),
+    )
+
+
+def _publish(actor: Any, suffix: str, row: Appointment) -> None:
+    from skeleton.service_api.events import EventService
+
+    EventService().publish(
+        actor=actor, event_type=f"{APP_LABEL}.appointment_{suffix}", record_id=row.pk, data=_payload(row)
+    )
+
+
+def _project(actor: Any, row: Appointment, schedule: Schedule) -> None:
+    """The appointment in the schedule's calendar: kind and code only, never the patient."""
+    from . import calendar_bridge
+
+    attendees = ()
+    if row.professional_id is not None:
+        user = Professional.objects.filter(pk=row.professional_id).values_list("user_id", flat=True).first()
+        attendees = (user,) if user else ()
+    calendar_bridge.put_event(
+        actor,
+        source_key=str(row.pk),
+        calendar_id=schedule.calendar_id,
+        title=f"{row.appointment_type.name} · {row.code}",
+        starts_at=row.starts_at,
+        ends_at=row.ends_at,
+        tzid=schedule.practice.timezone,
+        attendee_user_ids=attendees,
+        path=calendar_bridge.source_path(schedule.pk, row.pk),
+    )
+
+
+def _readable_patient(actor: Any, patient_id: object) -> Any:
+    from applications.med_patients.service_api import PatientService
+
+    summary = PatientService().summary(actor=actor, patient_id=as_uuid(patient_id, field="patient_id"))
+    if summary.status != "active":
+        raise Conflict("patient_inactive", gettext("O paciente não está ativo."))
+    if summary.processing_restricted:
+        raise Conflict("processing_restricted", gettext("O tratamento dos dados deste paciente está restrito."))
+    return summary
+
+
+def _book(
+    actor: Any,
+    *,
+    schedule_id: object,
+    patient_id: object,
+    appointment_type_id: object,
+    starts_at: object,
+    duration_minutes: object,
+    fit_in: object,
+    notes: object,
+    payment_kind: object,
+    room_id: object,
+    idempotency_key: object,
+    rescheduled_from: Appointment | None = None,
+) -> Appointment:
+    """Book an appointment (the body of ``SchedulingService.book``, shared with a reschedule)."""
+    from datetime import timedelta
+
+    from skeleton.access.policies import require_parent_action
+    from skeleton.service_api.sequences import SequenceService
+
+    from .registration import APPOINTMENT_SEQUENCE
+
+    key = common.key(idempotency_key)
+    starts_at = _aware(starts_at, "starts_at")
+    if payment_kind not in Appointment.PaymentKind.values:
+        raise InvalidInput({"payment_kind": [gettext("Forma de pagamento desconhecida.")]})
+    if len(str(notes)) > 2000:
+        raise InvalidInput({"notes": [gettext("Texto longo demais.")]})
+    if duration_minutes is not None and (type(duration_minutes) is not int or not 5 <= duration_minutes <= 480):
+        raise InvalidInput({"duration_minutes": [gettext("Use de 5 a 480 minutos.")]})
+    sysid = common.deterministic_id("appointment", actor, key)
+    existing = Appointment.objects.filter(pk=sysid).first()
+    if existing is not None:
+        return existing
+    schedule = _schedule(actor, schedule_id, write=True, lock=True)
+    require_parent_action(Appointment, schedule, user=actor, action="create")
+    patient = _readable_patient(actor, patient_id)
+    kind = common.row(actor, AppointmentType, appointment_type_id, field="appointment_type_id", write=False)
+    room = common.row(actor, Room, room_id, field="room_id", write=False) if room_id is not None else schedule.room
+    if kind.requires_room and room is None:
+        raise InvalidInput({"room_id": [gettext("Este tipo de atendimento exige uma sala.")]})
+    ends_at = starts_at + timedelta(minutes=duration_minutes or kind.duration_minutes)
+    _check_interval(actor, schedule, kind, starts_at, ends_at, fit_in=bool(fit_in), room=room)
+    number = SequenceService().next_number(actor=actor, key=APPOINTMENT_SEQUENCE)
+    row = Appointment(
+        sysid=sysid,
+        organization_id=schedule.organization_id,
+        schedule=schedule,
+        code=number.formatted,
+        patient_id=patient.sysid,
+        appointment_type=kind,
+        professional_id=schedule.professional_id,
+        room=room,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        is_fit_in=bool(fit_in),
+        billing_code=kind.billing_code,
+        payment_kind=payment_kind,
+        notes=str(notes).strip(),
+        rescheduled_from=rescheduled_from,
+    )
+    row.save()
+    _project(actor, row, schedule)
+    _publish(actor, "booked", row)
+    return row
+
+
+def _check_interval(
+    actor: Any,
+    schedule: Schedule,
+    kind: AppointmentType,
+    starts_at: datetime,
+    ends_at: datetime,
+    *,
+    fit_in: bool,
+    room: Room | None,
+    ignore: UUID | None = None,
+) -> None:
+    """The rules of a booking: inside the grid and free (unless a fit-in), never over a block."""
+    from skeleton.access.policies import authorized_queryset
+
+    from .slots import fits_grid, windows_of
+    from .transitions import LIVE
+
+    blocks = authorized_queryset(ScheduleBlock, user=actor, action="read").filter(
+        schedule=schedule, starts_at__lt=ends_at, ends_at__gt=starts_at
+    )
+    if blocks.exists():
+        raise Conflict("slot_unavailable", gettext("O horário está bloqueado."))
+    if not fit_in:
+        rules = authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule=schedule)
+        if not fits_grid(
+            windows_of(rules), starts_at, ends_at, timezone=schedule.practice.timezone, appointment_type_id=kind.pk
+        ):
+            raise Conflict("slot_unavailable", gettext("O horário está fora da grade da agenda."))
+        live = Appointment.objects.filter(
+            schedule=schedule, status__in=LIVE, starts_at__lt=ends_at, ends_at__gt=starts_at
+        )
+        if ignore is not None:
+            live = live.exclude(pk=ignore)
+        if live.exists():
+            raise Conflict("slot_unavailable", gettext("Já existe consulta neste horário."))
+    if room is not None:
+        busy_room = Appointment.objects.filter(room=room, status__in=LIVE, starts_at__lt=ends_at, ends_at__gt=starts_at)
+        if ignore is not None:
+            busy_room = busy_room.exclude(pk=ignore)
+        if busy_room.exists():
+            raise Conflict("room_unavailable", gettext("A sala já está ocupada neste horário."))
 
 
 # ------------------------------------------------------------------------------------ service
@@ -1201,3 +1474,288 @@ class SchedulingService(ServiceAPI):
             appointment_type_id=appointment_type_id,
         )
         return tuple(Slot(start, end, schedule.pk) for start, end in found)
+
+    # ------------------------------------------------------------------ appointments
+
+    @service_method(read_only=False, since="0.1.0")
+    def book(
+        self,
+        *,
+        actor: Any,
+        schedule_id: UUID,
+        patient_id: UUID,
+        appointment_type_id: UUID,
+        starts_at: datetime,
+        duration_minutes: int | None = None,
+        fit_in: bool = False,
+        notes: str = "",
+        payment_kind: str = "private",
+        room_id: UUID | None = None,
+        idempotency_key: str,
+    ) -> AppointmentInfo:
+        """Book an appointment; a fit-in skips the grid and the overlap check, never a block.
+
+        The schedule is locked while the interval is checked: two bookings of the same slot never
+        both win. The calendar of the schedule gets the event "<tipo> · <código>", never the patient.
+        Autorização: alteração na agenda e leitura do paciente.
+        Erros: NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda;
+        InvalidInput (horário sem fuso, duração fora de 5 a 480, forma de pagamento, observação
+        longa, sala exigida pelo tipo); Conflict("slot_unavailable", "room_unavailable",
+        "patient_inactive", "processing_restricted").
+        Efeitos: código da sequência sem lacunas, consulta gravada, evento no calendário e
+        ``med_scheduling.appointment_booked`` publicados; a mesma chave devolve a já marcada.
+        """
+        return appointment_info(
+            _book(
+                actor,
+                schedule_id=schedule_id,
+                patient_id=patient_id,
+                appointment_type_id=appointment_type_id,
+                starts_at=starts_at,
+                duration_minutes=duration_minutes,
+                fit_in=fit_in,
+                notes=notes,
+                payment_kind=payment_kind,
+                room_id=room_id,
+                idempotency_key=idempotency_key,
+            )
+        )
+
+    @service_method(read_only=False, since="0.1.0")
+    def reschedule(
+        self,
+        *,
+        actor: Any,
+        appointment_id: UUID,
+        starts_at: datetime,
+        expected_revision: int,
+        schedule_id: UUID | None = None,
+        idempotency_key: str | None = None,
+    ) -> AppointmentInfo:
+        """Move an appointment to another time (same duration), with CAS; to another schedule, a new one.
+
+        In the same schedule the appointment keeps its code and goes back to "agendada"; to another
+        schedule the current one is cancelled ("remarcada") and a new one is booked pointing to it.
+        Autorização: alteração na agenda atual (e na nova, quando outra).
+        Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "invalid_transition",
+        "slot_unavailable", "room_unavailable").
+        Efeitos: atualiza (ou cancela e cria) a consulta e o evento do calendário e publica
+        ``appointment_rescheduled`` (ou ``appointment_cancelled`` e ``appointment_booked``).
+        """
+        from .transitions import CANCELLED, CONFIRMED, LIVE, SCHEDULED
+
+        starts_at = _aware(starts_at, "starts_at")
+        row = _appointment(actor, appointment_id, write=True, lock=True)
+        common.check_revision(row, expected_revision)
+        if row.status not in LIVE or row.status == "in_progress":
+            raise Conflict("invalid_transition", gettext("Esta consulta não pode mais ser remarcada."))
+        duration = row.ends_at - row.starts_at
+        if schedule_id is not None and as_uuid(schedule_id, field="schedule_id") != row.schedule_id:
+            from . import calendar_bridge
+
+            target = _schedule(actor, schedule_id, write=True, lock=True)
+            _schedule(actor, row.schedule_id, write=True, lock=True)
+            row.status = CANCELLED
+            row.cancel_reason = Appointment.CancelReason.RESCHEDULED
+            from django.utils import timezone as dj_timezone
+
+            row.cancelled_at = dj_timezone.now()
+            row.save(update_fields={"status", "cancel_reason", "cancelled_at"})
+            calendar_bridge.remove_event(actor, source_key=str(row.pk))
+            _publish(actor, "cancelled", row)
+            moved = _book(
+                actor,
+                schedule_id=target.pk,
+                patient_id=row.patient_id,
+                appointment_type_id=row.appointment_type_id,
+                starts_at=starts_at,
+                duration_minutes=int(duration.total_seconds() // 60),
+                fit_in=False,
+                notes=row.notes,
+                payment_kind=row.payment_kind,
+                room_id=None,
+                idempotency_key=idempotency_key or f"reschedule:{row.pk}:{starts_at.isoformat()}",
+                rescheduled_from=row,
+            )
+            return appointment_info(moved)
+        schedule = _schedule(actor, row.schedule_id, write=True, lock=True)
+        ends_at = starts_at + duration
+        _check_interval(
+            actor,
+            schedule,
+            row.appointment_type,
+            starts_at,
+            ends_at,
+            fit_in=row.is_fit_in,
+            room=row.room,
+            ignore=row.pk,
+        )
+        values = {"starts_at": starts_at, "ends_at": ends_at}
+        if row.status == CONFIRMED:
+            values["status"] = SCHEDULED
+        common.apply_changes(row, values)
+        _project(actor, row, schedule)
+        _publish(actor, "rescheduled", row)
+        return appointment_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def cancel(
+        self, *, actor: Any, appointment_id: UUID, reason: str, expected_revision: int, note: str = ""
+    ) -> AppointmentInfo:
+        """Cancel an appointment (scheduled, confirmed or arrived), with CAS.
+
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; InvalidInput para motivo desconhecido ou observação acima de 200
+        caracteres; Conflict("stale_revision", "invalid_transition").
+        Efeitos: grava a situação e o motivo, remove o evento do calendário e publica
+        ``med_scheduling.appointment_cancelled``.
+        """
+        from django.utils import timezone
+
+        from . import calendar_bridge, transitions
+
+        if reason not in Appointment.CancelReason.values:
+            raise InvalidInput({"reason": [gettext("Motivo desconhecido.")]})
+        if len(str(note)) > 200:
+            raise InvalidInput({"note": [gettext("Texto longo demais.")]})
+        row = _appointment(actor, appointment_id, write=True, lock=True)
+        common.check_revision(row, expected_revision)
+        try:
+            state = transitions.target("cancel", row.status)
+        except transitions.InvalidTransition:
+            raise Conflict("invalid_transition", gettext("Esta consulta não pode ser cancelada.")) from None
+        common.apply_changes(
+            row,
+            {
+                "status": state,
+                "cancel_reason": reason,
+                "cancel_note": str(note).strip(),
+                "cancelled_at": timezone.now(),
+            },
+        )
+        calendar_bridge.remove_event(actor, source_key=str(row.pk))
+        _publish(actor, "cancelled", row)
+        return appointment_info(row)
+
+    @service_method(read_only=True, since="0.1.0")
+    def appointment(self, *, actor: Any, appointment_id: UUID) -> AppointmentDetail:
+        """One appointment with its notes and the times of each state.
+
+        Autorização: leitura da agenda.
+        Erros: NotFound para consulta inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        row = _appointment(actor, appointment_id)
+        return appointment_detail(row, writable=row.schedule_id in _writable_schedule_ids(actor))
+
+    @service_method(read_only=True, since="0.1.0")
+    def appointments(
+        self,
+        *,
+        actor: Any,
+        schedule_id: UUID | None = None,
+        patient_id: UUID | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        status: str | None = None,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> Page[AppointmentInfo]:
+        """Appointments of the schedules the actor reads, by start time, filtered.
+
+        Autorização: leitura de cada agenda.
+        Erros: InvalidInput para filtro, cursor ou tamanho de página inválidos.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        rows = authorized_queryset(Appointment, user=actor, action="read")
+        if schedule_id is not None:
+            rows = rows.filter(schedule_id=as_uuid(schedule_id, field="schedule_id"))
+        if patient_id is not None:
+            rows = rows.filter(patient_id=as_uuid(patient_id, field="patient_id"))
+        if start is not None:
+            rows = rows.filter(ends_at__gt=_aware(start, "start"))
+        if end is not None:
+            rows = rows.filter(starts_at__lt=_aware(end, "end"))
+        if status is not None:
+            if status not in Appointment.Status.values:
+                raise InvalidInput({"status": [gettext("Situação desconhecida.")]})
+            rows = rows.filter(status=status)
+        return paginate(rows, convert=appointment_info, cursor=cursor, page_size=page_size, key=("starts_at", "sysid"))
+
+    @service_method(read_only=True, since="0.1.0")
+    def day(self, *, actor: Any, date: date, schedule_ids: tuple[UUID, ...] | None = None) -> tuple[DayAgenda, ...]:
+        """The appointments and free slots of one local day, for every schedule the actor reads.
+
+        The number of queries does not grow with the number of appointments.
+        Autorização: leitura de cada agenda.
+        Erros: InvalidInput para data inválida ou mais de 20 agendas.
+        Efeitos: nenhum.
+        """
+        from django.utils import timezone as dj_timezone
+
+        from skeleton.access.policies import authorized_queryset
+
+        from . import calendar_bridge
+        from .slots import compute_slots, windows_of
+        from .transitions import LIVE
+
+        day = date
+        if not isinstance(day, type(dj_timezone.localdate())):
+            raise InvalidInput({"date": [gettext("Informe uma data.")]})
+        schedules = authorized_queryset(Schedule, user=actor, action="read").filter(is_active=True)
+        if schedule_ids is not None:
+            if not isinstance(schedule_ids, tuple) or len(schedule_ids) > 20:
+                raise InvalidInput({"schedule_ids": [gettext("Informe até 20 agendas.")]})
+            schedules = schedules.filter(pk__in=[as_uuid(value, field="schedule_ids") for value in schedule_ids])
+        schedules = list(schedules.select_related("practice", "professional").order_by("name", "sysid")[:20])
+        if not schedules:
+            return ()
+        timezone = schedules[0].practice.timezone
+        start, end = _day_window(day, day, timezone)
+        ids = [schedule.pk for schedule in schedules]
+        appointments: dict[UUID, list[Appointment]] = {pk: [] for pk in ids}
+        for row in (
+            authorized_queryset(Appointment, user=actor, action="read")
+            .filter(schedule_id__in=ids, starts_at__lt=end, ends_at__gt=start)
+            .order_by("starts_at", "sysid")
+        ):
+            appointments[row.schedule_id].append(row)
+        rules: dict[UUID, list[AvailabilityRule]] = {pk: [] for pk in ids}
+        for rule in authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule_id__in=ids):
+            rules[rule.schedule_id].append(rule)
+        blocks: dict[UUID, list[tuple[datetime, datetime]]] = {pk: [] for pk in ids}
+        for block in authorized_queryset(ScheduleBlock, user=actor, action="read").filter(
+            schedule_id__in=ids, starts_at__lt=end, ends_at__gt=start
+        ):
+            blocks[block.schedule_id].append((block.starts_at, block.ends_at))
+        people = tuple({s.professional.user_id for s in schedules if s.professional_id and s.professional.user_id})
+        busy: dict[UUID, list[tuple[datetime, datetime]]] = {}
+        for block in calendar_bridge.busy_of_people(actor, user_ids=people, start=start, end=end):
+            busy.setdefault(block.user_id, []).append((block.starts_at, block.ends_at))
+        writable = _writable_schedule_ids(actor)
+        now = dj_timezone.now()
+        result = []
+        for schedule in schedules:
+            live = [(row.starts_at, row.ends_at) for row in appointments[schedule.pk] if row.status in LIVE]
+            person = schedule.professional.user_id if schedule.professional_id else None
+            free = compute_slots(
+                windows=windows_of(rules[schedule.pk]),
+                taken=blocks[schedule.pk] + live + busy.get(person, []),
+                start_date=day,
+                end_date=day,
+                slot_minutes=schedule.slot_minutes,
+                duration_minutes=schedule.slot_minutes,
+                timezone=schedule.practice.timezone,
+                now=now,
+                horizon_days=schedule.booking_horizon_days,
+            )
+            result.append(
+                DayAgenda(
+                    schedule_info(schedule, writable=schedule.pk in writable),
+                    tuple(appointment_info(row) for row in appointments[schedule.pk]),
+                    tuple(Slot(slot_start, slot_end, schedule.pk) for slot_start, slot_end in free),
+                )
+            )
+        return tuple(result)
