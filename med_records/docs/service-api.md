@@ -24,6 +24,30 @@ Start a draft addendum (free text) to a signed encounter; it is signed by ``sign
 - **Erros:** NotFound; Forbidden; Conflict("not_signed") para atendimento não assinado ou que já é um adendo; InvalidInput para texto vazio ou longo demais.
 - **Efeitos:** cria o rascunho do adendo com uma seção de texto livre.
 
+#### `add_allergy(*, actor, chart_id, substance, category='other', reaction='', severity='unknown', noted_on=None, idempotency_key) -> AllergyInfo`
+
+Record an allergy on the chart.
+
+- **Autorização:** alteração no arquivo do prontuário.
+- **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo.
+- **Efeitos:** grava a alergia (substância e reação são dado de saúde) e o último registro do prontuário. A mesma chave devolve a já gravada.
+
+#### `add_medication(*, actor, chart_id, name, dose='', route='', frequency='', started_on=None, note='', idempotency_key) -> MedicationInfo`
+
+Record a medication in use on the chart.
+
+- **Autorização:** alteração no arquivo do prontuário.
+- **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo.
+- **Efeitos:** grava o medicamento (dado de saúde) e o último registro do prontuário. A mesma chave devolve o já gravado.
+
+#### `allergies(*, actor, chart_id) -> tuple[AllergyInfo, ...]`
+
+The allergies of the chart, active first, severe before the others.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para prontuário ilegível.
+- **Efeitos:** registra a leitura na trilha do prontuário.
+
 #### `archives(*, actor) -> tuple[ArchiveInfo, ...]`
 
 The clinical archives the actor reads, the default first.
@@ -39,6 +63,14 @@ One chart, without clinical content.
 - **Autorização:** leitura do arquivo.
 - **Erros:** NotFound para prontuário inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
+
+#### `chart_summary(*, actor, chart_id) -> ChartSummary`
+
+Active allergies (severe first), medications in use and the five latest encounter headers.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para prontuário ilegível.
+- **Efeitos:** registra a leitura na trilha do prontuário.
 
 #### `charts_for_patient(*, actor, patient_id) -> tuple[ChartInfo, ...]`
 
@@ -79,6 +111,14 @@ Headers of the chart's encounters, newest first, without clinical content.
 - **Autorização:** leitura do arquivo do prontuário.
 - **Erros:** NotFound para prontuário ilegível; InvalidInput para cursor ou tamanho inválidos.
 - **Efeitos:** nenhum.
+
+#### `medications(*, actor, chart_id) -> tuple[MedicationInfo, ...]`
+
+The medications of the chart, in use first.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para prontuário ilegível.
+- **Efeitos:** registra a leitura na trilha do prontuário.
 
 #### `open_chart(*, actor, patient_id, archive_id=None, idempotency_key=None) -> ChartInfo`
 
@@ -128,6 +168,22 @@ Start a draft encounter written by the actor; with an arrived appointment, start
 - **Erros:** NotFound para prontuário ou consulta ilegíveis; Forbidden sem alteração no arquivo; InvalidInput para tipo desconhecido (o adendo nasce por ``add_addendum``), data futura ou consulta de outro paciente.
 - **Efeitos:** cria o rascunho com o código da sequência e atualiza o último registro do prontuário; com a consulta em "chegou", tenta iniciá-la na agenda (recusa da agenda não impede o rascunho). A mesma chave devolve o mesmo rascunho.
 
+#### `update_allergy(*, actor, allergy_id, changes, expected_revision) -> AllergyInfo`
+
+Change an allergy (its status, for example), with CAS; the audit keeps the history (redacted).
+
+- **Autorização:** alteração no arquivo do prontuário.
+- **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo; Conflict("stale_revision").
+- **Efeitos:** grava só os campos que mudaram.
+
+#### `update_medication(*, actor, medication_id, changes, expected_revision) -> MedicationInfo`
+
+Change a medication (suspend or end it, for example), with CAS.
+
+- **Autorização:** alteração no arquivo do prontuário.
+- **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo; Conflict("stale_revision").
+- **Efeitos:** grava só os campos que mudaram.
+
 #### `verify_encounter(*, actor, encounter_id) -> SealCheck`
 
 Recompute the seal of an encounter from the stored content and its sections.
@@ -137,6 +193,20 @@ Recompute the seal of an encounter from the stored content and its sections.
 - **Efeitos:** nenhum.
 
 ## DTOs
+
+### `AllergyInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `chart_id` | `UUID` |
+| `substance` | `str` |
+| `category` | `str` |
+| `reaction` | `str` |
+| `severity` | `str` |
+| `status` | `str` |
+| `noted_on` | `date | None` |
+| `revision` | `int` |
 
 ### `ArchiveInfo`
 
@@ -162,6 +232,17 @@ A chart without clinical content: which patient, which archive, when it was last
 | `last_entry_at` | `datetime | None` |
 | `revision` | `int` |
 | `writable` | `bool` |
+
+### `ChartSummary`
+
+What the chart page shows first (clinical content: the read is recorded in the trail).
+
+| Campo | Tipo |
+|---|---|
+| `chart` | `ChartInfo` |
+| `allergies` | `tuple[AllergyInfo, ...]` |
+| `medications` | `tuple[MedicationInfo, ...]` |
+| `latest` | `tuple[EncounterHeader, ...]` |
 
 ### `DocumentKind`
 
@@ -207,6 +288,22 @@ An encounter with its sections (clinical content: every read is recorded in the 
 | `addenda` | `tuple[EncounterHeader, ...]` |
 | `writable` | `bool` |
 | `appointment_completed` | `bool` |
+
+### `MedicationInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `chart_id` | `UUID` |
+| `name` | `str` |
+| `dose` | `str` |
+| `route` | `str` |
+| `frequency` | `str` |
+| `started_on` | `date | None` |
+| `ended_on` | `date | None` |
+| `status` | `str` |
+| `note` | `str` |
+| `revision` | `int` |
 
 ### `SealCheck`
 

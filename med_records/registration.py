@@ -145,3 +145,46 @@ def register_encounters() -> None:
             owner_app=APP_LABEL,
         )
     )
+
+
+def register_clinical_lists() -> None:
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import Allergy, Medication
+
+    register(
+        TableSpec(
+            model=Allergy,
+            description=_("Alergias e intolerâncias do paciente no prontuário; substância e reação são dado de saúde."),
+            label=_("Alergias"),
+            scope="organization",
+            read_fields=("chart", "substance", "category", "reaction", "severity", "status", "noted_on"),
+            write_fields=(),
+            sensitive_fields=("substance", "reaction"),
+            expose_api=False,
+            access_parent="chart",
+        )
+    )
+    register(
+        TableSpec(
+            model=Medication,
+            description=_("Medicamentos em uso do paciente no prontuário; são dado de saúde."),
+            label=_("Medicamentos em uso"),
+            scope="organization",
+            read_fields=(
+                "chart",
+                "name",
+                "dose",
+                "route",
+                "frequency",
+                "started_on",
+                "ended_on",
+                "status",
+                "note",
+            ),
+            write_fields=(),
+            sensitive_fields=("name", "dose", "frequency", "note"),
+            expose_api=False,
+            access_parent="chart",
+        )
+    )

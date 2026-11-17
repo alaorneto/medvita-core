@@ -84,13 +84,26 @@ def test_appointment_follows_the_schedule(skeleton_db):
     )
 
 
-@pytest.mark.parametrize("table", ["patientchart", "encounter", "encountersection"])
+@pytest.mark.parametrize("table", ["patientchart", "encounter", "encountersection", "allergy", "medication"])
 def test_records_tables_follow_the_archive(skeleton_db, table):
-    from applications.med_records.models import Archive, Encounter, EncounterSection, PatientChart
+    from applications.med_records.models import (
+        Allergy,
+        Archive,
+        Encounter,
+        EncounterSection,
+        Medication,
+        PatientChart,
+    )
 
     for label in ("med_patients", "skeleton_calendar", "med_scheduling", "med_records"):
         open_app(label)
-    models = {"patientchart": PatientChart, "encounter": Encounter, "encountersection": EncounterSection}
+    models = {
+        "patientchart": PatientChart,
+        "encounter": Encounter,
+        "encountersection": EncounterSection,
+        "allergy": Allergy,
+        "medication": Medication,
+    }
     scenario = build_service_scenario(models[table], slug=f"derived-{table}")
 
     def make_archive(*, organization, owner):
@@ -131,7 +144,23 @@ def test_records_tables_follow_the_archive(skeleton_db, table):
         section.save()
         return section
 
-    makers = {"patientchart": make_chart, "encounter": make_encounter, "encountersection": make_section}
+    def make_allergy(archive):
+        row = Allergy(organization=archive.organization, chart=make_chart(archive), substance="Látex")
+        row.save()
+        return row
+
+    def make_medication(archive):
+        row = Medication(organization=archive.organization, chart=make_chart(archive), name="Losartana")
+        row.save()
+        return row
+
+    makers = {
+        "patientchart": make_chart,
+        "encounter": make_encounter,
+        "encountersection": make_section,
+        "allergy": make_allergy,
+        "medication": make_medication,
+    }
     assert_derived_access_contract(
         child_model=models[table], make_anchor=make_archive, make_child=makers[table], scenario=scenario
     )

@@ -129,3 +129,67 @@ class EncounterSection(OrganizationRecord):
             ),
         ]
         ordering = ("position", "section_type", "sysid")
+
+
+class Allergy(OrganizationRecord):
+    """An allergy or intolerance of the patient, on the chart."""
+
+    class Category(models.TextChoices):
+        DRUG = "drug", gettext_lazy("Medicamento")
+        FOOD = "food", gettext_lazy("Alimento")
+        ENVIRONMENT = "environment", gettext_lazy("Ambiental")
+        OTHER = "other", gettext_lazy("Outra")
+
+    class Severity(models.TextChoices):
+        MILD = "mild", gettext_lazy("Leve")
+        MODERATE = "moderate", gettext_lazy("Moderada")
+        SEVERE = "severe", gettext_lazy("Grave")
+        UNKNOWN = "unknown", gettext_lazy("Não informada")
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", gettext_lazy("Ativa")
+        RESOLVED = "resolved", gettext_lazy("Resolvida")
+        REFUTED = "refuted", gettext_lazy("Descartada")
+
+    chart = models.ForeignKey(PatientChart, on_delete=models.PROTECT, related_name="+")
+    substance = models.CharField(max_length=200)
+    category = models.CharField(max_length=12, choices=Category.choices, default=Category.OTHER)
+    reaction = models.CharField(max_length=300, blank=True)
+    severity = models.CharField(max_length=10, choices=Severity.choices, default=Severity.UNKNOWN)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    noted_on = models.DateField(null=True, blank=True)
+    immutable_fields = ("chart_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        ordering = ("substance", "sysid")
+
+
+class Medication(OrganizationRecord):
+    """A medication the patient uses, on the chart."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", gettext_lazy("Em uso")
+        SUSPENDED = "suspended", gettext_lazy("Suspenso")
+        ENDED = "ended", gettext_lazy("Encerrado")
+
+    chart = models.ForeignKey(PatientChart, on_delete=models.PROTECT, related_name="+")
+    name = models.CharField(max_length=200)
+    dose = models.CharField(max_length=80, blank=True)
+    route = models.CharField(max_length=40, blank=True)
+    frequency = models.CharField(max_length=120, blank=True)
+    started_on = models.DateField(null=True, blank=True)
+    ended_on = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    note = models.CharField(max_length=300, blank=True)
+    immutable_fields = ("chart_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(
+                condition=Q(ended_on__isnull=True)
+                | Q(started_on__isnull=True)
+                | Q(ended_on__gte=models.F("started_on")),
+                name="med_records_medication_dates",
+            ),
+        ]
+        ordering = ("name", "sysid")

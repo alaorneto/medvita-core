@@ -29,6 +29,10 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 
 **`EncounterSection`** (derivada do atendimento, três saltos até o arquivo; `seal_parent` do atendimento): `section_type` e `type_version`, `position`, `data` (JSON) e `text`, ambos em `sensitive_fields`. Uma seção viva por tipo e posição.
 
+**`Allergy`** (derivada do prontuário): `substance` e `reaction` (`sensitive_fields`), `category` (medicamento, alimento, ambiental, outra), `severity` (leve, moderada, grave, não informada), `status` (ativa, resolvida, descartada), `noted_on`.
+
+**`Medication`** (derivada do prontuário): `name`, `dose`, `frequency` e `note` (`sensitive_fields`), `route`, `started_on`, `ended_on` (não antes do início), `status` (em uso, suspenso, encerrado).
+
 ### Prontuário
 
 `open_chart` obtém ou cria o prontuário do paciente: exige alteração no arquivo e leitura do paciente. Sem `archive_id` usa o arquivo padrão que o ator altera, ou o único; com vários e nenhum padrão, pede o arquivo. `chart` e `charts_for_patient` não devolvem conteúdo clínico.
@@ -48,6 +52,10 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 - `add_addendum`: qualquer profissional que altera o arquivo cria um rascunho `addendum` com texto livre apontando para o original assinado; assina-se pelo mesmo `sign_encounter`. O original nunca muda e lista os adendos assinados.
 - `verify_encounter` recalcula o resumo a partir do conteúdo gravado.
 - A ação "Atender" (`med_records.attend`) aparece nas consultas em "chegou" e "em atendimento".
+
+### Alergias, medicamentos e resumo
+
+`allergies` lista as ativas primeiro (as graves antes); `medications`, as em uso primeiro. Alterar a situação é `update_allergy` / `update_medication` com CAS; a auditoria guarda o histórico com o conteúdo redigido. `chart_summary` reúne as alergias ativas, os medicamentos em uso e os cinco últimos cabeçalhos de atendimento. Toda leitura dessas listas grava a trilha.
 
 ### Tipos de seção e de documento
 

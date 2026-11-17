@@ -7,7 +7,7 @@ methods that say so, and every such read is recorded in the chart's read trail.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -29,7 +29,7 @@ from skeleton.service_api import (
 
 from . import common
 from .extension import DocumentKind, SectionField, SectionType, register_document_kind, register_section_type
-from .models import Archive, Encounter, EncounterSection, PatientChart
+from .models import Allergy, Archive, Encounter, EncounterSection, Medication, PatientChart
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.records"
@@ -39,11 +39,14 @@ MEMBER_TABLES = (ARCHIVE_TABLE,)
 
 __all__ = [
     "APP_ID",
+    "AllergyInfo",
     "ArchiveInfo",
     "ChartInfo",
+    "ChartSummary",
     "DocumentKind",
     "EncounterHeader",
     "EncounterInfo",
+    "MedicationInfo",
     "RecordsService",
     "SectionField",
     "SealCheck",
@@ -204,8 +207,106 @@ def seal_extra(encounter: Encounter) -> dict[str, Any]:
                 "text": row.text,
             }
             for row in rows
-        ]
+        ],
     }
+
+
+@dataclass(frozen=True, slots=True)
+class AllergyInfo:
+    sysid: UUID
+    chart_id: UUID
+    substance: str
+    category: str
+    reaction: str
+    severity: str
+    status: str
+    noted_on: date | None
+    revision: int
+
+
+def allergy_info(row: Allergy) -> AllergyInfo:
+    return AllergyInfo(
+        row.pk,
+        row.chart_id,
+        row.substance,
+        row.category,
+        row.reaction,
+        row.severity,
+        row.status,
+        row.noted_on,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class MedicationInfo:
+    sysid: UUID
+    chart_id: UUID
+    name: str
+    dose: str
+    route: str
+    frequency: str
+    started_on: date | None
+    ended_on: date | None
+    status: str
+    note: str
+    revision: int
+
+
+def medication_info(row: Medication) -> MedicationInfo:
+    return MedicationInfo(
+        row.pk,
+        row.chart_id,
+        row.name,
+        row.dose,
+        row.route,
+        row.frequency,
+        row.started_on,
+        row.ended_on,
+        row.status,
+        row.note,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ChartSummary:
+    """What the chart page shows first (clinical content: the read is recorded in the trail)."""
+
+    chart: ChartInfo
+    allergies: tuple[AllergyInfo, ...]
+    medications: tuple[MedicationInfo, ...]
+    latest: tuple[EncounterHeader, ...]
+
+
+def _allergy_rows(actor: Any, chart: PatientChart) -> list[Allergy]:
+    from django.db.models import Case, IntegerField, Value, When
+
+    from skeleton.access.policies import authorized_queryset
+
+    order = Case(
+        When(status="active", severity="severe", then=Value(0)),
+        When(status="active", then=Value(1)),
+        default=Value(2),
+        output_field=IntegerField(),
+    )
+    rows = authorized_queryset(Allergy, user=actor, action="read").filter(chart=chart)
+    return list(rows.order_by(order, "substance", "sysid")[:200])
+
+
+def _medication_rows(actor: Any, chart: PatientChart) -> list[Medication]:
+    from django.db.models import Case, IntegerField, Value, When
+
+    from skeleton.access.policies import authorized_queryset
+
+    order = Case(When(status="active", then=Value(0)), default=Value(1), output_field=IntegerField())
+    rows = authorized_queryset(Medication, user=actor, action="read").filter(chart=chart)
+    return list(rows.order_by(order, "name", "sysid")[:200])
+
+
+def _mark_entry(chart: PatientChart) -> None:
+    chart.last_entry_at = timezone.now()
+    chart.save(update_fields={"last_entry_at"})
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -879,4 +980,202 @@ class RecordsService(ServiceAPI):
             valid,
             encounter.seal_digest,
             as_utc(encounter.sealed_at) if encounter.sealed_at else None,
+        )
+
+    # ------------------------------------------------------------------ clinical lists
+
+    @service_method(read_only=True, since="0.1.0")
+    def allergies(self, *, actor: Any, chart_id: UUID) -> tuple[AllergyInfo, ...]:
+        """The allergies of the chart, active first, severe before the others.
+
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para prontuário ilegível.
+        Efeitos: registra a leitura na trilha do prontuário.
+        """
+        from .trail import record_access
+
+        chart = _chart(actor, chart_id)
+        record_access(actor, chart, "view_chart")
+        return tuple(allergy_info(row) for row in _allergy_rows(actor, chart))
+
+    @service_method(read_only=False, since="0.1.0")
+    def add_allergy(
+        self,
+        *,
+        actor: Any,
+        chart_id: UUID,
+        substance: str,
+        category: str = "other",
+        reaction: str = "",
+        severity: str = "unknown",
+        noted_on: date | None = None,
+        idempotency_key: str,
+    ) -> AllergyInfo:
+        """Record an allergy on the chart.
+
+        Autorização: alteração no arquivo do prontuário.
+        Erros: NotFound; Forbidden; InvalidInput com o nome do campo.
+        Efeitos: grava a alergia (substância e reação são dado de saúde) e o último registro do prontuário.
+        A mesma chave devolve a já gravada.
+        """
+        from skeleton.access.policies import require_parent_action
+
+        from .services import clean_allergy
+
+        key = common.key(idempotency_key)
+        values = clean_allergy(
+            {
+                "substance": substance,
+                "category": category,
+                "reaction": reaction,
+                "severity": severity,
+                "noted_on": noted_on,
+            },
+            partial=False,
+        )
+        sysid = common.deterministic_id("allergy", actor, key)
+        existing = Allergy.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return allergy_info(existing)
+        chart = _chart(actor, chart_id, write=True)
+        require_parent_action(Allergy, chart, user=actor, action="create")
+        row = Allergy(sysid=sysid, organization_id=chart.organization_id, chart=chart, **values)
+        row.save()
+        _mark_entry(chart)
+        return allergy_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def update_allergy(
+        self, *, actor: Any, allergy_id: UUID, changes: tuple[tuple[str, Any], ...], expected_revision: int
+    ) -> AllergyInfo:
+        """Change an allergy (its status, for example), with CAS; the audit keeps the history (redacted).
+
+        Autorização: alteração no arquivo do prontuário.
+        Erros: NotFound; Forbidden; InvalidInput com o nome do campo; Conflict("stale_revision").
+        Efeitos: grava só os campos que mudaram.
+        """
+        from .services import ALLERGY_FIELDS, clean_allergy
+
+        values = common.changes_dict(changes)
+        common.refuse_unknown(values, ALLERGY_FIELDS)
+        clean = clean_allergy(values, partial=True)
+        row = common.row(actor, Allergy, allergy_id, field="allergy_id", write=True, lock=True)
+        common.check_revision(row, expected_revision)
+        if common.apply_changes(row, clean):
+            _mark_entry(row.chart)
+        return allergy_info(row)
+
+    @service_method(read_only=True, since="0.1.0")
+    def medications(self, *, actor: Any, chart_id: UUID) -> tuple[MedicationInfo, ...]:
+        """The medications of the chart, in use first.
+
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para prontuário ilegível.
+        Efeitos: registra a leitura na trilha do prontuário.
+        """
+        from .trail import record_access
+
+        chart = _chart(actor, chart_id)
+        record_access(actor, chart, "view_chart")
+        return tuple(medication_info(row) for row in _medication_rows(actor, chart))
+
+    @service_method(read_only=False, since="0.1.0")
+    def add_medication(
+        self,
+        *,
+        actor: Any,
+        chart_id: UUID,
+        name: str,
+        dose: str = "",
+        route: str = "",
+        frequency: str = "",
+        started_on: date | None = None,
+        note: str = "",
+        idempotency_key: str,
+    ) -> MedicationInfo:
+        """Record a medication in use on the chart.
+
+        Autorização: alteração no arquivo do prontuário.
+        Erros: NotFound; Forbidden; InvalidInput com o nome do campo.
+        Efeitos: grava o medicamento (dado de saúde) e o último registro do prontuário. A mesma chave
+        devolve o já gravado.
+        """
+        from skeleton.access.policies import require_parent_action
+
+        from .services import clean_medication
+
+        key = common.key(idempotency_key)
+        values = clean_medication(
+            {
+                "name": name,
+                "dose": dose,
+                "route": route,
+                "frequency": frequency,
+                "started_on": started_on,
+                "note": note,
+            },
+            partial=False,
+        )
+        sysid = common.deterministic_id("medication", actor, key)
+        existing = Medication.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return medication_info(existing)
+        chart = _chart(actor, chart_id, write=True)
+        require_parent_action(Medication, chart, user=actor, action="create")
+        row = Medication(sysid=sysid, organization_id=chart.organization_id, chart=chart, **values)
+        row.save()
+        _mark_entry(chart)
+        return medication_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def update_medication(
+        self, *, actor: Any, medication_id: UUID, changes: tuple[tuple[str, Any], ...], expected_revision: int
+    ) -> MedicationInfo:
+        """Change a medication (suspend or end it, for example), with CAS.
+
+        Autorização: alteração no arquivo do prontuário.
+        Erros: NotFound; Forbidden; InvalidInput com o nome do campo; Conflict("stale_revision").
+        Efeitos: grava só os campos que mudaram.
+        """
+        from .services import MEDICATION_FIELDS, clean_medication
+
+        values = common.changes_dict(changes)
+        common.refuse_unknown(values, MEDICATION_FIELDS)
+        clean = clean_medication(values, partial=True)
+        row = common.row(actor, Medication, medication_id, field="medication_id", write=True, lock=True)
+        common.check_revision(row, expected_revision)
+        merged_start = clean.get("started_on", row.started_on)
+        merged_end = clean.get("ended_on", row.ended_on)
+        if merged_start and merged_end and merged_end < merged_start:
+            raise InvalidInput({"ended_on": [gettext("O fim não pode ser antes do início.")]})
+        if common.apply_changes(row, clean):
+            _mark_entry(row.chart)
+        return medication_info(row)
+
+    @service_method(read_only=True, since="0.1.0")
+    def chart_summary(self, *, actor: Any, chart_id: UUID) -> ChartSummary:
+        """Active allergies (severe first), medications in use and the five latest encounter headers.
+
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para prontuário ilegível.
+        Efeitos: registra a leitura na trilha do prontuário.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        from .trail import record_access
+
+        chart = _chart(actor, chart_id)
+        record_access(actor, chart, "view_chart")
+        allergies = [row for row in _allergy_rows(actor, chart) if row.status == Allergy.Status.ACTIVE]
+        medications = [row for row in _medication_rows(actor, chart) if row.status == Medication.Status.ACTIVE]
+        latest = (
+            authorized_queryset(Encounter, user=actor, action="read")
+            .filter(chart=chart)
+            .order_by("-occurred_at", "-sysid")[:5]
+        )
+        return ChartSummary(
+            chart_info(chart, writable=chart.archive_id in _writable_ids(actor, Archive)),
+            tuple(allergy_info(row) for row in allergies),
+            tuple(medication_info(row) for row in medications),
+            tuple(encounter_header(row) for row in latest),
         )
