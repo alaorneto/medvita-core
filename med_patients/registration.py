@@ -116,3 +116,58 @@ def register_sequences_and_events() -> None:
                 owner_app=APP_LABEL,
             )
         )
+
+
+def register_patient_rows() -> None:
+    """Guardians and coverages: derived from the patient (two hops to the registry)."""
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import PatientCoverage, PatientGuardian
+
+    register(
+        TableSpec(
+            model=PatientGuardian,
+            description=gettext_lazy("Responsáveis e contatos dos pacientes; a autorização vem do cadastro."),
+            label=gettext_lazy("Responsáveis"),
+            scope="organization",
+            read_fields=(
+                "patient",
+                "name",
+                "relationship",
+                "cpf",
+                "phone",
+                "email",
+                "is_legal_representative",
+                "is_financial_responsible",
+                "notes",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            personal_fields=("name", "cpf", "phone", "email", "notes"),
+            expose_api=False,
+            access_parent="patient",
+        )
+    )
+    register(
+        TableSpec(
+            model=PatientCoverage,
+            description=gettext_lazy("Convênios dos pacientes; a autorização vem do cadastro."),
+            label=gettext_lazy("Convênios"),
+            scope="organization",
+            read_fields=(
+                "patient",
+                "insurer_name",
+                "insurer_code",
+                "plan_name",
+                "card_number",
+                "holder_name",
+                "valid_until",
+                "is_primary",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            personal_fields=("card_number", "holder_name"),
+            expose_api=False,
+            access_parent="patient",
+        )
+    )

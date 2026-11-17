@@ -27,7 +27,7 @@ from skeleton.service_api import (
 )
 from skeleton.service_api.dto import DEFAULT_PAGE_SIZE
 
-from .models import Patient, PatientRegistry
+from .models import Patient, PatientCoverage, PatientGuardian, PatientRegistry
 from .policies import (
     REGISTRY_TABLE,
     ids_allowed,
@@ -45,6 +45,10 @@ Scalar = str | int | bool | date | None
 
 __all__ = [
     "APP_ID",
+    "CoverageInfo",
+    "CoverageInput",
+    "GuardianInfo",
+    "GuardianInput",
     "PatientInfo",
     "PatientInput",
     "PatientService",
@@ -120,9 +124,10 @@ class PatientInfo:
     revision: int
     updated_at: datetime
     writable: bool = False
+    needs_guardian: bool = False
 
 
-def patient_info(patient: Patient, *, writable: bool = False) -> PatientInfo:
+def patient_info(patient: Patient, *, writable: bool = False, needs_guardian: bool = False) -> PatientInfo:
     return PatientInfo(
         sysid=patient.pk,
         registry_id=patient.registry_id,
@@ -155,6 +160,7 @@ def patient_info(patient: Patient, *, writable: bool = False) -> PatientInfo:
         revision=patient.revision,
         updated_at=as_utc(patient.updated_at),
         writable=writable,
+        needs_guardian=needs_guardian,
     )
 
 
@@ -182,6 +188,89 @@ class PatientInput:
     city: str = ""
     state: str = ""
     notes: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GuardianInfo:
+    sysid: UUID
+    patient_id: UUID
+    name: str
+    relationship: str
+    cpf: str
+    phone: str
+    email: str
+    is_legal_representative: bool
+    is_financial_responsible: bool
+    notes: str
+    revision: int
+
+
+def guardian_info(row: PatientGuardian) -> GuardianInfo:
+    return GuardianInfo(
+        row.pk,
+        row.patient_id,
+        row.name,
+        row.relationship,
+        row.cpf,
+        row.phone,
+        row.email,
+        row.is_legal_representative,
+        row.is_financial_responsible,
+        row.notes,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class GuardianInput:
+    name: str
+    relationship: str = "other"
+    cpf: str = ""
+    phone: str = ""
+    email: str = ""
+    is_legal_representative: bool = False
+    is_financial_responsible: bool = False
+    notes: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageInfo:
+    sysid: UUID
+    patient_id: UUID
+    insurer_name: str
+    insurer_code: str
+    plan_name: str
+    card_number: str
+    holder_name: str
+    valid_until: date | None
+    is_primary: bool
+    revision: int
+
+
+def coverage_info(row: PatientCoverage) -> CoverageInfo:
+    return CoverageInfo(
+        row.pk,
+        row.patient_id,
+        row.insurer_name,
+        row.insurer_code,
+        row.plan_name,
+        row.card_number,
+        row.holder_name,
+        row.valid_until,
+        row.is_primary,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageInput:
+    insurer_name: str
+    card_number: str
+    insurer_code: str = ""
+    plan_name: str = ""
+    holder_name: str = ""
+    valid_until: date | None = None
+    is_primary: bool = False
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -274,6 +363,52 @@ def _default_writable_registry(actor: Any, registry_id: object) -> PatientRegist
         raise NotFound()
     require_parent_action(Patient, registry, user=actor, action="create")
     return registry
+
+
+def _input_values(data: object, kind: type) -> dict[str, Any]:
+    if not isinstance(data, kind):
+        raise InvalidInput({"data": [gettext("Use {name}.").format(name=kind.__name__)]})
+    return {field.name: getattr(data, field.name) for field in fields(data)}
+
+
+def _row(actor: Any, model: type, row_id: object, *, field: str, write: bool) -> Any:
+    """A guardian or coverage: ``NotFound`` when unreadable, ``Forbidden`` when only readable."""
+    from skeleton.access.policies import authorized_queryset
+
+    pk = as_uuid(row_id, field=field)
+    if write:
+        row = authorized_queryset(model, user=actor, action="update").select_for_update().filter(pk=pk).first()
+        if row is not None:
+            return row
+    row = authorized_queryset(model, user=actor, action="read").filter(pk=pk).first()
+    if row is None:
+        raise NotFound()
+    if write:
+        raise Forbidden()
+    return row
+
+
+def _patient_for_child(actor: Any, patient_id: object) -> Patient:
+    """The live, changeable patient a new guardian or coverage is added to."""
+    from skeleton.access.policies import require_parent_action
+
+    patient = _readable(actor, patient_id)
+    require_parent_action(PatientGuardian, patient, user=actor, action="create")
+    _require_changeable(patient)
+    return patient
+
+
+def _unmark_other_primary(actor: Any, patient_id: UUID, keep: UUID | None) -> None:
+    from skeleton.access.policies import authorized_queryset
+
+    rows = authorized_queryset(PatientCoverage, user=actor, action="update").filter(
+        patient_id=patient_id, is_primary=True
+    )
+    if keep is not None:
+        rows = rows.exclude(pk=keep)
+    for row in rows.select_for_update():
+        row.is_primary = False
+        row.save(update_fields={"is_primary"})
 
 
 # ------------------------------------------------------------------------------------ service
@@ -414,9 +549,11 @@ class PatientService(ServiceAPI):
         Erros: NotFound para paciente inexistente, de outra organização ou ilegível (a mesma resposta).
         Efeitos: nenhum.
         """
+        from .services import needs_guardian
+
         patient = _readable(actor, patient_id)
         writable = writable_patients(actor).filter(pk=patient.pk).exists()
-        return patient_info(patient, writable=writable)
+        return patient_info(patient, writable=writable, needs_guardian=needs_guardian(patient, actor))
 
     @service_method(read_only=True, since="0.1.0")
     def summary(self, *, actor: Any, patient_id: UUID) -> PatientSummary:
@@ -621,3 +758,158 @@ class PatientService(ServiceAPI):
         _check_revision(patient, expected_revision)
         patient.restore()
         return patient_info(patient, writable=True)
+
+    # ------------------------------------------------------------------ guardians and coverages
+
+    @service_method(read_only=True, since="0.1.0")
+    def guardians(self, *, actor: Any, patient_id: UUID) -> tuple[GuardianInfo, ...]:
+        """Guardians and contact people of a patient, in the order they were added.
+
+        Autorização: leitura do cadastro do paciente.
+        Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        patient = _readable(actor, patient_id)
+        rows = authorized_queryset(PatientGuardian, user=actor, action="read").filter(patient=patient)
+        return tuple(guardian_info(row) for row in rows.order_by("created_at", "sysid")[:100])
+
+    @service_method(read_only=False, since="0.1.0")
+    def add_guardian(
+        self, *, actor: Any, patient_id: UUID, data: GuardianInput, idempotency_key: str | None = None
+    ) -> GuardianInfo:
+        """Add a guardian or contact person to a patient.
+
+        Autorização: alteração no cadastro do paciente.
+        Erros: NotFound; Forbidden se só lê; InvalidInput com o nome do campo;
+        Conflict("processing_restricted", "anonymized").
+        Efeitos: grava o responsável; a mesma chave do mesmo ator devolve o já criado.
+        """
+        from .services import clean_guardian_values, deterministic_id
+
+        values = clean_guardian_values(_input_values(data, GuardianInput))
+        patient = _patient_for_child(actor, patient_id)
+        row = PatientGuardian(organization_id=patient.organization_id, patient=patient, **values)
+        if idempotency_key is not None:
+            row.sysid = deterministic_id("guardian", actor, _key(idempotency_key))
+            existing = PatientGuardian.objects.filter(pk=row.sysid).first()
+            if existing is not None:
+                return guardian_info(existing)
+        row.save()
+        return guardian_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def update_guardian(
+        self, *, actor: Any, guardian_id: UUID, data: GuardianInput, expected_revision: int
+    ) -> GuardianInfo:
+        """Replace the data of a guardian, with CAS.
+
+        Autorização: alteração no cadastro do paciente.
+        Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "processing_restricted",
+        "anonymized").
+        Efeitos: grava só os campos que mudaram; sem mudança real, não grava.
+        """
+        from .services import clean_guardian_values
+
+        values = clean_guardian_values(_input_values(data, GuardianInput))
+        row = _row(actor, PatientGuardian, guardian_id, field="guardian_id", write=True)
+        _check_revision(row, expected_revision)
+        _require_changeable(_readable(actor, row.patient_id))
+        changed = {name for name, value in values.items() if getattr(row, name) != value}
+        for name in changed:
+            setattr(row, name, values[name])
+        row.save(update_fields=changed)
+        return guardian_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def remove_guardian(self, *, actor: Any, guardian_id: UUID, expected_revision: int) -> None:
+        """Remove a guardian (tombstone), with CAS.
+
+        Autorização: alteração no cadastro do paciente.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "processing_restricted", "anonymized").
+        Efeitos: exclusão lógica do responsável.
+        """
+        row = _row(actor, PatientGuardian, guardian_id, field="guardian_id", write=True)
+        _check_revision(row, expected_revision)
+        _require_changeable(_readable(actor, row.patient_id))
+        row.delete()
+
+    @service_method(read_only=True, since="0.1.0")
+    def coverages(self, *, actor: Any, patient_id: UUID) -> tuple[CoverageInfo, ...]:
+        """Health plan cards of a patient, the primary one first.
+
+        Autorização: leitura do cadastro do paciente.
+        Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        patient = _readable(actor, patient_id)
+        rows = authorized_queryset(PatientCoverage, user=actor, action="read").filter(patient=patient)
+        return tuple(coverage_info(row) for row in rows.order_by("-is_primary", "insurer_name", "sysid")[:50])
+
+    @service_method(read_only=False, since="0.1.0")
+    def add_coverage(
+        self, *, actor: Any, patient_id: UUID, data: CoverageInput, idempotency_key: str | None = None
+    ) -> CoverageInfo:
+        """Add a health plan card to a patient; marking it primary unmarks the previous primary one.
+
+        Autorização: alteração no cadastro do paciente.
+        Erros: NotFound; Forbidden se só lê; InvalidInput com o nome do campo;
+        Conflict("processing_restricted", "anonymized").
+        Efeitos: grava o convênio (e desmarca o principal anterior) na mesma transação; a mesma
+        chave do mesmo ator devolve o já criado.
+        """
+        from .services import clean_coverage_values, deterministic_id
+
+        values = clean_coverage_values(_input_values(data, CoverageInput))
+        patient = _patient_for_child(actor, patient_id)
+        row = PatientCoverage(organization_id=patient.organization_id, patient=patient, **values)
+        if idempotency_key is not None:
+            row.sysid = deterministic_id("coverage", actor, _key(idempotency_key))
+            existing = PatientCoverage.objects.filter(pk=row.sysid).first()
+            if existing is not None:
+                return coverage_info(existing)
+        if row.is_primary:
+            _unmark_other_primary(actor, patient.pk, keep=None)
+        row.save()
+        return coverage_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def update_coverage(
+        self, *, actor: Any, coverage_id: UUID, data: CoverageInput, expected_revision: int
+    ) -> CoverageInfo:
+        """Replace the data of a health plan card, with CAS; marking it primary unmarks the others.
+
+        Autorização: alteração no cadastro do paciente.
+        Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "processing_restricted",
+        "anonymized").
+        Efeitos: grava só os campos que mudaram; sem mudança real, não grava.
+        """
+        from .services import clean_coverage_values
+
+        values = clean_coverage_values(_input_values(data, CoverageInput))
+        row = _row(actor, PatientCoverage, coverage_id, field="coverage_id", write=True)
+        _check_revision(row, expected_revision)
+        _require_changeable(_readable(actor, row.patient_id))
+        changed = {name for name, value in values.items() if getattr(row, name) != value}
+        if values["is_primary"] and "is_primary" in changed:
+            _unmark_other_primary(actor, row.patient_id, keep=row.pk)
+        for name in changed:
+            setattr(row, name, values[name])
+        row.save(update_fields=changed)
+        return coverage_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def remove_coverage(self, *, actor: Any, coverage_id: UUID, expected_revision: int) -> None:
+        """Remove a health plan card (tombstone), with CAS.
+
+        Autorização: alteração no cadastro do paciente.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "processing_restricted", "anonymized").
+        Efeitos: exclusão lógica do convênio.
+        """
+        row = _row(actor, PatientCoverage, coverage_id, field="coverage_id", write=True)
+        _check_revision(row, expected_revision)
+        _require_changeable(_readable(actor, row.patient_id))
+        row.delete()

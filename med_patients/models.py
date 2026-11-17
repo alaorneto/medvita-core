@@ -133,3 +133,67 @@ class Patient(OrganizationRecord):
     @property
     def display_name(self) -> str:
         return self.social_name or self.full_name
+
+
+class PatientGuardian(OrganizationRecord):
+    """A guardian or contact person of a patient: legal representative, financial responsible."""
+
+    class Relationship(models.TextChoices):
+        MOTHER = "mother", gettext_lazy("Mãe")
+        FATHER = "father", gettext_lazy("Pai")
+        LEGAL_GUARDIAN = "legal_guardian", gettext_lazy("Responsável legal")
+        SPOUSE = "spouse", gettext_lazy("Cônjuge")
+        CHILD = "child", gettext_lazy("Filho ou filha")
+        CAREGIVER = "caregiver", gettext_lazy("Cuidador")
+        OTHER = "other", gettext_lazy("Outro")
+
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name="+")
+    name = models.CharField(max_length=200)
+    relationship = models.CharField(max_length=20, choices=Relationship.choices, default=Relationship.OTHER)
+    cpf = models.CharField(max_length=11, blank=True)
+    phone = models.CharField(max_length=20, blank=True)
+    email = models.EmailField(blank=True)
+    is_legal_representative = models.BooleanField(default=False)
+    is_financial_responsible = models.BooleanField(default=False)
+    notes = models.TextField(blank=True)
+    immutable_fields = ("patient_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(
+                condition=Q(
+                    relationship__in=("mother", "father", "legal_guardian", "spouse", "child", "caregiver", "other")
+                ),
+                name="med_patients_guardian_relationship",
+            ),
+            models.CheckConstraint(condition=Q(cpf__regex=r"^([0-9]{11})?$"), name="med_patients_guardian_cpf"),
+        ]
+        ordering = ("created_at", "sysid")
+
+
+class PatientCoverage(OrganizationRecord):
+    """A health plan card of a patient; at most one primary live coverage per patient."""
+
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name="+")
+    insurer_name = models.CharField(max_length=120)
+    insurer_code = models.CharField(max_length=6, blank=True)
+    plan_name = models.CharField(max_length=120, blank=True)
+    card_number = models.CharField(max_length=40)
+    holder_name = models.CharField(max_length=200, blank=True)
+    valid_until = models.DateField(null=True, blank=True)
+    is_primary = models.BooleanField(default=False)
+    immutable_fields = ("patient_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("patient",),
+                condition=Q(is_primary=True, deleted_at__isnull=True),
+                name="med_patients_one_primary_coverage",
+                violation_error_code="unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(insurer_code__regex=r"^([0-9]{6})?$"), name="med_patients_coverage_insurer_code"
+            ),
+        ]
+        ordering = ("-is_primary", "insurer_name", "sysid")

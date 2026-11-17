@@ -18,6 +18,30 @@ Para listar pacientes de outra app, use `PatientSummary` (`summary`, `summaries`
 
 ### `PatientService`
 
+#### `add_coverage(*, actor, patient_id, data, idempotency_key=None) -> CoverageInfo`
+
+Add a health plan card to a patient; marking it primary unmarks the previous primary one.
+
+- **Autorização:** alteração no cadastro do paciente.
+- **Erros:** NotFound; Forbidden se só lê; InvalidInput com o nome do campo; Conflict("processing_restricted", "anonymized").
+- **Efeitos:** grava o convênio (e desmarca o principal anterior) na mesma transação; a mesma chave do mesmo ator devolve o já criado.
+
+#### `add_guardian(*, actor, patient_id, data, idempotency_key=None) -> GuardianInfo`
+
+Add a guardian or contact person to a patient.
+
+- **Autorização:** alteração no cadastro do paciente.
+- **Erros:** NotFound; Forbidden se só lê; InvalidInput com o nome do campo; Conflict("processing_restricted", "anonymized").
+- **Efeitos:** grava o responsável; a mesma chave do mesmo ator devolve o já criado.
+
+#### `coverages(*, actor, patient_id) -> tuple[CoverageInfo, ...]`
+
+Health plan cards of a patient, the primary one first.
+
+- **Autorização:** leitura do cadastro do paciente.
+- **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
 #### `create(*, actor, data, registry_id=None, idempotency_key=None) -> PatientInfo`
 
 Register a patient in a registry (the default one when not given).
@@ -50,6 +74,14 @@ Everything the app keeps about one patient.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível (a mesma resposta).
 - **Efeitos:** nenhum.
 
+#### `guardians(*, actor, patient_id) -> tuple[GuardianInfo, ...]`
+
+Guardians and contact people of a patient, in the order they were added.
+
+- **Autorização:** leitura do cadastro do paciente.
+- **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
 #### `registries(*, actor) -> tuple[RegistryInfo, ...]`
 
 Patient registries the actor reads, the default one first.
@@ -57,6 +89,22 @@ Patient registries the actor reads, the default one first.
 - **Autorização:** TablePermission read em med_patients.patientregistry e leitura de cada cadastro.
 - **Erros:** Forbidden sem a permissão de tabela; Unavailable com a app desativada.
 - **Efeitos:** nenhum.
+
+#### `remove_coverage(*, actor, coverage_id, expected_revision) -> None`
+
+Remove a health plan card (tombstone), with CAS.
+
+- **Autorização:** alteração no cadastro do paciente.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "processing_restricted", "anonymized").
+- **Efeitos:** exclusão lógica do convênio.
+
+#### `remove_guardian(*, actor, guardian_id, expected_revision) -> None`
+
+Remove a guardian (tombstone), with CAS.
+
+- **Autorização:** alteração no cadastro do paciente.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "processing_restricted", "anonymized").
+- **Efeitos:** exclusão lógica do responsável.
 
 #### `restore(*, actor, patient_id, expected_revision) -> PatientInfo`
 
@@ -114,7 +162,79 @@ Change identification, contact or address fields of a patient, with CAS.
 - **Erros:** NotFound; Forbidden se só lê; InvalidInput com o nome do campo; Conflict ("stale_revision", "processing_restricted", "anonymized", "integrity_conflict").
 - **Efeitos:** grava só os campos que mudaram e publica ``med_patients.patient_updated``; sem mudança real, não grava nem publica.
 
+#### `update_coverage(*, actor, coverage_id, data, expected_revision) -> CoverageInfo`
+
+Replace the data of a health plan card, with CAS; marking it primary unmarks the others.
+
+- **Autorização:** alteração no cadastro do paciente.
+- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "processing_restricted", "anonymized").
+- **Efeitos:** grava só os campos que mudaram; sem mudança real, não grava.
+
+#### `update_guardian(*, actor, guardian_id, data, expected_revision) -> GuardianInfo`
+
+Replace the data of a guardian, with CAS.
+
+- **Autorização:** alteração no cadastro do paciente.
+- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "processing_restricted", "anonymized").
+- **Efeitos:** grava só os campos que mudaram; sem mudança real, não grava.
+
 ## DTOs
+
+### `CoverageInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `patient_id` | `UUID` |
+| `insurer_name` | `str` |
+| `insurer_code` | `str` |
+| `plan_name` | `str` |
+| `card_number` | `str` |
+| `holder_name` | `str` |
+| `valid_until` | `date | None` |
+| `is_primary` | `bool` |
+| `revision` | `int` |
+
+### `CoverageInput`
+
+| Campo | Tipo |
+|---|---|
+| `insurer_name` | `str` |
+| `card_number` | `str` |
+| `insurer_code` | `str` |
+| `plan_name` | `str` |
+| `holder_name` | `str` |
+| `valid_until` | `date | None` |
+| `is_primary` | `bool` |
+
+### `GuardianInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `patient_id` | `UUID` |
+| `name` | `str` |
+| `relationship` | `str` |
+| `cpf` | `str` |
+| `phone` | `str` |
+| `email` | `str` |
+| `is_legal_representative` | `bool` |
+| `is_financial_responsible` | `bool` |
+| `notes` | `str` |
+| `revision` | `int` |
+
+### `GuardianInput`
+
+| Campo | Tipo |
+|---|---|
+| `name` | `str` |
+| `relationship` | `str` |
+| `cpf` | `str` |
+| `phone` | `str` |
+| `email` | `str` |
+| `is_legal_representative` | `bool` |
+| `is_financial_responsible` | `bool` |
+| `notes` | `str` |
 
 ### `PatientInfo`
 
@@ -151,6 +271,7 @@ Change identification, contact or address fields of a patient, with CAS.
 | `revision` | `int` |
 | `updated_at` | `datetime` |
 | `writable` | `bool` |
+| `needs_guardian` | `bool` |
 
 ### `PatientInput`
 

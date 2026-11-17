@@ -48,6 +48,31 @@ O `setup` (só com a capacidade `access.manage`) cria o cadastro padrão, privad
 | `processing_restricted` | | restrição de tratamento (LGPD) |
 | `anonymized_at` | | preenchido só pela anonimização |
 
+**`PatientGuardian`** (derivada do paciente, dois saltos até o cadastro)
+
+| Campo | P | Regra |
+|---|---|---|
+| `patient` | | imutável |
+| `name` | P | obrigatório, até 200 |
+| `relationship` | | `mother`, `father`, `legal_guardian`, `spouse`, `child`, `caregiver`, `other` |
+| `cpf`, `phone`, `email`, `notes` | P | validados como os do paciente |
+| `is_legal_representative`, `is_financial_responsible` | | marcações livres |
+
+Paciente menor de 18 anos (pela data de nascimento) sem responsável vivo marcado como representante legal aparece com `needs_guardian`: é um aviso, não bloqueia o cadastro.
+
+**`PatientCoverage`** (derivada do paciente)
+
+| Campo | P | Regra |
+|---|---|---|
+| `patient` | | imutável |
+| `insurer_name` | | obrigatório, até 120 |
+| `insurer_code` | | registro ANS, 6 dígitos |
+| `plan_name` | | até 120 |
+| `card_number` | P | obrigatório, até 40 |
+| `holder_name` | P | titular, até 200 |
+| `valid_until` | | validade |
+| `is_primary` | | no máximo um principal vivo por paciente; marcar outro desmarca o anterior na mesma transação |
+
 As linhas que pertencem a um paciente (responsáveis, convênios, consentimentos) não impedem a exclusão lógica dele: a autorização derivada as esconde junto e a restauração do paciente as traz de volta. Registros de outras apps que apontam para o paciente (consultas, prontuários, contas) continuam impedindo a exclusão.
 
 ## Acceptance

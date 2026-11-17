@@ -20,3 +20,6 @@ class MedPatientsConfig(AppConfig):
         from .registration import register_sequences_and_events
 
         register_sequences_and_events()
+        from .registration import register_patient_rows
+
+        register_patient_rows()

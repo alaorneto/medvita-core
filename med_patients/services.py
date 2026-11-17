@@ -179,3 +179,85 @@ def search_filter(query: str) -> tuple[str, str]:
     if plain and len(plain) >= 8 and plain == text.replace("(", "").replace(")", "").replace(" ", "").replace("-", ""):
         return "phone", plain
     return "name", validators.normalize_name(text)
+
+
+def clean_guardian_values(values: dict[str, Any]) -> dict[str, Any]:
+    from skeleton.service_api import InvalidInput
+
+    from .models import PatientGuardian
+
+    errors: dict[str, list[str]] = {}
+    clean = {
+        "name": _text(values.get("name")),
+        "relationship": _text(values.get("relationship")) or PatientGuardian.Relationship.OTHER,
+        "cpf": validators.digits(values.get("cpf")),
+        "phone": validators.normalize_phone(values.get("phone")),
+        "email": _text(values.get("email")).lower(),
+        "is_legal_representative": bool(values.get("is_legal_representative")),
+        "is_financial_responsible": bool(values.get("is_financial_responsible")),
+        "notes": _text(values.get("notes")),
+    }
+    if not clean["name"] or len(clean["name"]) > 200:
+        errors["name"] = [gettext("Informe o nome (até 200 caracteres).")]
+    if clean["relationship"] not in PatientGuardian.Relationship.values:
+        errors["relationship"] = [gettext("Escolha uma das opções.")]
+    if clean["cpf"] and not validators.valid_cpf(clean["cpf"]):
+        errors["cpf"] = [gettext("CPF inválido.")]
+    if not validators.valid_phone(clean["phone"]):
+        errors["phone"] = [gettext("Telefone inválido: use DDD e número, com DDI opcional.")]
+    if clean["email"]:
+        from django.core.exceptions import ValidationError
+        from django.core.validators import validate_email
+
+        try:
+            validate_email(clean["email"])
+        except ValidationError:
+            errors["email"] = [gettext("Email inválido.")]
+    if len(clean["notes"]) > 2000:
+        errors["notes"] = [gettext("Texto longo demais.")]
+    if errors:
+        raise InvalidInput(errors)
+    return clean
+
+
+def clean_coverage_values(values: dict[str, Any]) -> dict[str, Any]:
+    from skeleton.service_api import InvalidInput
+
+    errors: dict[str, list[str]] = {}
+    clean = {
+        "insurer_name": _text(values.get("insurer_name")),
+        "insurer_code": validators.digits(values.get("insurer_code")),
+        "plan_name": _text(values.get("plan_name")),
+        "card_number": _text(values.get("card_number")),
+        "holder_name": _text(values.get("holder_name")),
+        "valid_until": _date(values.get("valid_until"), "valid_until", errors),
+        "is_primary": bool(values.get("is_primary")),
+    }
+    if not clean["insurer_name"] or len(clean["insurer_name"]) > 120:
+        errors["insurer_name"] = [gettext("Informe a operadora (até 120 caracteres).")]
+    if clean["insurer_code"] and len(clean["insurer_code"]) != 6:
+        errors["insurer_code"] = [gettext("O registro ANS tem 6 dígitos.")]
+    if not clean["card_number"] or len(clean["card_number"]) > 40:
+        errors["card_number"] = [gettext("Informe o número da carteirinha (até 40 caracteres).")]
+    if len(clean["plan_name"]) > 120 or len(clean["holder_name"]) > 200:
+        errors["plan_name" if len(clean["plan_name"]) > 120 else "holder_name"] = [gettext("Texto longo demais.")]
+    if errors:
+        raise InvalidInput(errors)
+    return clean
+
+
+def needs_guardian(patient: Patient, actor: Any) -> bool:
+    """A minor (by birth date) without a live legal representative: shown, never blocking."""
+    from skeleton.access.policies import authorized_queryset
+
+    from .models import PatientGuardian
+
+    if patient.birth_date is None:
+        return False
+    today = timezone.localdate()
+    born = patient.birth_date
+    age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+    if age >= 18:
+        return False
+    rows = authorized_queryset(PatientGuardian, user=actor, action="read")
+    return not rows.filter(patient=patient, is_legal_representative=True).exists()
