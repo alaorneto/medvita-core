@@ -8,6 +8,7 @@ O consultório recebe no balcão (dinheiro, Pix, cartão) e precisa de recibo e 
 
 - **ADR-001, frente de caixa sobre o livro.** A app guarda o que é do balcão (preços, contas, pagamentos, sessões, recibos) e lança no livro: a conta confirmada vira título a receber, o pagamento vira baixa, suprimento e sangria viram lançamentos de regra. O livro é a fonte da contabilidade; a app nunca escreve nas tabelas dele.
 - **ADR-002, autorização pela origem, sem espelho de acesso.** O livro autoriza títulos, baixas e lançamentos de regra pelo registro de origem desta app, então o acesso ao caixa basta para receber. As contas do livro de cada forma de pagamento ficam no caixa, resolvidas no `setup` por quem gere o livro. Mudar o vínculo de uma chave no livro depois exige refazer essa resolução.
+- **ADR-003, recibo selado e anulação por registro.** O recibo é selado na emissão e nunca muda; anular é gravar um `ReceiptVoid`, nunca editar nem excluir. As referências (conta e pagamento) ficam fora de `seal_fields`, porque são imutáveis desde a criação, e o resumo as cobre pelo `extra`.
 
 ## Consequences
 

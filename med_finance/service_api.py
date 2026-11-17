@@ -30,7 +30,18 @@ from skeleton.service_api import (
 
 from . import common
 from .extension import ChargeOrigin, register_charge_origin
-from .models import CashDesk, CashMovement, CashSession, Charge, ChargeItem, Payment, PriceItem, PriceList
+from .models import (
+    CashDesk,
+    CashMovement,
+    CashSession,
+    Charge,
+    ChargeItem,
+    Payment,
+    PriceItem,
+    PriceList,
+    Receipt,
+    ReceiptVoid,
+)
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.finance"
@@ -41,6 +52,7 @@ MEMBER_TABLES = (PRICE_LIST_TABLE, DESK_TABLE)
 MAX_AMOUNT = 10**11  # R$ 1 bilhão em centavos: a sanity bound, not a business rule.
 
 __all__ = [
+    "ReceiptInfo",
     "PaymentInfo",
     "ChargeDetail",
     "ChargeInfo",
@@ -382,14 +394,144 @@ def _publish_payment(actor: Any, suffix: str, row: Payment) -> None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ReceiptInfo:
+    sysid: UUID
+    charge_id: UUID
+    payment_id: UUID
+    number: str
+    issued_at: datetime
+    amount: int
+    method: str
+    payer_name: str
+    payer_document: str
+    patient_name: str
+    description: str
+    issuer_name: str
+    issuer_document: str
+    professional_name: str
+    professional_council: str
+    professional_tax_id: str
+    seal_digest: str
+    voided: bool
+    void_reason: str
+    voided_at: datetime | None
+    revision: int
+
+
+def receipt_info(row: Receipt, void: ReceiptVoid | None = None) -> ReceiptInfo:
+    return ReceiptInfo(
+        row.pk,
+        row.charge_id,
+        row.payment_id,
+        row.number,
+        as_utc(row.issued_at),
+        row.amount,
+        row.method,
+        row.payer_name,
+        row.payer_document,
+        row.patient_name,
+        row.description,
+        row.issuer_name,
+        row.issuer_document,
+        row.professional_name,
+        row.professional_council,
+        row.professional_tax_id,
+        row.seal_digest,
+        void is not None,
+        void.reason if void is not None else "",
+        as_utc(void.voided_at) if void is not None else None,
+        row.revision,
+    )
+
+
+def receipt_extra(receipt: Receipt) -> dict[str, Any]:
+    """What the seal digest covers besides the frozen columns: the immutable references."""
+    return {"references": {"charge": receipt.charge_id, "payment": receipt.payment_id}}
+
+
+def _receipt_with_void(row: Receipt) -> ReceiptInfo:
+    return receipt_info(row, ReceiptVoid.objects.filter(receipt=row).first())
+
+
 def _has_live_receipt(payment: Payment) -> bool:
-    """Whether the payment has a receipt that was not voided (none until receipts exist)."""
-    return False
+    """Whether the payment has a receipt that was not voided."""
+    receipt = Receipt.objects.filter(payment=payment).first()
+    return receipt is not None and not ReceiptVoid.objects.filter(receipt=receipt).exists()
 
 
-def _issue_receipt(actor: Any, payment: Payment, *, key: str) -> None:
-    """Issue the receipt of a payment (nothing until receipts exist)."""
-    return None
+def _issue_receipt(actor: Any, payment: Payment, *, key: str) -> Receipt:
+    """Photograph payer, patient, issuer and professional, number the receipt and seal it."""
+    from applications.med_patients.service_api import PatientService
+    from applications.med_scheduling.service_api import SchedulingService
+    from skeleton.access.policies import require_parent_action
+    from skeleton.records.sealing import seal_record
+    from skeleton.service_api.sequences import SequenceService
+
+    from .registration import RECEIPT_SEQUENCE
+
+    existing = Receipt.objects.filter(payment=payment).first()
+    if existing is not None:
+        return existing
+    if payment.status != Payment.Status.REGISTERED:
+        raise Conflict("reversed", gettext("Pagamento estornado não recebe recibo."))
+    charge = payment.charge
+    patient = PatientService().summary(actor=actor, patient_id=charge.patient_id)
+    scheduling = SchedulingService()
+    issuer_name, issuer_document = "", ""
+    try:
+        practice = scheduling.practice(actor=actor)
+        issuer_name, issuer_document = practice.legal_name or practice.name, practice.tax_id
+    except (NotFound, Forbidden):
+        pass
+    professional = None
+    if charge.appointment_id is not None:
+        try:
+            appointment = scheduling.appointment(actor=actor, appointment_id=charge.appointment_id).appointment
+            if appointment.professional_id is not None:
+                professional = scheduling.professional(actor=actor, professional_id=appointment.professional_id)
+        except (NotFound, Forbidden):
+            professional = None
+    items = ChargeItem.objects.filter(charge=charge).order_by("created_at", "sysid")
+    description = "; ".join(f"{row.quantity}x {row.description}" for row in items)[:500]
+    issued_at = timezone.now()
+    require_parent_action(Receipt, charge, user=actor, action="create")
+    number = SequenceService().next_number(actor=actor, key=RECEIPT_SEQUENCE, at=issued_at)
+    receipt = Receipt(
+        sysid=common.deterministic_id("receipt", actor, key),
+        organization_id=charge.organization_id,
+        charge=charge,
+        payment=payment,
+        number=number.formatted,
+        issued_at=issued_at,
+        amount=payment.amount,
+        method=payment.method,
+        payer_name=charge.payer_name or patient.display_name,
+        payer_document=charge.payer_document,
+        patient_name=patient.display_name,
+        description=description or gettext("Atendimento"),
+        issuer_name=issuer_name or gettext("Consultório"),
+        issuer_document=issuer_document,
+        professional_name=professional.display_name if professional else "",
+        professional_council=professional.council_label if professional else "",
+        professional_tax_id=professional.tax_id if professional else "",
+    )
+    receipt.save()
+    sealed = seal_record(receipt, user=actor, expected_revision=receipt.revision, extra=receipt_extra(receipt))
+    from skeleton.service_api.events import EventService
+
+    EventService().publish(
+        actor=actor,
+        event_type="med_finance.receipt_issued",
+        record_id=sealed.pk,
+        data=(
+            ("number", sealed.number),
+            ("charge", str(sealed.charge_id)),
+            ("amount", sealed.amount),
+            ("seal_digest", sealed.seal_digest),
+        ),
+    )
+    return sealed
 
 
 def _clean_payer(name: object, document: object) -> tuple[str, str]:
@@ -1407,3 +1549,114 @@ class FinanceService(ServiceAPI):
         charge = _charge(actor, charge_id)
         rows = authorized_queryset(Payment, user=actor, action="read").filter(charge=charge)
         return tuple(payment_info(row) for row in rows.order_by("received_at", "sysid"))
+
+    # ------------------------------------------------------------------ receipts
+
+    @service_method(read_only=False, since="0.1.0")
+    def issue_receipt(self, *, actor: Any, payment_id: UUID, idempotency_key: str) -> ReceiptInfo:
+        """Issue the receipt of a payment (one per payment), numbered per year without gaps and sealed.
+
+        Fotografa pagador, paciente, emitente (o consultório) e o profissional da consulta. O recibo
+        não substitui documento fiscal.
+        Autorização: alteração no caixa da conta.
+        Erros: NotFound; Forbidden; Conflict("reversed") para pagamento estornado.
+        Efeitos: grava o recibo, pede o número depois de validar tudo, sela e publica
+        ``receipt_issued`` (sem nome nem documento). Repetir devolve o mesmo recibo.
+        """
+        key = common.key(idempotency_key)
+        payment = common.row(actor, Payment, payment_id, field="payment_id", write=True, lock=True)
+        return _receipt_with_void(_issue_receipt(actor, payment, key=key))
+
+    @service_method(read_only=True, since="0.1.0")
+    def receipt(self, *, actor: Any, receipt_id: UUID) -> ReceiptInfo:
+        """One receipt, marked when voided.
+
+        Autorização: leitura do caixa.
+        Erros: NotFound para recibo inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        return _receipt_with_void(common.row(actor, Receipt, receipt_id, field="receipt_id", write=False))
+
+    @service_method(read_only=True, since="0.1.0")
+    def receipts(
+        self,
+        *,
+        actor: Any,
+        charge_id: UUID | None = None,
+        year: int | None = None,
+        cursor: str | None = None,
+        page_size: int = 50,
+    ) -> Page[ReceiptInfo]:
+        """Receipts of the desks the actor reads, newest first, by charge or year.
+
+        Autorização: leitura de cada caixa.
+        Erros: InvalidInput para ano, cursor ou tamanho inválidos.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        rows = authorized_queryset(Receipt, user=actor, action="read")
+        if charge_id is not None:
+            rows = rows.filter(charge_id=as_uuid(charge_id, field="charge_id"))
+        if year is not None:
+            if type(year) is not int or not 2000 <= year <= 2200:
+                raise InvalidInput({"year": [gettext("Informe um ano.")]})
+            rows = rows.filter(issued_at__year=year)
+        return paginate(
+            rows.order_by("-issued_at", "-sysid"),
+            convert=_receipt_with_void,
+            cursor=cursor,
+            page_size=page_size,
+            key=("-issued_at", "-sysid"),
+        )
+
+    @service_method(read_only=False, since="0.1.0")
+    def void_receipt(self, *, actor: Any, receipt_id: UUID, reason: str, idempotency_key: str) -> ReceiptInfo:
+        """Void a receipt: it stays intact, marked as voided; the number is never reused.
+
+        Autorização: alteração no caixa.
+        Erros: NotFound; Forbidden; InvalidInput sem motivo.
+        Efeitos: grava a anulação e publica ``receipt_voided``. Repetir devolve o mesmo recibo anulado.
+        """
+        from skeleton.access.policies import require_parent_action
+        from skeleton.service_api.events import EventService
+
+        common.key(idempotency_key)
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 300:
+            raise InvalidInput({"reason": [gettext("Informe o motivo (até 300 caracteres).")]})
+        receipt = common.row(actor, Receipt, receipt_id, field="receipt_id", write=True, lock=True)
+        if ReceiptVoid.objects.filter(receipt=receipt).exists():
+            return _receipt_with_void(receipt)
+        require_parent_action(ReceiptVoid, receipt, user=actor, action="create")
+        ReceiptVoid(
+            organization_id=receipt.organization_id,
+            receipt=receipt,
+            reason=reason.strip(),
+            voided_at=timezone.now(),
+            voided_by_id=actor.pk,
+        ).save()
+        EventService().publish(
+            actor=actor,
+            event_type="med_finance.receipt_voided",
+            record_id=receipt.pk,
+            data=(
+                ("number", receipt.number),
+                ("charge", str(receipt.charge_id)),
+                ("amount", receipt.amount),
+                ("seal_digest", receipt.seal_digest),
+            ),
+        )
+        return _receipt_with_void(receipt)
+
+    @service_method(read_only=True, since="0.1.0")
+    def verify_receipt(self, *, actor: Any, receipt_id: UUID) -> bool:
+        """Whether the stored content of the receipt still matches its seal.
+
+        Autorização: leitura do caixa.
+        Erros: NotFound para recibo ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.records.sealing import verify_seal
+
+        receipt = common.row(actor, Receipt, receipt_id, field="receipt_id", write=False)
+        return verify_seal(receipt, extra=receipt_extra(receipt))

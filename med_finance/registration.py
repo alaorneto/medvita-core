@@ -267,3 +267,79 @@ def register_payments() -> None:
                 owner_app=APP_LABEL,
             )
         )
+
+
+RECEIPT_SEQUENCE = "med_finance.receipt"
+
+
+def register_receipts() -> None:
+    from skeleton.events.registry import EventType, register_event_type
+    from skeleton.sequences.registry import SequenceSpec, register_sequence
+    from skeleton.system.registry import SealPolicy, TableSpec, register
+
+    from .models import Receipt, ReceiptVoid
+
+    register(
+        TableSpec(
+            model=Receipt,
+            description=_("Recibos numerados por ano e selados na emissão; não substituem documento fiscal."),
+            label=_("Recibos"),
+            scope="organization",
+            read_fields=(
+                "charge",
+                "payment",
+                "number",
+                "issued_at",
+                "amount",
+                "method",
+                "payer_name",
+                "payer_document",
+                "patient_name",
+                "description",
+                "issuer_name",
+                "issuer_document",
+                "professional_name",
+                "professional_council",
+                "professional_tax_id",
+                "seal_digest",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            personal_fields=(
+                "payer_name",
+                "payer_document",
+                "patient_name",
+                "issuer_document",
+                "professional_name",
+                "professional_tax_id",
+            ),
+            expose_api=False,
+            access_parent="charge",
+            seal=SealPolicy(attachments="frozen", comments="frozen"),
+        )
+    )
+    register(
+        TableSpec(
+            model=ReceiptVoid,
+            description=_("Anulações de recibos; o recibo continua íntegro e o número não volta."),
+            label=_("Anulações de recibo"),
+            scope="organization",
+            read_fields=("receipt", "reason", "voided_at", "voided_by"),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="receipt",
+        )
+    )
+    register_sequence(
+        SequenceSpec(key=RECEIPT_SEQUENCE, period="year", template="{year}/{number:06d}", owner_app=APP_LABEL)
+    )
+    for name in ("issued", "voided"):
+        register_event_type(
+            EventType(
+                code=f"{APP_LABEL}.receipt_{name}",
+                table_key="med_finance.receipt",
+                payload_fields=("number", "charge", "amount", "seal_digest"),
+                owner_app=APP_LABEL,
+            )
+        )

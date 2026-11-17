@@ -48,6 +48,10 @@ O atendimento assinado é selado: o banco recusa qualquer mudança nele e nas su
 
 Toda leitura de conteúdo clínico pelo sistema é registrada (quem, o quê, quando), com uma linha por pessoa e alvo a cada 5 minutos; só o dono do arquivo clínico ou o administrador a consulta. Limites: leituras feitas fora do sistema (cópia impressa, acesso direto ao banco por quem administra a infraestrutura) não entram na trilha, e a cópia integral do prontuário para o titular é entregue pelo profissional, não pelo relatório automático.
 
+### Recibos
+
+Os recibos do financeiro são numerados por ano sem lacunas, selados na emissão e anulados por registro, nunca editados. Eles comprovam o pagamento ao paciente, mas **não** substituem documento fiscal: NFS-e e o Receita Saúde ficam fora do plano base.
+
 ## O que o produto não cobre
 
 - Assinatura digital ICP-Brasil nem nível de garantia NGS2 do prontuário: os registros definitivos são selados (imutáveis, com resumo SHA-256) e trazem o aviso de ausência de assinatura digital.

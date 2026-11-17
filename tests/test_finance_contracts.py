@@ -162,13 +162,56 @@ def _payment(desk):
     return row
 
 
+def _receipt_of(desk):
+    from applications.med_finance.models import Receipt
+
+    payment = _payment(desk)
+    row = Receipt(
+        organization=desk.organization,
+        charge=payment.charge,
+        payment=payment,
+        number=f"T/{next(NUMBERS)}",
+        issued_at=datetime(2026, 1, 1, tzinfo=UTC),
+        amount=100,
+        method="cash",
+        payer_name="Pagador",
+        patient_name="Paciente",
+        description="Consulta",
+        issuer_name="Consultório",
+    )
+    row.save()
+    return row
+
+
+@register_child("receipt")
+def _receipt(desk):
+    return _receipt_of(desk)
+
+
+@register_child("receiptvoid")
+def _receipt_void(desk):
+    from applications.med_finance.models import ReceiptVoid
+
+    row = ReceiptVoid(
+        organization=desk.organization,
+        receipt=_receipt_of(desk),
+        reason="Erro",
+        voided_at=datetime(2026, 1, 2, tzinfo=UTC),
+        voided_by=desk.owner,
+    )
+    row.save()
+    return row
+
+
 def _model(name):
     from django.apps import apps
 
     return apps.get_model("med_finance", name)
 
 
-@pytest.mark.parametrize("table", ["cashsession", "cashmovement", "charge", "chargeitem", "payment"])
+@pytest.mark.parametrize(
+    "table", ["cashsession", "cashmovement", "charge", "chargeitem", "payment", "receipt", "receiptvoid"]
+)
 def test_desk_tables_follow_the_desk(skeleton_db, table):
     for label in APPS:
         open_app(label)

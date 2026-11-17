@@ -11,7 +11,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy
 
-from skeleton.common.models import OrganizationRecord, SecuredRecord
+from skeleton.common.models import OrganizationRecord, SealableMixin, SecuredRecord
 
 
 class PriceList(SecuredRecord):
@@ -247,3 +247,63 @@ class Payment(OrganizationRecord):
             ),
         ]
         ordering = ("received_at", "sysid")
+
+
+class Receipt(SealableMixin, OrganizationRecord):
+    """The receipt of one payment: numbered without gaps per year and sealed at issue; it never changes.
+
+    A voided receipt stays, marked by a ``ReceiptVoid``; its number is never reused.
+    """
+
+    charge = models.ForeignKey(Charge, on_delete=models.PROTECT, related_name="+")
+    payment = models.ForeignKey(Payment, on_delete=models.PROTECT, related_name="+")
+    number = models.CharField(max_length=20)
+    issued_at = models.DateTimeField()
+    amount = models.PositiveBigIntegerField()
+    method = models.CharField(max_length=16)
+    payer_name = models.CharField(max_length=200)
+    payer_document = models.CharField(max_length=14, blank=True)
+    patient_name = models.CharField(max_length=200)
+    description = models.CharField(max_length=500)
+    issuer_name = models.CharField(max_length=200)
+    issuer_document = models.CharField(max_length=14, blank=True)
+    professional_name = models.CharField(max_length=200, blank=True)
+    professional_council = models.CharField(max_length=60, blank=True)
+    professional_tax_id = models.CharField(max_length=11, blank=True)
+    # The references are immutable from creation; the seal digest covers them through the extra.
+    seal_fields = (
+        "number",
+        "issued_at",
+        "amount",
+        "method",
+        "payer_name",
+        "payer_document",
+        "patient_name",
+        "description",
+        "issuer_name",
+        "issuer_document",
+        "professional_name",
+        "professional_council",
+        "professional_tax_id",
+    )
+    immutable_fields = ("charge_id", "payment_id")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(fields=("organization", "number"), name="med_finance_receipt_number"),
+            models.UniqueConstraint(fields=("payment",), name="med_finance_one_receipt_per_payment"),
+        ]
+        ordering = ("-issued_at", "sysid")
+
+
+class ReceiptVoid(OrganizationRecord):
+    """The voiding of a receipt: the receipt stays intact and is shown as voided."""
+
+    receipt = models.OneToOneField(Receipt, on_delete=models.PROTECT, related_name="+")
+    reason = models.CharField(max_length=300)
+    voided_at = models.DateTimeField()
+    voided_by = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, related_name="+")
+    immutable_fields = ("receipt_id", "reason", "voided_at", "voided_by_id")
+
+    class Meta(OrganizationRecord.Meta):
+        ordering = ("voided_at", "sysid")

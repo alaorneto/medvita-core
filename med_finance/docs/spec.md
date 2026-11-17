@@ -39,6 +39,10 @@ Valores sempre em inteiros de centavos.
 
 **`Payment`** (derivada da conta): `session` (a sessão aberta do caixa da conta), `method` (dinheiro, Pix, débito, crédito, transferência, outro), `amount`, `received_at`, `installments` (mais de uma só no crédito), `authorization_code`, `received_by` (imutáveis), `status` (registrado, estornado), `reversed_at`, `reverse_reason`, `ledger_settlement` (a baixa no livro).
 
+**`Receipt`** (derivada da conta, selável, um por pagamento): `number` (`<ano>/<6 dígitos>`, sequência `med_finance.receipt` sem lacunas, reiniciada a cada ano), `issued_at`, `amount`, `method`, e as fotografias da emissão: `payer_name` e `payer_document`, `patient_name`, `description` (itens da conta), `issuer_name` e `issuer_document` (o consultório), `professional_name`, `professional_council` e `professional_tax_id` (o profissional da consulta). Os campos pessoais estão em `personal_fields`.
+
+**`ReceiptVoid`** (derivada do recibo, imutável, uma por recibo): `reason`, `voided_at`, `voided_by`.
+
 ### Preços
 
 `price_items` lista os itens (da tabela padrão, sem `price_list_id`); `price_for(code)` devolve o item ativo do código ou `None`. `add_price_item` exige alteração na tabela; código repetido é `Conflict`. `update_price_item` muda descrição, valor ou atividade, com CAS; o código nunca muda.
@@ -66,6 +70,12 @@ Valores sempre em inteiros de centavos.
 - `reverse_payment` exige motivo e o recibo anulado, estorna a baixa no livro (que volta o saldo do título), reabre a conta (parcialmente paga ou em aberto) e publica `payment_reversed`. O estorno de uma sessão já fechada não muda o esperado gravado no fechamento.
 - Eventos `payment_registered` e `payment_reversed`: `charge`, `method`, `amount`, `status`.
 
+### Recibos
+
+- `register_payment(issue_receipt=True)` ou `issue_receipt` emitem o recibo do pagamento (um só; repetir devolve o mesmo): o número é pedido depois de todas as validações, na mesma transação do selo, e um rollback o devolve; o recibo é selado na emissão (`seal_record`, referências no `extra`) e publica `receipt_issued` (sem nome nem documento).
+- `void_receipt` grava a anulação; o recibo continua íntegro (`verify_receipt` válido), aparece como anulado e o número não volta. O pagamento só é estornado com o recibo anulado.
+- O recibo não substitui documento fiscal (NFS-e, Receita Saúde).
+
 ## Acceptance
 
 - O `setup` prepara o livro com as chaves do financeiro vinculadas, é idempotente pela chave e só o administrador o faz; com o livro desativado, nada é criado.
@@ -74,3 +84,4 @@ Valores sempre em inteiros de centavos.
 - Abrir, suprir, sangrar e fechar conferem o esperado e a diferença; cada movimento tem um lançamento no livro.
 - O título da conta confirmada não leva nome nem documento do pagador; a mesma origem devolve a mesma conta.
 - Pagamento parcial e depois o restante quitam a conta e o título; o estorno reabre os dois.
+- Recibos emitidos têm números consecutivos no ano; a anulação mantém o recibo e o número.

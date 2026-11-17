@@ -112,6 +112,14 @@ The cash desks the actor reads, the default first.
 - **Erros:** nenhum além do contrato.
 - **Efeitos:** nenhum.
 
+#### `issue_receipt(*, actor, payment_id, idempotency_key) -> ReceiptInfo`
+
+Issue the receipt of a payment (one per payment), numbered per year without gaps and sealed.
+
+- **Autorização:** alteração no caixa da conta.
+- **Erros:** NotFound; Forbidden; Conflict("reversed") para pagamento estornado.
+- **Efeitos:** grava o recibo, pede o número depois de validar tudo, sela e publica ``receipt_issued`` (sem nome nem documento). Repetir devolve o mesmo recibo.
+
 #### `open_session(*, actor, desk_id=None, opening_amount=0, idempotency_key) -> SessionInfo`
 
 Open a session of the cash desk with the cash in the drawer.
@@ -158,6 +166,22 @@ The price lists the actor reads, the default first.
 
 - **Autorização:** leitura de cada tabela de preços.
 - **Erros:** nenhum além do contrato.
+- **Efeitos:** nenhum.
+
+#### `receipt(*, actor, receipt_id) -> ReceiptInfo`
+
+One receipt, marked when voided.
+
+- **Autorização:** leitura do caixa.
+- **Erros:** NotFound para recibo inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
+#### `receipts(*, actor, charge_id=None, year=None, cursor=None, page_size=50) -> Page[ReceiptInfo]`
+
+Receipts of the desks the actor reads, newest first, by charge or year.
+
+- **Autorização:** leitura de cada caixa.
+- **Erros:** InvalidInput para ano, cursor ou tamanho inválidos.
 - **Efeitos:** nenhum.
 
 #### `register_payment(*, actor, charge_id, method, amount, expected_revision, idempotency_key, installments=1, authorization_code='', issue_receipt=True) -> PaymentInfo`
@@ -215,6 +239,22 @@ Change the description, amount or activity of a price item, with CAS (the code n
 - **Autorização:** alteração na tabela de preços.
 - **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo; Conflict("stale_revision").
 - **Efeitos:** grava só os campos que mudaram; contas já confirmadas não mudam.
+
+#### `verify_receipt(*, actor, receipt_id) -> bool`
+
+Whether the stored content of the receipt still matches its seal.
+
+- **Autorização:** leitura do caixa.
+- **Erros:** NotFound para recibo ilegível.
+- **Efeitos:** nenhum.
+
+#### `void_receipt(*, actor, receipt_id, reason, idempotency_key) -> ReceiptInfo`
+
+Void a receipt: it stays intact, marked as voided; the number is never reused.
+
+- **Autorização:** alteração no caixa.
+- **Erros:** NotFound; Forbidden; InvalidInput sem motivo.
+- **Efeitos:** grava a anulação e publica ``receipt_voided``. Repetir devolve o mesmo recibo anulado.
 
 ## DTOs
 
@@ -355,6 +395,32 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 | `is_default` | `bool` |
 | `revision` | `int` |
 | `writable` | `bool` |
+
+### `ReceiptInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `charge_id` | `UUID` |
+| `payment_id` | `UUID` |
+| `number` | `str` |
+| `issued_at` | `datetime` |
+| `amount` | `int` |
+| `method` | `str` |
+| `payer_name` | `str` |
+| `payer_document` | `str` |
+| `patient_name` | `str` |
+| `description` | `str` |
+| `issuer_name` | `str` |
+| `issuer_document` | `str` |
+| `professional_name` | `str` |
+| `professional_council` | `str` |
+| `professional_tax_id` | `str` |
+| `seal_digest` | `str` |
+| `voided` | `bool` |
+| `void_reason` | `str` |
+| `voided_at` | `datetime | None` |
+| `revision` | `int` |
 
 ### `SessionInfo`
 
