@@ -7,7 +7,7 @@ methods that say so, and every such read is recorded in the chart's read trail.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -19,15 +19,17 @@ from skeleton.service_api import (
     Forbidden,
     InvalidInput,
     NotFound,
+    Page,
     ServiceAPI,
     as_utc,
     as_uuid,
+    paginate,
     service_method,
 )
 
 from . import common
 from .extension import DocumentKind, SectionField, SectionType, register_document_kind, register_section_type
-from .models import Archive, PatientChart
+from .models import Archive, Encounter, EncounterSection, PatientChart
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.records"
@@ -40,8 +42,11 @@ __all__ = [
     "ArchiveInfo",
     "ChartInfo",
     "DocumentKind",
+    "EncounterHeader",
+    "EncounterInfo",
     "RecordsService",
     "SectionField",
+    "SectionInfo",
     "SectionType",
     "register_document_kind",
     "register_section_type",
@@ -88,6 +93,77 @@ def chart_info(row: PatientChart, *, writable: bool = False) -> ChartInfo:
         row.revision,
         writable,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class EncounterHeader:
+    """An encounter without clinical content: what lists show."""
+
+    sysid: UUID
+    chart_id: UUID
+    patient_id: UUID
+    code: str
+    kind: str
+    occurred_at: datetime
+    author_id: UUID
+    author_name: str
+    author_council: str
+    appointment_id: UUID | None
+    amends_id: UUID | None
+    signed: bool
+    signed_at: datetime | None
+    seal_digest: str
+    revision: int
+
+
+def encounter_header(row: Encounter) -> EncounterHeader:
+    return EncounterHeader(
+        row.pk,
+        row.chart_id,
+        row.patient_id,
+        row.code,
+        row.kind,
+        as_utc(row.occurred_at),
+        row.author_id,
+        row.author_name,
+        row.author_council,
+        row.appointment_id,
+        row.amends_id,
+        row.sealed_at is not None,
+        as_utc(row.sealed_at) if row.sealed_at else None,
+        row.seal_digest,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SectionInfo:
+    """A section with its content; ``data_json`` is the structured data as canonical JSON text."""
+
+    sysid: UUID
+    section_type: str
+    type_version: int
+    position: int
+    data_json: str
+    text: str
+
+
+def section_info(row: EncounterSection) -> SectionInfo:
+    from skeleton.common.sealing import canonical_bytes
+
+    return SectionInfo(
+        row.pk, row.section_type, row.type_version, row.position, canonical_bytes(row.data).decode(), row.text
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class EncounterInfo:
+    """An encounter with its sections (clinical content: every read is recorded in the trail)."""
+
+    header: EncounterHeader
+    sections: tuple[SectionInfo, ...]
+    addenda: tuple[EncounterHeader, ...]
+    writable: bool
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -182,6 +258,91 @@ def _new_archive(actor: Any, *, sysid: UUID, name: str, kind: str, owner_id: Any
     )
     archive.save()
     return archive
+
+
+def _encounter(actor: Any, encounter_id: object, *, write: bool = False, lock: bool = False) -> Encounter:
+    return common.row(actor, Encounter, encounter_id, field="encounter_id", write=write, lock=lock)
+
+
+def _own_draft(actor: Any, encounter_id: object, expected_revision: object) -> Encounter:
+    """A draft the actor wrote, locked, at the expected revision."""
+    encounter = _encounter(actor, encounter_id, write=True, lock=True)
+    if encounter.sealed_at is not None:
+        raise Conflict("signed", gettext("O atendimento já foi assinado e não muda."))
+    if encounter.author_id != actor.pk:
+        raise Forbidden(gettext("Só o autor altera o rascunho."))
+    common.check_revision(encounter, expected_revision)
+    return encounter
+
+
+def _touch(encounter: Encounter) -> None:
+    """Bump the encounter's revision (the CAS of its sections) and the chart's last entry."""
+    encounter.save(update_fields={"updated_at"})
+    chart = PatientChart.objects.get(pk=encounter.chart_id)
+    chart.last_entry_at = timezone.now()
+    chart.save(update_fields={"last_entry_at"})
+
+
+def _sections(actor: Any, encounter: Encounter) -> tuple[SectionInfo, ...]:
+    from skeleton.access.policies import authorized_queryset
+
+    rows = authorized_queryset(EncounterSection, user=actor, action="read").filter(encounter=encounter)
+    return tuple(section_info(row) for row in rows.order_by("position", "section_type", "sysid"))
+
+
+def _encounter_info(actor: Any, encounter: Encounter) -> EncounterInfo:
+    from skeleton.access.policies import authorized_queryset
+
+    addenda = authorized_queryset(Encounter, user=actor, action="read").filter(
+        amends=encounter, sealed_at__isnull=False
+    )
+    writable = (
+        encounter.sealed_at is None
+        and encounter.author_id == actor.pk
+        and encounter.chart.archive_id in _writable_ids(actor, Archive)
+    )
+    return EncounterInfo(
+        encounter_header(encounter),
+        _sections(actor, encounter),
+        tuple(encounter_header(row) for row in addenda.order_by("sealed_at", "sysid")),
+        writable,
+    )
+
+
+def _occurred(value: object) -> datetime:
+    if value is None:
+        return timezone.now()
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        raise InvalidInput({"occurred_at": [gettext("Informe data e hora com fuso.")]})
+    if value > timezone.now() + timedelta(minutes=5):
+        raise InvalidInput({"occurred_at": [gettext("O atendimento não pode ser no futuro.")]})
+    return value
+
+
+def _new_encounter(
+    actor: Any, chart: PatientChart, *, kind: str, occurred_at: datetime, sysid: UUID, **values: Any
+) -> Encounter:
+    from skeleton.access.policies import require_parent_action
+    from skeleton.service_api.sequences import SequenceService
+
+    from .registration import ENCOUNTER_SEQUENCE
+
+    require_parent_action(Encounter, chart, user=actor, action="create")
+    number = SequenceService().next_number(actor=actor, key=ENCOUNTER_SEQUENCE)
+    encounter = Encounter(
+        sysid=sysid,
+        organization_id=chart.organization_id,
+        chart=chart,
+        patient_id=chart.patient_id,
+        code=number.formatted,
+        kind=kind,
+        occurred_at=occurred_at,
+        author_id=actor.pk,
+        **values,
+    )
+    encounter.save()
+    _touch(encounter)
+    return encounter
 
 
 # ------------------------------------------------------------------------------------ service
@@ -385,3 +546,177 @@ class RecordsService(ServiceAPI):
         rows = authorized_queryset(PatientChart, user=actor, action="read").filter(patient_id=pk)
         writable = _writable_ids(actor, Archive)
         return tuple(chart_info(row, writable=row.archive_id in writable) for row in rows.order_by("opened_at")[:50])
+
+    # ------------------------------------------------------------------ encounters
+
+    @service_method(read_only=False, since="0.1.0")
+    def start_encounter(
+        self,
+        *,
+        actor: Any,
+        chart_id: UUID,
+        kind: str = "consultation",
+        occurred_at: datetime | None = None,
+        appointment_id: UUID | None = None,
+        idempotency_key: str,
+    ) -> EncounterInfo:
+        """Start a draft encounter written by the actor; with an arrived appointment, start the attendance.
+
+        Autorização: alteração no arquivo do prontuário; com ``appointment_id``, leitura da consulta.
+        Erros: NotFound para prontuário ou consulta ilegíveis; Forbidden sem alteração no arquivo;
+        InvalidInput para tipo desconhecido (o adendo nasce por ``add_addendum``), data futura ou
+        consulta de outro paciente.
+        Efeitos: cria o rascunho com o código da sequência e atualiza o último registro do
+        prontuário; com a consulta em "chegou", tenta iniciá-la na agenda (recusa da agenda não
+        impede o rascunho). A mesma chave devolve o mesmo rascunho.
+        """
+        key = common.key(idempotency_key)
+        if kind not in Encounter.Kind.values or kind == Encounter.Kind.ADDENDUM:
+            raise InvalidInput({"kind": [gettext("Tipo de atendimento desconhecido.")]})
+        when = _occurred(occurred_at)
+        sysid = common.deterministic_id("encounter", actor, key)
+        existing = Encounter.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return _encounter_info(actor, existing)
+        chart = _chart(actor, chart_id, write=True)
+        appointment = None
+        if appointment_id is not None:
+            from applications.med_scheduling.service_api import SchedulingService
+
+            scheduling = SchedulingService()
+            appointment = scheduling.appointment(
+                actor=actor, appointment_id=as_uuid(appointment_id, field="appointment_id")
+            ).appointment
+            if appointment.patient_id != chart.patient_id:
+                raise InvalidInput({"appointment_id": [gettext("A consulta é de outro paciente.")]})
+        encounter = _new_encounter(
+            actor,
+            chart,
+            kind=kind,
+            occurred_at=when,
+            sysid=sysid,
+            appointment_id=appointment.sysid if appointment else None,
+        )
+        if appointment is not None and appointment.status == "arrived":
+            try:
+                scheduling.start(actor=actor, appointment_id=appointment.sysid, expected_revision=appointment.revision)
+            except (Forbidden, Conflict):
+                pass
+        return _encounter_info(actor, encounter)
+
+    @service_method(read_only=True, since="0.1.0")
+    def encounter(self, *, actor: Any, encounter_id: UUID) -> EncounterInfo:
+        """One encounter with its sections and signed addenda; the read is recorded in the trail.
+
+        Rascunhos aparecem a todos os leitores do arquivo, marcados como não assinados.
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para atendimento inexistente, de outra organização ou ilegível.
+        Efeitos: registra a leitura na trilha do prontuário.
+        """
+        from .trail import record_access
+
+        encounter = _encounter(actor, encounter_id)
+        record_access(actor, encounter.chart, "view_encounter", encounter)
+        return _encounter_info(actor, encounter)
+
+    @service_method(read_only=True, since="0.1.0")
+    def encounters(
+        self, *, actor: Any, chart_id: UUID, cursor: str | None = None, page_size: int = 50
+    ) -> Page[EncounterHeader]:
+        """Headers of the chart's encounters, newest first, without clinical content.
+
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para prontuário ilegível; InvalidInput para cursor ou tamanho inválidos.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        chart = _chart(actor, chart_id)
+        rows = (
+            authorized_queryset(Encounter, user=actor, action="read")
+            .filter(chart=chart)
+            .order_by("-occurred_at", "-sysid")
+        )
+        return paginate(
+            rows, convert=encounter_header, cursor=cursor, page_size=page_size, key=("-occurred_at", "-sysid")
+        )
+
+    @service_method(read_only=False, since="0.1.0")
+    def save_section(
+        self,
+        *,
+        actor: Any,
+        encounter_id: UUID,
+        section_type: str,
+        data: tuple[tuple[str, Any], ...] = (),
+        text: str = "",
+        position: int = 0,
+        expected_revision: int,
+    ) -> EncounterInfo:
+        """Write one section of the actor's draft (the section at ``section_type`` and ``position``).
+
+        ``data`` are ``(field, value)`` pairs, validated by the section type (the latest version).
+        Autorização: alteração no arquivo; só o autor do rascunho.
+        Erros: NotFound; Forbidden para quem não é o autor; InvalidInput para tipo desconhecido ou
+        campo inválido (citado pelo nome); Conflict("signed") ou Conflict("stale_revision").
+        Efeitos: grava a seção, sobe a revisão do atendimento e o último registro do prontuário.
+        """
+        from skeleton.access.policies import require_parent_action
+
+        from .extension import SECTION_TYPES, active_section_types
+        from .sections import validate_section
+
+        if type(position) is not int or not 0 <= position <= 50:
+            raise InvalidInput({"position": [gettext("Use uma posição de 0 a 50.")]})
+        values = common.changes_dict(tuple(data)) if data else {}
+        kind = SECTION_TYPES.get(section_type) if isinstance(section_type, str) else None
+        if kind is None or kind not in active_section_types(actor):
+            raise InvalidInput({"section_type": [gettext("Tipo de seção desconhecido.")]})
+        clean, clean_text = validate_section(kind, values, text)
+        encounter = _own_draft(actor, encounter_id, expected_revision)
+        row = EncounterSection.objects.filter(encounter=encounter, section_type=kind.code, position=position).first()
+        if row is None:
+            require_parent_action(EncounterSection, encounter, user=actor, action="create")
+            row = EncounterSection(
+                organization_id=encounter.organization_id,
+                encounter=encounter,
+                section_type=kind.code,
+                position=position,
+            )
+        row.type_version = kind.version
+        row.data = clean
+        row.text = clean_text
+        row.save()
+        _touch(encounter)
+        return _encounter_info(actor, encounter)
+
+    @service_method(read_only=False, since="0.1.0")
+    def remove_section(
+        self, *, actor: Any, encounter_id: UUID, section_id: UUID, expected_revision: int
+    ) -> EncounterInfo:
+        """Remove one section of the actor's draft.
+
+        Autorização: alteração no arquivo; só o autor do rascunho.
+        Erros: NotFound; Forbidden; Conflict("signed") ou Conflict("stale_revision").
+        Efeitos: exclusão lógica da seção e nova revisão do atendimento.
+        """
+        encounter = _own_draft(actor, encounter_id, expected_revision)
+        row = EncounterSection.objects.filter(encounter=encounter, pk=as_uuid(section_id, field="section_id")).first()
+        if row is None:
+            raise NotFound()
+        row.delete()
+        _touch(encounter)
+        return _encounter_info(actor, encounter)
+
+    @service_method(read_only=False, since="0.1.0")
+    def discard_draft(self, *, actor: Any, encounter_id: UUID, expected_revision: int) -> None:
+        """Discard the actor's draft encounter with its sections.
+
+        Autorização: alteração no arquivo; só o autor do rascunho.
+        Erros: NotFound; Forbidden; Conflict("signed") para atendimento assinado; Conflict("stale_revision").
+        Efeitos: exclusão lógica das seções e do atendimento.
+        """
+        encounter = _own_draft(actor, encounter_id, expected_revision)
+        for row in EncounterSection.objects.filter(encounter=encounter):
+            row.delete()
+        encounter.delete()

@@ -25,9 +25,21 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 
 **`PatientChart`** (derivada do arquivo): `archive` e `patient` (imutáveis; um prontuário vivo por arquivo e paciente), `opened_at`, `last_entry_at` (o último registro clínico, base da guarda legal).
 
+**`Encounter`** (derivada do prontuário, selável): `chart`, `patient`, `code` (`E` + 8 dígitos da sequência `med_records.encounter`), `kind` (consulta, retorno, procedimento, contato a distância, anotação, adendo), `occurred_at` (não futura), `author` (a pessoa), `author_name` e `author_council` (fotografia na assinatura; `personal_fields`), `appointment` (opcional), `amends` (só no adendo). Todos em `seal_fields`.
+
+**`EncounterSection`** (derivada do atendimento, três saltos até o arquivo; `seal_parent` do atendimento): `section_type` e `type_version`, `position`, `data` (JSON) e `text`, ambos em `sensitive_fields`. Uma seção viva por tipo e posição.
+
 ### Prontuário
 
 `open_chart` obtém ou cria o prontuário do paciente: exige alteração no arquivo e leitura do paciente. Sem `archive_id` usa o arquivo padrão que o ator altera, ou o único; com vários e nenhum padrão, pede o arquivo. `chart` e `charts_for_patient` não devolvem conteúdo clínico.
+
+### Atendimentos em rascunho
+
+- `start_encounter` cria um rascunho do ator (alteração no arquivo). Com uma consulta, confere que é do mesmo paciente e, se ela está em "chegou", tenta iniciá-la na agenda; a recusa da agenda não impede o rascunho.
+- Só o autor altera ou descarta o rascunho; os outros leitores do arquivo o veem marcado "rascunho, não assinado".
+- `save_section` valida pelo tipo de seção, usa a revisão do **atendimento** como CAS (cada seção salva sobe a revisão) e atualiza `last_entry_at` do prontuário. `remove_section` e `discard_draft` são exclusões lógicas; atendimento assinado responde `Conflict("signed")`.
+- `encounters` devolve só cabeçalhos; `encounter` devolve o conteúdo e registra a leitura na trilha.
+- O conteúdo das seções sai `[REDACTED]` na auditoria.
 
 ### Tipos de seção e de documento
 

@@ -11,7 +11,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy
 
-from skeleton.common.models import OrganizationRecord, SecuredRecord
+from skeleton.common.models import OrganizationRecord, SealableMixin, SecuredRecord
 
 
 class Archive(SecuredRecord):
@@ -61,3 +61,80 @@ class PatientChart(OrganizationRecord):
         ]
         indexes = [models.Index(fields=("organization", "patient"), name="med_records_chart_patient")]
         ordering = ("opened_at", "sysid")
+
+
+class Encounter(SealableMixin, OrganizationRecord):
+    """One encounter of the chart: a draft only its author changes, sealed when signed.
+
+    A signed encounter never changes; a correction is an addendum (``kind="addendum"``) pointing
+    to the original with ``amends``.
+    """
+
+    class Kind(models.TextChoices):
+        CONSULTATION = "consultation", gettext_lazy("Consulta")
+        RETURN = "return", gettext_lazy("Retorno")
+        PROCEDURE = "procedure", gettext_lazy("Procedimento")
+        REMOTE_CONTACT = "remote_contact", gettext_lazy("Contato a distância")
+        NOTE = "note", gettext_lazy("Anotação")
+        ADDENDUM = "addendum", gettext_lazy("Adendo")
+
+    chart = models.ForeignKey(PatientChart, on_delete=models.PROTECT, related_name="+")
+    patient = models.ForeignKey("med_patients.Patient", on_delete=models.PROTECT, related_name="+")
+    code = models.CharField(max_length=20)
+    kind = models.CharField(max_length=16, choices=Kind.choices, default=Kind.CONSULTATION)
+    occurred_at = models.DateTimeField()
+    author = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, related_name="+")
+    author_name = models.CharField(max_length=200, blank=True)
+    author_council = models.CharField(max_length=60, blank=True)
+    appointment = models.ForeignKey(
+        "med_scheduling.Appointment", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    amends = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    seal_fields = (
+        "chart",
+        "patient",
+        "code",
+        "kind",
+        "occurred_at",
+        "author",
+        "author_name",
+        "author_council",
+        "appointment",
+        "amends",
+    )
+    immutable_fields = ("chart_id", "patient_id", "code", "author_id", "appointment_id", "amends_id")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(fields=("organization", "code"), name="med_records_encounter_code"),
+            models.CheckConstraint(
+                condition=Q(kind="addendum", amends__isnull=False) | (~Q(kind="addendum") & Q(amends__isnull=True)),
+                name="med_records_addendum_amends",
+            ),
+        ]
+        indexes = [models.Index(fields=("chart", "occurred_at"), name="med_records_encounter_chart")]
+        ordering = ("-occurred_at", "sysid")
+
+
+class EncounterSection(OrganizationRecord):
+    """A structured section of an encounter; frozen with the encounter's seal."""
+
+    encounter = models.ForeignKey(Encounter, on_delete=models.PROTECT, related_name="+")
+    section_type = models.CharField(max_length=80)
+    type_version = models.PositiveSmallIntegerField(default=1)
+    position = models.PositiveSmallIntegerField(default=0)
+    data = models.JSONField(default=dict, blank=True)
+    text = models.TextField(blank=True)
+    seal_parent = "encounter"
+    immutable_fields = ("encounter_id", "section_type")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("encounter", "section_type", "position"),
+                condition=Q(deleted_at__isnull=True),
+                name="med_records_one_section_per_slot",
+                violation_error_code="unique",
+            ),
+        ]
+        ordering = ("position", "section_type", "sysid")

@@ -19,3 +19,4 @@ class MedRecordsConfig(AppConfig):
         registration.register_archive_tables()
         registration.register_contributions()
         registration.register_clinical_types()
+        registration.register_encounters()

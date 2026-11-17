@@ -74,3 +74,56 @@ def register_clinical_types() -> None:
         register_section_type(section_type)
     for kind in BASIC_KINDS:
         register_document_kind(kind)
+
+
+ENCOUNTER_SEQUENCE = "med_records.encounter"
+
+
+def register_encounters() -> None:
+    from skeleton.sequences.registry import SequenceSpec, register_sequence
+    from skeleton.system.registry import SealPolicy, TableSpec, register
+
+    from .models import Encounter, EncounterSection
+
+    register(
+        TableSpec(
+            model=Encounter,
+            description=_("Atendimentos do prontuário: rascunho do autor até a assinatura, que os sela."),
+            label=_("Atendimentos"),
+            scope="organization",
+            read_fields=(
+                "chart",
+                "patient",
+                "code",
+                "kind",
+                "occurred_at",
+                "author",
+                "author_name",
+                "author_council",
+                "appointment",
+                "amends",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            personal_fields=("author_name", "author_council"),
+            expose_api=False,
+            access_parent="chart",
+            seal=SealPolicy(attachments="frozen", comments="frozen"),
+        )
+    )
+    register(
+        TableSpec(
+            model=EncounterSection,
+            description=_("Seções estruturadas dos atendimentos; o conteúdo é dado de saúde."),
+            label=_("Seções de atendimento"),
+            scope="organization",
+            read_fields=("encounter", "section_type", "type_version", "position", "data", "text"),
+            write_fields=(),
+            sensitive_fields=("data", "text"),
+            expose_api=False,
+            access_parent="encounter",
+        )
+    )
+    register_sequence(
+        SequenceSpec(key=ENCOUNTER_SEQUENCE, period="none", template="E{number:08d}", owner_app=APP_LABEL)
+    )

@@ -48,6 +48,30 @@ Create one more clinical archive, written by the groups and people informed.
 - **Erros:** Forbidden; InvalidInput para nome ou tipo inválidos, dono que não é membro ativo ou listas longas demais.
 - **Efeitos:** cria o arquivo privado (dono ``owner_user_id`` ou o ator) e concede leitura e alteração aos grupos e pessoas. A mesma chave devolve o já criado.
 
+#### `discard_draft(*, actor, encounter_id, expected_revision) -> None`
+
+Discard the actor's draft encounter with its sections.
+
+- **Autorização:** alteração no arquivo; só o autor do rascunho.
+- **Erros:** NotFound; Forbidden; Conflict("signed") para atendimento assinado; Conflict("stale_revision").
+- **Efeitos:** exclusão lógica das seções e do atendimento.
+
+#### `encounter(*, actor, encounter_id) -> EncounterInfo`
+
+One encounter with its sections and signed addenda; the read is recorded in the trail.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para atendimento inexistente, de outra organização ou ilegível.
+- **Efeitos:** registra a leitura na trilha do prontuário.
+
+#### `encounters(*, actor, chart_id, cursor=None, page_size=50) -> Page[EncounterHeader]`
+
+Headers of the chart's encounters, newest first, without clinical content.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para prontuário ilegível; InvalidInput para cursor ou tamanho inválidos.
+- **Efeitos:** nenhum.
+
 #### `open_chart(*, actor, patient_id, archive_id=None, idempotency_key=None) -> ChartInfo`
 
 The chart of the patient in the archive, created on first use (get or create).
@@ -56,6 +80,22 @@ The chart of the patient in the archive, created on first use (get or create).
 - **Erros:** NotFound para paciente ou arquivo ilegíveis; Forbidden sem alteração no arquivo; InvalidInput quando o ator altera vários arquivos e nenhum é o padrão.
 - **Efeitos:** cria o prontuário uma vez; repetir devolve o mesmo.
 
+#### `remove_section(*, actor, encounter_id, section_id, expected_revision) -> EncounterInfo`
+
+Remove one section of the actor's draft.
+
+- **Autorização:** alteração no arquivo; só o autor do rascunho.
+- **Erros:** NotFound; Forbidden; Conflict("signed") ou Conflict("stale_revision").
+- **Efeitos:** exclusão lógica da seção e nova revisão do atendimento.
+
+#### `save_section(*, actor, encounter_id, section_type, data=(), text='', position=0, expected_revision) -> EncounterInfo`
+
+Write one section of the actor's draft (the section at ``section_type`` and ``position``).
+
+- **Autorização:** alteração no arquivo; só o autor do rascunho.
+- **Erros:** NotFound; Forbidden para quem não é o autor; InvalidInput para tipo desconhecido ou campo inválido (citado pelo nome); Conflict("signed") ou Conflict("stale_revision").
+- **Efeitos:** grava a seção, sobe a revisão do atendimento e o último registro do prontuário.
+
 #### `setup(*, actor, mode='shared', name='', member_group_ids=(), idempotency_key) -> tuple[ArchiveInfo, ...]`
 
 Create the first clinical archives of the organization.
@@ -63,6 +103,14 @@ Create the first clinical archives of the organization.
 - **Autorização:** a capacidade ``access.manage`` e ``create`` em med_records.archive.
 - **Erros:** Forbidden; InvalidInput para modo desconhecido, nome inválido, mais de 20 grupos ou nenhum profissional vinculado; Conflict("already_set_up") com arquivos criados por outra chave.
 - **Efeitos:** cria os arquivos (privados), dá ao papel ``member`` leitura e alteração da tabela de arquivos e concede leitura e alteração aos grupos. A mesma chave devolve o já criado.
+
+#### `start_encounter(*, actor, chart_id, kind='consultation', occurred_at=None, appointment_id=None, idempotency_key) -> EncounterInfo`
+
+Start a draft encounter written by the actor; with an arrived appointment, start the attendance.
+
+- **Autorização:** alteração no arquivo do prontuário; com ``appointment_id``, leitura da consulta.
+- **Erros:** NotFound para prontuário ou consulta ilegíveis; Forbidden sem alteração no arquivo; InvalidInput para tipo desconhecido (o adendo nasce por ``add_addendum``), data futura ou consulta de outro paciente.
+- **Efeitos:** cria o rascunho com o código da sequência e atualiza o último registro do prontuário; com a consulta em "chegou", tenta iniciá-la na agenda (recusa da agenda não impede o rascunho). A mesma chave devolve o mesmo rascunho.
 
 ## DTOs
 
@@ -102,6 +150,39 @@ A kind of clinical document. ``default_body`` may use {{patient_name}}, {{date}}
 | `default_body` | `Any` |
 | `notice` | `Any` |
 
+### `EncounterHeader`
+
+An encounter without clinical content: what lists show.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `chart_id` | `UUID` |
+| `patient_id` | `UUID` |
+| `code` | `str` |
+| `kind` | `str` |
+| `occurred_at` | `datetime` |
+| `author_id` | `UUID` |
+| `author_name` | `str` |
+| `author_council` | `str` |
+| `appointment_id` | `UUID | None` |
+| `amends_id` | `UUID | None` |
+| `signed` | `bool` |
+| `signed_at` | `datetime | None` |
+| `seal_digest` | `str` |
+| `revision` | `int` |
+
+### `EncounterInfo`
+
+An encounter with its sections (clinical content: every read is recorded in the trail).
+
+| Campo | Tipo |
+|---|---|
+| `header` | `EncounterHeader` |
+| `sections` | `tuple[SectionInfo, ...]` |
+| `addenda` | `tuple[EncounterHeader, ...]` |
+| `writable` | `bool` |
+
 ### `SectionField`
 
 One structured field of a section type. ``choices`` are ``(code, label)`` pairs.
@@ -116,6 +197,19 @@ One structured field of a section type. ``choices`` are ``(code, label)`` pairs.
 | `min` | `float | None` |
 | `max` | `float | None` |
 | `choices` | `tuple[tuple[str, Any], ...]` |
+
+### `SectionInfo`
+
+A section with its content; ``data_json`` is the structured data as canonical JSON text.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `section_type` | `str` |
+| `type_version` | `int` |
+| `position` | `int` |
+| `data_json` | `str` |
+| `text` | `str` |
 
 ### `SectionType`
 

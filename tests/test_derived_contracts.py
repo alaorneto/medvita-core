@@ -84,13 +84,13 @@ def test_appointment_follows_the_schedule(skeleton_db):
     )
 
 
-@pytest.mark.parametrize("table", ["patientchart"])
+@pytest.mark.parametrize("table", ["patientchart", "encounter", "encountersection"])
 def test_records_tables_follow_the_archive(skeleton_db, table):
-    from applications.med_records.models import Archive, PatientChart
+    from applications.med_records.models import Archive, Encounter, EncounterSection, PatientChart
 
     for label in ("med_patients", "skeleton_calendar", "med_scheduling", "med_records"):
         open_app(label)
-    models = {"patientchart": PatientChart}
+    models = {"patientchart": PatientChart, "encounter": Encounter, "encountersection": EncounterSection}
     scenario = build_service_scenario(models[table], slug=f"derived-{table}")
 
     def make_archive(*, organization, owner):
@@ -108,7 +108,30 @@ def test_records_tables_follow_the_archive(skeleton_db, table):
         chart.save()
         return chart
 
-    makers = {"patientchart": make_chart}
+    def make_encounter(archive):
+        chart = make_chart(archive)
+        encounter = Encounter(
+            organization=archive.organization,
+            chart=chart,
+            patient=chart.patient,
+            code=f"E{next(NUMBERS):08d}",
+            occurred_at=datetime(2026, 1, 2, tzinfo=UTC),
+            author=archive.owner,
+        )
+        encounter.save()
+        return encounter
+
+    def make_section(archive):
+        section = EncounterSection(
+            organization=archive.organization,
+            encounter=make_encounter(archive),
+            section_type="med_records.free_text",
+            text="x",
+        )
+        section.save()
+        return section
+
+    makers = {"patientchart": make_chart, "encounter": make_encounter, "encountersection": make_section}
     assert_derived_access_contract(
         child_model=models[table], make_anchor=make_archive, make_child=makers[table], scenario=scenario
     )
