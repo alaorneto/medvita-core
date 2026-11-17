@@ -286,3 +286,20 @@ def register_imports() -> None:
                 owner_app=APP_LABEL,
             )
         )
+
+
+def register_setup_steps() -> None:
+    """The first step of the clinic setup list: the patient registry."""
+    from django.utils.translation import gettext_lazy
+
+    from .extension import SetupStep, register_setup_step
+
+    register_setup_step(
+        SetupStep("med_patients.registry", gettext_lazy("Pacientes"), "med_patients:setup", _has_registry, order=10)
+    )
+
+
+def _has_registry(*, actor) -> bool:
+    from .service_api import PatientService
+
+    return bool(PatientService().registries(actor=actor))

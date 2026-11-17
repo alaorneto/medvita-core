@@ -53,3 +53,6 @@ Mesmo ambiente.
 
 - `tests/test_clinic_journey.py`: o dia inteiro da clínica pelos serviços públicos (cadastro, marcação, chegada, atendimento assinado, atestado, conta da consulta, Pix e dinheiro, recibos, fechamento do caixa), seguido da varredura de privacidade: nenhum nome, CPF, telefone, queixa ou alergia do cenário em eventos de domínio, evento do calendário, título do livro, auditoria (redigida) ou logs.
 - `tests/test_isolation_matrix.py`: matriz papel × registro, organização B sem nada da A, escrita pelos contêineres, apps desligadas e paciente com registros não excluído.
+- `tests/apps/med_example/tests/test_extension_points.py`: cada ponto de extensão das quatro apps usado por uma quinta app sem alterá-las.
+- `med_patients/tests/test_clinic_setup.py` e `tests/test_demo_data.py`: a lista de configuração da clínica e o script de demonstração (roda uma vez; recusa fora de desenvolvimento e teste).
+- Não rodou: o roteiro manual do guia de implantação num banco limpo, até a primeira consulta marcada; ele depende de um servidor com os pacotes instalados.

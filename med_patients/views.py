@@ -816,3 +816,24 @@ def patient_anonymize(request: HttpRequest, organization_id: UUID, patient_id: U
     else:
         messages.success(request, gettext("Paciente anonimizado."))
     return redirect("med_patients:privacy", organization_id, patient_id)
+
+
+@tenant_page()
+def clinic_setup(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    """The clinic setup list: each step is the setup page of the app that owns it (administrators only)."""
+    try:
+        steps = _service().setup_steps(actor=request.user)
+    except Forbidden:
+        raise Http404 from None
+    rows = []
+    for step in steps:
+        try:
+            url = reverse(step.url_name, args=(organization_id,))
+        except NoReverseMatch:
+            url = ""
+        rows.append({"step": step, "url": url})
+    return render(
+        request,
+        "med_patients/clinic_setup.html",
+        {"organization_id": organization_id, "rows": rows, "done": all(row["step"].done for row in rows)},
+    )
