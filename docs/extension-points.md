@@ -29,7 +29,7 @@ Funções exportadas pelo `service_api` da app dona, chamadas no `ready()` da ap
 
 | App dona | Função | Para quê |
 |---|---|---|
-| `med_patients` | `register_patient_section(PatientSection(code, label, url_name, order))` | Aba ou atalho na página do paciente |
+| `med_patients` | `register_patient_section(PatientSection(code, label, url_name, order, visible))` | Aba ou atalho na página do paciente; `visible(actor=..., patient_id=...)`, opcional, esconde a aba de quem só veria uma página vazia |
 | `med_patients` | `register_timeline_provider(code, provider)` | Itens na linha do tempo do paciente: `provider(*, actor, patient_id, before, limit)` autoriza e devolve até `limit` `TimelineEntry` com `at <= before` |
 | `med_patients` | `register_consent_purpose(ConsentPurpose(code, label, description))` | Finalidade de consentimento LGPD |
 | `med_patients` | `register_retention_guard(code, guard)` | Veto à anonimização ou exclusão de paciente; `guard(patient_id=...)` devolve o motivo ou `None` |

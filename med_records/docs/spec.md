@@ -39,6 +39,10 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 
 **`ClinicalDocument`** (derivada do prontuário, selável): `code` (`D` + 8 dígitos da sequência `med_records.document`), `kind` (tipo registrado), `title` e `body` (`sensitive_fields`), `issued_at`, `author`, `author_name` e `author_council` (fotografia na emissão), `encounter` (opcional), `replaces` (documento substituído). O selo congela código, tipo, título, texto, emissão e autor; o resumo cobre as referências.
 
+**`AccessLog`** (derivada do prontuário, nunca muda): `actor`, `action` (leitura do prontuário, de atendimento, de documento, impressão, download de anexo, exportação), `target_table`, `target_id`, `at`.
+
+Anexos (PDF, JPEG, PNG, até 20 MB) ficam no armazenamento privado do núcleo, no prontuário (exames e documentos externos) ou num atendimento em rascunho (o selo os cobre depois).
+
 ### Prontuário
 
 `open_chart` obtém ou cria o prontuário do paciente: exige alteração no arquivo e leitura do paciente. Sem `archive_id` usa o arquivo padrão que o ator altera, ou o único; com vários e nenhum padrão, pede o arquivo. `chart` e `charts_for_patient` não devolvem conteúdo clínico.
@@ -76,6 +80,18 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 O repositório não distribui a tabela CID-10. O operador baixa a oficial (DATASUS), converte para um CSV `code;description` e roda `python -m django load_icd10 <arquivo.csv> --confirm` (sem `--confirm`, só valida). O arquivo inteiro é validado antes de gravar (código `^[A-Z][0-9]{2}(\.[0-9])?$`, descrição de 1 a 300 caracteres, sem código repetido), numa transação: uma linha inválida aborta tudo e o erro diz o número da linha. Rodar de novo só atualiza descrições.
 
 `search_icd10` busca por prefixo de código (`J45`) ou pelas palavras da descrição sem acento (`asma`), até 50 resultados, para qualquer ator com a app ativa. Sem catálogo carregado, o formulário de diagnóstico aceita código e descrição digitados (validação só de formato); a seção guarda `code` e `description` como fotografia, nunca uma FK. Limite conhecido: a tabela é global e o núcleo não impede a role runtime de escrevê-la; nenhum serviço, página ou API da app escreve nela, só o comando.
+
+### Trilha de leitura e anexos
+
+- A auditoria do núcleo só cobre escrita; a leitura de conteúdo clínico (`encounter`, `document`, `chart_summary`, `allergies`, `medications`, `attachment_url`) grava uma linha em `AccessLog` depois de autorizada, escrita pelo serviço (quem lê só precisa de leitura). A mesma pessoa lendo o mesmo alvo em menos de 5 minutos gera uma linha só.
+- `access_log` exige a gestão de acesso do arquivo (dono ou administrador): o profissional comum não lê a trilha. A linha não tem caminho de alteração nem de exclusão; o guard do banco recusa mudança.
+- `attach_to_chart` e `attach_to_encounter` anexam (atendimento assinado: `Conflict("signed")`, anexe ao prontuário); `attachments` lista; `attachment_url` confere que o anexo é do alvo, devolve o endereço reautorizado pelo núcleo a cada download e grava a trilha. Revogada a concessão no arquivo, o endereço para de funcionar.
+
+### Página do paciente
+
+- Aba "Prontuário" (`med_records.chart`, ordem 30), visível só para quem lê algum arquivo clínico (`PatientSection.visible`): a recepção não a vê.
+- Linha do tempo: "Atendimento registrado" e "Documento emitido", sem tipo de documento nem conteúdo, só do que o ator lê.
+- Relatório do titular: data, código e profissional de cada atendimento assinado e documento emitido legível. O conteúdo clínico integral não entra no relatório automático: a cópia do prontuário é entregue pelo profissional, pela impressão dos registros.
 
 ### Tipos de seção e de documento
 

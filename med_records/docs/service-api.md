@@ -16,6 +16,14 @@ Referência de `RecordsService` (`applications.med_records.service_api`). O cont
 
 ### `RecordsService`
 
+#### `access_log(*, actor, chart_id, cursor=None, page_size=50) -> Page[AccessLogEntry]`
+
+Who read clinical content of the chart, newest first.
+
+- **Autorização:** gestão de acesso do arquivo (dono ou administrador); quem só lê ou escreve o prontuário não lê a trilha.
+- **Erros:** NotFound para prontuário ilegível; Forbidden sem gestão de acesso.
+- **Efeitos:** nenhum.
+
 #### `add_addendum(*, actor, encounter_id, text, idempotency_key) -> EncounterInfo`
 
 Start a draft addendum (free text) to a signed encounter; it is signed by ``sign_encounter``.
@@ -54,6 +62,38 @@ The clinical archives the actor reads, the default first.
 
 - **Autorização:** leitura de cada arquivo.
 - **Erros:** nenhum além do contrato.
+- **Efeitos:** nenhum.
+
+#### `attach_to_chart(*, actor, chart_id, filename, stream, content_type=None) -> AttachmentInfo`
+
+Attach an exam or external document (PDF, JPEG, PNG, up to 20 MB) to the chart.
+
+- **Autorização:** alteração no arquivo do prontuário.
+- **Erros:** NotFound; Forbidden; InvalidInput para tipo ou tamanho recusados.
+- **Efeitos:** grava o anexo no armazenamento privado do núcleo e o último registro do prontuário.
+
+#### `attach_to_encounter(*, actor, encounter_id, filename, stream, content_type=None) -> AttachmentInfo`
+
+Attach a file to a draft encounter; the seal covers it once signed.
+
+- **Autorização:** alteração no arquivo do atendimento.
+- **Erros:** NotFound; Forbidden; Conflict("signed") para atendimento assinado (anexe ao prontuário); InvalidInput para tipo ou tamanho recusados.
+- **Efeitos:** grava o anexo.
+
+#### `attachment_url(*, actor, attachment_id, chart_id=None, encounter_id=None) -> str`
+
+The authorized download address of an attachment of the chart or encounter; recorded in the trail.
+
+- **Autorização:** leitura do arquivo (o download é reautorizado pelo núcleo a cada requisição).
+- **Erros:** NotFound para anexo de outro registro, ilegível ou indisponível; InvalidInput sem alvo.
+- **Efeitos:** registra o download na trilha do prontuário.
+
+#### `attachments(*, actor, chart_id=None, encounter_id=None) -> tuple[AttachmentInfo, ...]`
+
+The attachments of a chart or of an encounter (exactly one of the two).
+
+- **Autorização:** leitura do arquivo.
+- **Erros:** NotFound; InvalidInput sem alvo ou com os dois.
 - **Efeitos:** nenhum.
 
 #### `chart(*, actor, chart_id) -> ChartInfo`
@@ -281,6 +321,17 @@ Recompute the seal of an encounter from the stored content and its sections.
 - **Efeitos:** nenhum.
 
 ## DTOs
+
+### `AccessLogEntry`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `actor_id` | `UUID` |
+| `action` | `str` |
+| `target_table` | `str` |
+| `target_id` | `UUID | None` |
+| `at` | `datetime` |
 
 ### `AllergyInfo`
 

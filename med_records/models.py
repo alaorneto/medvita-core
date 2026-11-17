@@ -260,3 +260,27 @@ class ClinicalDocument(SealableMixin, OrganizationRecord):
         ]
         indexes = [models.Index(fields=("chart", "created_at"), name="med_records_document_chart")]
         ordering = ("-created_at", "sysid")
+
+
+class AccessLog(OrganizationRecord):
+    """One read of clinical content of a chart (the core audit covers writes only). Never changes."""
+
+    class Action(models.TextChoices):
+        VIEW_CHART = "view_chart", gettext_lazy("Leitura do prontuário")
+        VIEW_ENCOUNTER = "view_encounter", gettext_lazy("Leitura de atendimento")
+        VIEW_DOCUMENT = "view_document", gettext_lazy("Leitura de documento")
+        PRINT_DOCUMENT = "print_document", gettext_lazy("Impressão de documento")
+        DOWNLOAD_ATTACHMENT = "download_attachment", gettext_lazy("Download de anexo")
+        EXPORT = "export", gettext_lazy("Exportação")
+
+    chart = models.ForeignKey(PatientChart, on_delete=models.PROTECT, related_name="+")
+    actor = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, related_name="+")
+    action = models.CharField(max_length=20, choices=Action.choices)
+    target_table = models.CharField(max_length=60, blank=True)
+    target_id = models.UUIDField(null=True, blank=True)
+    at = models.DateTimeField()
+    immutable_fields = ("chart_id", "actor_id", "action", "target_table", "target_id", "at")
+
+    class Meta(OrganizationRecord.Meta):
+        indexes = [models.Index(fields=("chart", "at"), name="med_records_access_chart")]
+        ordering = ("-at", "sysid")

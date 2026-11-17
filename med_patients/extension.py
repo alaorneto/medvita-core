@@ -94,12 +94,17 @@ class ConsentPurpose:
 
 @dataclass(frozen=True)
 class PatientSection:
-    """A tab or shortcut on the patient page; ``url_name`` receives ``org`` and ``patient_id``."""
+    """A tab or shortcut on the patient page; ``url_name`` receives ``org`` and ``patient_id``.
+
+    ``visible(actor=..., patient_id=...)``, when given, hides the tab from who would only find an
+    empty page (a clinical tab for the reception, for example); a failure hides it too.
+    """
 
     code: str
     label: Any
     url_name: str
     order: int = 100
+    visible: Callable[..., bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)

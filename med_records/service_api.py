@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, BinaryIO
 from uuid import UUID
 
 from django.utils import timezone
@@ -26,10 +26,12 @@ from skeleton.service_api import (
     paginate,
     service_method,
 )
+from skeleton.service_api.files import AttachmentInfo
 
 from . import common
 from .extension import DocumentKind, SectionField, SectionType, register_document_kind, register_section_type
 from .models import (
+    AccessLog,
     Allergy,
     Archive,
     ClinicalDocument,
@@ -48,6 +50,7 @@ ARCHIVE_TABLE = "med_records.archive"
 MEMBER_TABLES = (ARCHIVE_TABLE,)
 
 __all__ = [
+    "AccessLogEntry",
     "TemplateSectionInput",
     "TemplateInfo",
     "DocumentInfo",
@@ -439,6 +442,20 @@ def document_extra(document: ClinicalDocument) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True, slots=True)
+class AccessLogEntry:
+    sysid: UUID
+    actor_id: UUID
+    action: str
+    target_table: str
+    target_id: UUID | None
+    at: datetime
+
+
+def access_log_entry(row: AccessLog) -> AccessLogEntry:
+    return AccessLogEntry(row.pk, row.actor_id, row.action, row.target_table, row.target_id, as_utc(row.at))
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -748,6 +765,14 @@ def _placeholder_values(actor: Any, chart: PatientChart) -> dict[str, str]:
         "date": today.strftime("%d/%m/%Y"),
         "professional_name": professional_name,
     }
+
+
+def _attachment_target(actor: Any, chart_id: object, encounter_id: object) -> tuple[str, Any]:
+    if (chart_id is None) == (encounter_id is None):
+        raise InvalidInput({"chart_id": [gettext("Informe o prontuário ou o atendimento.")]})
+    if chart_id is not None:
+        return "med_records.patientchart", _chart(actor, chart_id)
+    return "med_records.encounter", _encounter(actor, encounter_id)
 
 
 # ------------------------------------------------------------------------------------ service
@@ -1830,3 +1855,122 @@ class RecordsService(ServiceAPI):
             document.seal_digest,
             as_utc(document.sealed_at) if document.sealed_at else None,
         )
+
+    # ------------------------------------------------------------------ read trail and attachments
+
+    @service_method(read_only=True, since="0.1.0")
+    def access_log(
+        self, *, actor: Any, chart_id: UUID, cursor: str | None = None, page_size: int = 50
+    ) -> Page[AccessLogEntry]:
+        """Who read clinical content of the chart, newest first.
+
+        Autorização: gestão de acesso do arquivo (dono ou administrador); quem só lê ou escreve
+        o prontuário não lê a trilha.
+        Erros: NotFound para prontuário ilegível; Forbidden sem gestão de acesso.
+        Efeitos: nenhum.
+        """
+        from django.core.exceptions import PermissionDenied
+
+        from skeleton.access.policies import authorized_queryset
+
+        chart = _chart(actor, chart_id)
+        try:
+            manages = (
+                authorized_queryset(Archive, user=actor, action="manage_access").filter(pk=chart.archive_id).exists()
+            )
+        except PermissionDenied:
+            manages = False
+        if not manages:
+            raise Forbidden()
+        rows = AccessLog.objects.filter(chart=chart).order_by("-at", "-sysid")
+        return paginate(rows, convert=access_log_entry, cursor=cursor, page_size=page_size, key=("-at", "-sysid"))
+
+    @service_method(read_only=False, since="0.1.0")
+    def attach_to_chart(
+        self, *, actor: Any, chart_id: UUID, filename: str, stream: BinaryIO, content_type: str | None = None
+    ) -> AttachmentInfo:
+        """Attach an exam or external document (PDF, JPEG, PNG, up to 20 MB) to the chart.
+
+        Autorização: alteração no arquivo do prontuário.
+        Erros: NotFound; Forbidden; InvalidInput para tipo ou tamanho recusados.
+        Efeitos: grava o anexo no armazenamento privado do núcleo e o último registro do prontuário.
+        """
+        from skeleton.service_api.files import FileService
+
+        chart = _chart(actor, chart_id, write=True)
+        info = FileService().attach(
+            actor=actor,
+            table_key="med_records.patientchart",
+            record_id=chart.pk,
+            filename=filename,
+            stream=stream,
+            content_type=content_type,
+        )
+        _mark_entry(chart)
+        return info
+
+    @service_method(read_only=False, since="0.1.0")
+    def attach_to_encounter(
+        self, *, actor: Any, encounter_id: UUID, filename: str, stream: BinaryIO, content_type: str | None = None
+    ) -> AttachmentInfo:
+        """Attach a file to a draft encounter; the seal covers it once signed.
+
+        Autorização: alteração no arquivo do atendimento.
+        Erros: NotFound; Forbidden; Conflict("signed") para atendimento assinado (anexe ao
+        prontuário); InvalidInput para tipo ou tamanho recusados.
+        Efeitos: grava o anexo.
+        """
+        from skeleton.service_api.files import FileService
+
+        encounter = _encounter(actor, encounter_id, write=True)
+        if encounter.sealed_at is not None:
+            raise Conflict("signed", gettext("O atendimento assinado não recebe anexo; anexe ao prontuário."))
+        return FileService().attach(
+            actor=actor,
+            table_key="med_records.encounter",
+            record_id=encounter.pk,
+            filename=filename,
+            stream=stream,
+            content_type=content_type,
+        )
+
+    @service_method(read_only=True, since="0.1.0")
+    def attachments(
+        self, *, actor: Any, chart_id: UUID | None = None, encounter_id: UUID | None = None
+    ) -> tuple[AttachmentInfo, ...]:
+        """The attachments of a chart or of an encounter (exactly one of the two).
+
+        Autorização: leitura do arquivo.
+        Erros: NotFound; InvalidInput sem alvo ou com os dois.
+        Efeitos: nenhum.
+        """
+        table, record = _attachment_target(actor, chart_id, encounter_id)
+        from skeleton.service_api.files import FileService
+
+        return FileService().list(actor=actor, table_key=table, record_id=record.pk, page_size=100).items
+
+    @service_method(read_only=True, since="0.1.0")
+    def attachment_url(
+        self, *, actor: Any, attachment_id: UUID, chart_id: UUID | None = None, encounter_id: UUID | None = None
+    ) -> str:
+        """The authorized download address of an attachment of the chart or encounter; recorded in the trail.
+
+        Autorização: leitura do arquivo (o download é reautorizado pelo núcleo a cada requisição).
+        Erros: NotFound para anexo de outro registro, ilegível ou indisponível; InvalidInput sem alvo.
+        Efeitos: registra o download na trilha do prontuário.
+        """
+        from skeleton.service_api.files import FileService
+
+        from .trail import record_access
+
+        table, record = _attachment_target(actor, chart_id, encounter_id)
+        pk = as_uuid(attachment_id, field="attachment_id")
+        files = FileService()
+        if pk not in {
+            item.sysid for item in files.list(actor=actor, table_key=table, record_id=record.pk, page_size=100).items
+        }:
+            raise NotFound()
+        url = files.download_url(actor=actor, attachment_id=pk)
+        chart = record if isinstance(record, PatientChart) else record.chart
+        record_access(actor, chart, "download_attachment", record)
+        return url

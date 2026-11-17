@@ -23,3 +23,7 @@ class MedRecordsConfig(AppConfig):
         registration.register_clinical_lists()
         registration.register_icd10()
         registration.register_documents()
+        registration.register_access_log()
+        from . import integration
+
+        integration.register()

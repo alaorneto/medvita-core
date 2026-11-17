@@ -44,6 +44,10 @@ O `med_patients` gera o relatório dos dados de um paciente (cadastro, responsá
 
 O atendimento assinado é selado: o banco recusa qualquer mudança nele e nas suas seções, e a correção é um adendo também selado. O resumo SHA-256 do selo e a data e o autor da assinatura aparecem no registro. Isso garante integridade e autoria dentro do sistema, **não** a assinatura digital com certificado ICP-Brasil que o CFM exige para dispensar o papel (ver abaixo).
 
+### Trilha de leitura do prontuário
+
+Toda leitura de conteúdo clínico pelo sistema é registrada (quem, o quê, quando), com uma linha por pessoa e alvo a cada 5 minutos; só o dono do arquivo clínico ou o administrador a consulta. Limites: leituras feitas fora do sistema (cópia impressa, acesso direto ao banco por quem administra a infraestrutura) não entram na trilha, e a cópia integral do prontuário para o titular é entregue pelo profissional, não pelo relatório automático.
+
 ## O que o produto não cobre
 
 - Assinatura digital ICP-Brasil nem nível de garantia NGS2 do prontuário: os registros definitivos são selados (imutáveis, com resumo SHA-256) e trazem o aviso de ausência de assinatura digital.

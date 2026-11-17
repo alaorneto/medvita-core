@@ -5,6 +5,9 @@ from __future__ import annotations
 from django.utils.translation import gettext_lazy as _
 
 APP_LABEL = "med_records"
+# Exams and external documents attached to a chart or an encounter.
+ATTACHMENT_TYPES = ("application/pdf", "image/jpeg", "image/png")
+ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
 
 
 def _archive_update(record, *, user, values):
@@ -16,7 +19,7 @@ def _archive_update(record, *, user, values):
 
 def register_archive_tables() -> None:
     from skeleton.system.record_operations import RecordOperations, register_record_operations
-    from skeleton.system.registry import TableSpec, register
+    from skeleton.system.registry import AttachmentPolicy, TableSpec, register
 
     from .models import Archive, PatientChart
 
@@ -44,6 +47,7 @@ def register_archive_tables() -> None:
             sensitive_fields=(),
             expose_api=False,
             access_parent="archive",
+            attachments=AttachmentPolicy(max_bytes=ATTACHMENT_MAX_BYTES, types=ATTACHMENT_TYPES),
         )
     )
 
@@ -88,7 +92,7 @@ ENCOUNTER_SEQUENCE = "med_records.encounter"
 
 def register_encounters() -> None:
     from skeleton.sequences.registry import SequenceSpec, register_sequence
-    from skeleton.system.registry import SealPolicy, TableSpec, register
+    from skeleton.system.registry import AttachmentPolicy, SealPolicy, TableSpec, register
 
     from .models import Encounter, EncounterSection
 
@@ -116,6 +120,7 @@ def register_encounters() -> None:
             personal_fields=("author_name", "author_council"),
             expose_api=False,
             access_parent="chart",
+            attachments=AttachmentPolicy(max_bytes=ATTACHMENT_MAX_BYTES, types=ATTACHMENT_TYPES),
             seal=SealPolicy(attachments="frozen", comments="frozen"),
         )
     )
@@ -278,5 +283,25 @@ def register_documents() -> None:
             table_key="med_records.clinicaldocument",
             payload_fields=("code", "chart", "patient", "kind", "seal_digest"),
             owner_app=APP_LABEL,
+        )
+    )
+
+
+def register_access_log() -> None:
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import AccessLog
+
+    register(
+        TableSpec(
+            model=AccessLog,
+            description=_("Trilha de leitura do prontuário: quem leu conteúdo clínico, o quê e quando."),
+            label=_("Trilha de leitura"),
+            scope="organization",
+            read_fields=("chart", "actor", "action", "target_table", "target_id", "at"),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="chart",
         )
     )

@@ -86,10 +86,20 @@ def test_appointment_follows_the_schedule(skeleton_db):
 
 @pytest.mark.parametrize(
     "table",
-    ["patientchart", "encounter", "encountersection", "allergy", "medication", "entrytemplate", "clinicaldocument"],
+    [
+        "patientchart",
+        "encounter",
+        "encountersection",
+        "allergy",
+        "medication",
+        "entrytemplate",
+        "clinicaldocument",
+        "accesslog",
+    ],
 )
 def test_records_tables_follow_the_archive(skeleton_db, table):
     from applications.med_records.models import (
+        AccessLog,
         Allergy,
         Archive,
         ClinicalDocument,
@@ -110,6 +120,7 @@ def test_records_tables_follow_the_archive(skeleton_db, table):
         "medication": Medication,
         "entrytemplate": EntryTemplate,
         "clinicaldocument": ClinicalDocument,
+        "accesslog": AccessLog,
     }
     scenario = build_service_scenario(models[table], slug=f"derived-{table}")
 
@@ -180,6 +191,17 @@ def test_records_tables_follow_the_archive(skeleton_db, table):
         row.save()
         return row
 
+    def make_log(archive):
+        row = AccessLog(
+            organization=archive.organization,
+            chart=make_chart(archive),
+            actor=archive.owner,
+            action="view_chart",
+            at=datetime(2026, 1, 3, tzinfo=UTC),
+        )
+        row.save()
+        return row
+
     makers = {
         "patientchart": make_chart,
         "encounter": make_encounter,
@@ -188,6 +210,7 @@ def test_records_tables_follow_the_archive(skeleton_db, table):
         "medication": make_medication,
         "entrytemplate": make_template,
         "clinicaldocument": make_document,
+        "accesslog": make_log,
     }
     assert_derived_access_contract(
         child_model=models[table], make_anchor=make_archive, make_child=makers[table], scenario=scenario
