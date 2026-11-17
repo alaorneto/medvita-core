@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import date
 from typing import Any
 
@@ -69,3 +70,9 @@ def clean_medication(values: dict[str, Any], *, partial: bool) -> dict[str, Any]
     if errors:
         raise InvalidInput(errors)
     return values
+
+
+def fold(value: str) -> str:
+    """Lower case without accents, for searching the ICD-10 descriptions."""
+    decomposed = unicodedata.normalize("NFKD", str(value or ""))
+    return " ".join("".join(char for char in decomposed if not unicodedata.combining(char)).lower().split())

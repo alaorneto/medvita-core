@@ -29,7 +29,7 @@ from skeleton.service_api import (
 
 from . import common
 from .extension import DocumentKind, SectionField, SectionType, register_document_kind, register_section_type
-from .models import Allergy, Archive, Encounter, EncounterSection, Medication, PatientChart
+from .models import Allergy, Archive, Encounter, EncounterSection, Icd10Code, Medication, PatientChart
 
 APP_LABEL = common.APP_LABEL
 APP_ID = "io.katua.sk.med.records"
@@ -46,6 +46,7 @@ __all__ = [
     "DocumentKind",
     "EncounterHeader",
     "EncounterInfo",
+    "Icd10Info",
     "MedicationInfo",
     "RecordsService",
     "SectionField",
@@ -307,6 +308,13 @@ def _medication_rows(actor: Any, chart: PatientChart) -> list[Medication]:
 def _mark_entry(chart: PatientChart) -> None:
     chart.last_entry_at = timezone.now()
     chart.save(update_fields={"last_entry_at"})
+
+
+@dataclass(frozen=True, slots=True)
+class Icd10Info:
+    code: str
+    description: str
+    is_category: bool
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -1179,3 +1187,31 @@ class RecordsService(ServiceAPI):
             tuple(medication_info(row) for row in medications),
             tuple(encounter_header(row) for row in latest),
         )
+
+    # ------------------------------------------------------------------ ICD-10
+
+    @service_method(read_only=True, since="0.1.0")
+    def search_icd10(self, *, actor: Any, query: str, limit: int = 20) -> tuple[Icd10Info, ...]:
+        """ICD-10 codes by code prefix (``J45``) or by the words of the description (``asma``).
+
+        Sem catálogo carregado, devolve vazio: o diagnóstico aceita código e descrição digitados.
+        Autorização: qualquer ator da organização com a app ativa (o catálogo é público e global).
+        Erros: InvalidInput para busca vazia ou longa demais, ou limite fora de 1 a 50.
+        Efeitos: nenhum.
+        """
+        import re
+
+        from .services import fold
+
+        if not isinstance(query, str) or not query.strip() or len(query) > 100:
+            raise InvalidInput({"query": [gettext("Informe de 1 a 100 caracteres.")]})
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise InvalidInput({"limit": [gettext("Use um limite de 1 a 50.")]})
+        text = query.strip()
+        rows = Icd10Code.objects.all()
+        if re.fullmatch(r"[A-Za-z][0-9][0-9A-Za-z.]{0,4}", text):
+            rows = rows.filter(code__startswith=text.upper())
+        else:
+            for word in fold(text).split()[:5]:
+                rows = rows.filter(search_text__contains=word)
+        return tuple(Icd10Info(row.code, row.description, row.is_category) for row in rows.order_by("code")[:limit])

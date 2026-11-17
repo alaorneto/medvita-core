@@ -11,7 +11,7 @@ from django.db import models
 from django.db.models import Q
 from django.utils.translation import gettext_lazy
 
-from skeleton.common.models import OrganizationRecord, SealableMixin, SecuredRecord
+from skeleton.common.models import OrganizationRecord, SealableMixin, SecuredRecord, SystemRecord
 
 
 class Archive(SecuredRecord):
@@ -193,3 +193,18 @@ class Medication(OrganizationRecord):
             ),
         ]
         ordering = ("name", "sysid")
+
+
+class Icd10Code(SystemRecord):
+    """The ICD-10 reference table, global to the platform and written only by ``load_icd10``.
+
+    The repository does not ship the table: the operator loads the official one (DATASUS).
+    """
+
+    code = models.CharField(max_length=8, unique=True)
+    description = models.CharField(max_length=300)
+    is_category = models.BooleanField(default=False)
+    search_text = models.CharField(max_length=320, db_index=True)
+
+    class Meta(SystemRecord.Meta):
+        ordering = ("code",)

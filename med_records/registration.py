@@ -188,3 +188,22 @@ def register_clinical_lists() -> None:
             access_parent="chart",
         )
     )
+
+
+def register_icd10() -> None:
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import Icd10Code
+
+    register(
+        TableSpec(
+            model=Icd10Code,
+            description=_("Tabela CID-10 de referência, global, carregada pelo operador com load_icd10."),
+            label=_("CID-10"),
+            scope="global",
+            read_fields=("code", "description", "is_category"),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+        )
+    )

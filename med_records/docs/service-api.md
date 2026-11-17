@@ -144,6 +144,14 @@ Write one section of the actor's draft (the section at ``section_type`` and ``po
 - **Erros:** NotFound; Forbidden para quem não é o autor; InvalidInput para tipo desconhecido ou campo inválido (citado pelo nome); Conflict("signed") ou Conflict("stale_revision").
 - **Efeitos:** grava a seção, sobe a revisão do atendimento e o último registro do prontuário.
 
+#### `search_icd10(*, actor, query, limit=20) -> tuple[Icd10Info, ...]`
+
+ICD-10 codes by code prefix (``J45``) or by the words of the description (``asma``).
+
+- **Autorização:** qualquer ator da organização com a app ativa (o catálogo é público e global).
+- **Erros:** InvalidInput para busca vazia ou longa demais, ou limite fora de 1 a 50.
+- **Efeitos:** nenhum.
+
 #### `setup(*, actor, mode='shared', name='', member_group_ids=(), idempotency_key) -> tuple[ArchiveInfo, ...]`
 
 Create the first clinical archives of the organization.
@@ -288,6 +296,14 @@ An encounter with its sections (clinical content: every read is recorded in the 
 | `addenda` | `tuple[EncounterHeader, ...]` |
 | `writable` | `bool` |
 | `appointment_completed` | `bool` |
+
+### `Icd10Info`
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `description` | `str` |
+| `is_category` | `bool` |
 
 ### `MedicationInfo`
 

@@ -33,6 +33,8 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 
 **`Medication`** (derivada do prontuário): `name`, `dose`, `frequency` e `note` (`sensitive_fields`), `route`, `started_on`, `ended_on` (não antes do início), `status` (em uso, suspenso, encerrado).
 
+**`Icd10Code`** (`SystemRecord` global, não exposta): `code` (único), `description`, `is_category`, `search_text` (normalizado). Sem dado de organização; escrita só pelo comando `load_icd10`.
+
 ### Prontuário
 
 `open_chart` obtém ou cria o prontuário do paciente: exige alteração no arquivo e leitura do paciente. Sem `archive_id` usa o arquivo padrão que o ator altera, ou o único; com vários e nenhum padrão, pede o arquivo. `chart` e `charts_for_patient` não devolvem conteúdo clínico.
@@ -56,6 +58,12 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 ### Alergias, medicamentos e resumo
 
 `allergies` lista as ativas primeiro (as graves antes); `medications`, as em uso primeiro. Alterar a situação é `update_allergy` / `update_medication` com CAS; a auditoria guarda o histórico com o conteúdo redigido. `chart_summary` reúne as alergias ativas, os medicamentos em uso e os cinco últimos cabeçalhos de atendimento. Toda leitura dessas listas grava a trilha.
+
+### CID-10
+
+O repositório não distribui a tabela CID-10. O operador baixa a oficial (DATASUS), converte para um CSV `code;description` e roda `python -m django load_icd10 <arquivo.csv> --confirm` (sem `--confirm`, só valida). O arquivo inteiro é validado antes de gravar (código `^[A-Z][0-9]{2}(\.[0-9])?$`, descrição de 1 a 300 caracteres, sem código repetido), numa transação: uma linha inválida aborta tudo e o erro diz o número da linha. Rodar de novo só atualiza descrições.
+
+`search_icd10` busca por prefixo de código (`J45`) ou pelas palavras da descrição sem acento (`asma`), até 50 resultados, para qualquer ator com a app ativa. Sem catálogo carregado, o formulário de diagnóstico aceita código e descrição digitados (validação só de formato); a seção guarda `code` e `description` como fotografia, nunca uma FK. Limite conhecido: a tabela é global e o núcleo não impede a role runtime de escrevê-la; nenhum serviço, página ou API da app escreve nela, só o comando.
 
 ### Tipos de seção e de documento
 

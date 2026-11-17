@@ -21,3 +21,4 @@ class MedRecordsConfig(AppConfig):
         registration.register_clinical_types()
         registration.register_encounters()
         registration.register_clinical_lists()
+        registration.register_icd10()
