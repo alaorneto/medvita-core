@@ -1,0 +1,62 @@
+{
+  "app_config": "applications.med_patients.apps.MedPatientsConfig",
+  "app_id": "io.katua.sk.med.patients",
+  "app_label": "med_patients",
+  "compatibility": {
+    "django": ">=6.1,<6.2",
+    "python": ">=3.12,<3.15",
+    "skeleton": ">=0.0.0,<0.1.0"
+  },
+  "conflicts": {},
+  "dependencies": {},
+  "description": "Cadastro de pacientes do consultório: identificação, contatos, responsáveis, convênios e consentimentos.",
+  "files": [],
+  "kind": "app",
+  "lifecycle": {
+    "backup": true,
+    "data_retention": "retain",
+    "maintenance": true
+  },
+  "manifest_version": 2,
+  "migrations": {
+    "from_versions": ">=0.0.0",
+    "labels": [
+      "med_patients"
+    ],
+    "leaves": [
+      "0002_record_infrastructure"
+    ]
+  },
+  "name": "Pacientes",
+  "package_name": "med_patients",
+  "publisher": "katua-tech",
+  "python_dependencies": [],
+  "runtime": {
+    "administration": {
+      "configuration_sections": [],
+      "screens": [],
+      "sections": []
+    },
+    "api_urls": "applications.med_patients.api_urls",
+    "configuration_fields": [],
+    "default_enabled": false,
+    "documentation_root": "docs",
+    "model_ui": [],
+    "navigation": [
+      {
+        "action": "read",
+        "label": "Pacientes",
+        "table_key": "med_patients.patientregistry",
+        "url_name": "med_patients:home"
+      }
+    ],
+    "service_api": {
+      "classes": [
+        "PatientRegistryService"
+      ],
+      "module": "applications.med_patients.service_api"
+    },
+    "urls": "applications.med_patients.urls"
+  },
+  "version": "0.0.0"
+}
