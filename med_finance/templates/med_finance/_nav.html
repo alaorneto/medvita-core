@@ -1,0 +1,6 @@
+{% load i18n %}<nav class="link-tabs" aria-label="{% translate "Financeiro" %}">
+<a href="{% url 'med_finance:desk' organization_id %}"{% if section == "desk" %} aria-current="page"{% endif %}>{% translate "Caixa" %}</a>
+<a href="{% url 'med_finance:charges' organization_id %}"{% if section == "charges" %} aria-current="page"{% endif %}>{% translate "Contas" %}</a>
+<a href="{% url 'med_finance:charge_new' organization_id %}"{% if section == "new" %} aria-current="page"{% endif %}>{% translate "Nova conta" %}</a>
+<a href="{% url 'med_finance:prices' organization_id %}"{% if section == "prices" %} aria-current="page"{% endif %}>{% translate "Preços" %}</a>
+</nav>

@@ -83,6 +83,36 @@ Valores sempre em inteiros de centavos.
 - Aba "Financeiro" (`med_finance.account`, ordem 40), visível só para quem lê algum caixa; linha do tempo "Conta emitida" e "Pagamento recebido", sem valores; relatório do titular com contas (código, vencimento, total, situação) e recibos (número, valor).
 - Guarda de retenção `med_finance.retention`: veta excluir ou anonimizar o paciente com conta dos últimos 5 anos (guarda fiscal; confirme o prazo com o contador).
 
+### Páginas
+
+Em `/o/<org>/apps/med_finance/` (nomes `med_finance:<nome>`); toda leitura e escrita passa pelo `FinanceService`. Valores são digitados em reais com vírgula ("250,00"), convertidos para centavos por `skeleton.common.money.parse` (nunca `float`), e mostrados com o filtro `brl`.
+
+| Nome | Página |
+|---|---|
+| `desk` | Caixa do dia: abrir, totais por forma de pagamento, suprimento e sangria, fechar, contas recentes |
+| `session` | Relatório da sessão (imprimível): abertura, formas de pagamento, movimentos, contado e diferença |
+| `charges`, `charge_new`, `charge` | Contas com filtro de situação; nova conta (busca de paciente, item da tabela ou descrição livre, pagador); a conta com itens, pagamentos, recibos, receber, estornar, confirmar e cancelar |
+| `collect` | Entrada pela consulta ("Receber"): a conta da consulta |
+| `receipt`, `receipt_print` | Recibo com o valor por extenso, o resumo do selo, o aviso fiscal e "ANULADO" quando for o caso; anular |
+| `prices` | Tabela de preços: itens, incluir, desativar |
+| `patient_section` | Aba "Financeiro" do paciente: contas e saldo |
+| `setup` | Configuração inicial (administradores) |
+
+### API REST
+
+Em `/api/v1/o/<org>/apps/med_finance/`, valores em centavos:
+
+| Método e caminho | O que faz |
+|---|---|
+| `GET price-items/?q=` | Itens ativos da tabela padrão |
+| `GET charges/?patient=&status=&cursor=&page_size=` | Contas (`ChargeInfo`) |
+| `POST charges/` | Cria (e confirma, salvo `confirm: false`) uma conta; exige `Idempotency-Key`; campos `patient`, `items` (`code`, `description`, `quantity`, `unit_amount`, `discount_amount`), `payer_name`, `payer_document`, `note` |
+| `GET charges/<id>/` | A conta com os itens, com `ETag` |
+| `GET charges/<id>/payments/`, `POST charges/<id>/payments/` | Pagamentos; receber exige `Idempotency-Key` e `If-Match` com a revisão da conta (`method`, `amount`, `installments`, `authorization_code`) |
+| `GET receipts/<id>/` | O recibo |
+
+Campo fora da lista é 400; conta ou recibo sem acesso ou de outra organização é 404.
+
 ## Acceptance
 
 - O `setup` prepara o livro com as chaves do financeiro vinculadas, é idempotente pela chave e só o administrador o faz; com o livro desativado, nada é criado.
@@ -93,3 +123,4 @@ Valores sempre em inteiros de centavos.
 - Pagamento parcial e depois o restante quitam a conta e o título; o estorno reabre os dois.
 - Recibos emitidos têm números consecutivos no ano; a anulação mantém o recibo e o número.
 - A mesma consulta particular gera uma conta só; convênio não gera conta; a conta recente veta anonimizar o paciente.
+- Pelas páginas, a recepção abre o caixa, cria a conta, recebe em dois meios, imprime o recibo, faz sangria e fecha o caixa com diferença.

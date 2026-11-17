@@ -1,0 +1,14 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Nova conta" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Nova conta" %}</h1></div></div>
+{% with section="new" %}{% include "med_finance/_nav.html" %}{% endwith %}
+{% if not patient %}
+<form method="get" class="filter-bar"><div class="field"><label for="q">{% translate "Paciente (nome, CPF, código ou telefone)" %}</label><input id="q" name="q" value="{{ query }}" maxlength="200"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Buscar" %}</button></div></form>
+{% if query %}<ul>{% for item in patients %}<li><a href="?patient={{ item.sysid }}">{{ item.code }} · {{ item.display_name }}</a></li>{% empty %}<li>{% translate "Nenhum paciente encontrado." %}</li>{% endfor %}</ul>{% endif %}
+{% else %}
+<p class="mb-4">{% translate "Paciente:" %} <strong>{{ patient.code }} · {{ patient.display_name }}</strong> · <a href="?">{% translate "trocar" %}</a></p>
+<form method="post" class="card max-w-3xl">{% csrf_token %}<input type="hidden" name="patient" value="{{ patient.sysid }}"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Criar e confirmar a conta" %}</button></div></form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Contas" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Contas" %}</h1></div></div>
+{% with section="charges" %}{% include "med_finance/_nav.html" %}{% endwith %}
+<form method="get" class="filter-bar"><div class="field"><label for="status">{% translate "Situação" %}</label><select id="status" name="status"><option value="">{% translate "Todas" %}</option><option value="open"{% if status == "open" %} selected{% endif %}>{% translate "Em aberto" %}</option><option value="partially_paid"{% if status == "partially_paid" %} selected{% endif %}>{% translate "Parcialmente paga" %}</option><option value="paid"{% if status == "paid" %} selected{% endif %}>{% translate "Paga" %}</option><option value="cancelled"{% if status == "cancelled" %} selected{% endif %}>{% translate "Cancelada" %}</option></select></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Filtrar" %}</button></div></form>
+{% include "med_finance/_charge_rows.html" %}
+{% if page.next_cursor %}<p><a href="?status={{ status }}&amp;cursor={{ page.next_cursor }}">{% translate "Mais antigas" %}</a></p>{% endif %}
+{% endblock %}

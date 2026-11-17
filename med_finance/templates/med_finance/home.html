@@ -1,5 +1,0 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Financeiro" %} · {{ site_name }}{% endblock %}
-{% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Caixas" %}</h1></div></div>
-<ul>{% for item in desks %}<li>{{ item.name }}{% if item.is_default %} <span class="badge badge-neutral">{% translate "Padrão" %}</span>{% endif %}</li>{% empty %}<li>{% translate "Nenhum caixa que você possa ver." %}</li>{% endfor %}</ul>
-{% endblock %}
