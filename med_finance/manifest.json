@@ -56,7 +56,7 @@
     ],
     "service_api": {
       "classes": [
-        "CashDeskService"
+        "FinanceService"
       ],
       "module": "applications.med_finance.service_api"
     },

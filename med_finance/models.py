@@ -1,23 +1,82 @@
+"""Tables of the finance app (docs/spec.md, "Modelo de dados").
+
+Two containers decide access: ``PriceList`` (a price table) and ``CashDesk`` (a point of
+payment, bound to a ledger book). Every other table is derived from one of them. Money is always
+an integer of the minor unit (``skeleton.common.money``), never a float.
+"""
+
+from __future__ import annotations
+
 from django.db import models
 from django.db.models import Q
 
-from skeleton.common.models import SecuredRecord
+from skeleton.common.models import OrganizationRecord, SecuredRecord
 
 
-class CashDesk(SecuredRecord):
-    code = models.CharField(max_length=64)
-    title = models.CharField(max_length=200)
+class PriceList(SecuredRecord):
+    """A price table; its item codes are the ``billing_code`` of the appointment types."""
+
+    name = models.CharField(max_length=120)
+    currency = models.CharField(max_length=3, default="BRL")
+    is_default = models.BooleanField(default=False)
+    immutable_fields = ("currency",)
 
     class Meta(SecuredRecord.Meta):
         constraints = SecuredRecord.Meta.constraints + [
             models.UniqueConstraint(
-                fields=("organization", "code"),
-                condition=Q(deleted_at__isnull=True),
-                name="med_finance_cashdesk_live_code",
+                fields=("organization",),
+                condition=Q(is_default=True, deleted_at__isnull=True),
+                name="med_finance_one_default_price_list",
                 violation_error_code="unique",
             ),
         ]
-        ordering = ("created_at", "sysid")
+        ordering = ("-is_default", "name", "sysid")
 
-    def __str__(self):
-        return self.title
+    def __str__(self) -> str:
+        return self.name
+
+
+class PriceItem(OrganizationRecord):
+    price_list = models.ForeignKey(PriceList, on_delete=models.PROTECT, related_name="+")
+    code = models.CharField(max_length=40)
+    description = models.CharField(max_length=200)
+    amount = models.PositiveBigIntegerField()
+    is_active = models.BooleanField(default=True)
+    immutable_fields = ("price_list_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("price_list", "code"),
+                condition=Q(deleted_at__isnull=True),
+                name="med_finance_price_code",
+                violation_error_code="unique",
+            ),
+        ]
+        ordering = ("code", "sysid")
+
+
+class CashDesk(SecuredRecord):
+    """A point of payment; it posts to one ledger book and keeps the book accounts of each method."""
+
+    name = models.CharField(max_length=120)
+    book = models.ForeignKey("skeleton_ledger.Book", on_delete=models.PROTECT, related_name="+")
+    price_list = models.ForeignKey(PriceList, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    # Book accounts by payment key ("cash", "pix", "cards", "bank"), resolved at setup by who manages the book.
+    payment_accounts = models.JSONField(default=dict, blank=True)
+    is_default = models.BooleanField(default=False)
+    immutable_fields = ("book_id",)
+
+    class Meta(SecuredRecord.Meta):
+        constraints = SecuredRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("organization",),
+                condition=Q(is_default=True, deleted_at__isnull=True),
+                name="med_finance_one_default_desk",
+                violation_error_code="unique",
+            ),
+        ]
+        ordering = ("-is_default", "name", "sysid")
+
+    def __str__(self) -> str:
+        return self.name

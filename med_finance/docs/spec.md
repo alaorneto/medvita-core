@@ -1,22 +1,40 @@
 # Financeiro
 
-Especificação inicial gerada por `skeleton_startapp`. Substitua cada parágrafo pelo comportamento real da app antes do primeiro release; o check E012 verifica apenas a presença das seções, não a qualidade do conteúdo. Veja [apps e instalação](https://github.com/alaorneto/skeleton/blob/f38c9a02166d63e402d2c7708e616ae842441665/docs/concepts.md#apps-pacotes-e-deployment) e o roteiro de [extensão](https://github.com/alaorneto/skeleton/blob/f38c9a02166d63e402d2c7708e616ae842441665/docs/extending.md).
+A frente de caixa do consultório: tabela de preços, conta do paciente, recebimento particular (dinheiro, Pix, cartão, transferência), caixa com abertura e fechamento e recibos numerados. A contabilidade (títulos, baixas, lançamentos, relatórios, contas a pagar) fica no livro contábil do núcleo (`skeleton_ledger`). A app **não** faz TISS, NFS-e, repasse, maquininha integrada nem cobrança recorrente.
 
 ## Contract
-`med_finance` é instalada globalmente e ativada por organização; instalar o código não concede permissões. A app nasce indisponível e desativada: a plataforma concede a disponibilidade e cada organização ativa explicitamente (`default_enabled` é obsoleto e fica `false`).
 
-Cada `CashDesk` pertence a uma organização e deriva de `SecuredRecord`: UUID imutável, revisão, proprietário e visibilidade. Os campos de negócio são `code` (até 64 caracteres, único entre registros vivos da organização) e `title` (até 200). Nenhum campo é sensível; declare em `sensitive_fields` qualquer campo novo cujo valor não possa aparecer na auditoria.
+### Ativação e dependências
 
-O gateway usa `med_finance.cashdesk` com criação, leitura, alteração, exclusão lógica e restauração conforme `TablePermission` e a autorização do registro. Alterar, excluir ou restaurar exige a revisão atual.
+Depende de `io.katua.sk.med.patients` (o paciente de cada conta), de `io.katua.sk.med.scheduling` (a consulta e o emitente do recibo) e de `org.skeleton.ledger` (títulos, baixas e lançamentos). Instalada globalmente e ativada por organização, depois das dependências.
 
-A página própria fica em `/o/<org>/apps/med_finance/` e o sumário em `/api/v1/o/<org>/apps/med_finance/summary/`. Ambos exigem app ativa e `table.read`, e contam somente registros legíveis pelo ator.
+### Acesso
 
-Outras apps consomem esta só por `CashDeskService`, declarada em `runtime.service_api` e documentada em [service-api.md](service-api.md). Página e sumário chamam o mesmo serviço, que devolve DTOs imutáveis e revalida a autorização.
+Dois contêineres (`SecuredRecord` expostos):
+
+- `PriceList`: uma tabela de preços; os itens derivam dela.
+- `CashDesk`: um caixa, ligado a um livro contábil; sessões, movimentos, contas, pagamentos e recibos derivam dele.
+
+O `setup` (capacidade `access.manage` e gestão do livro padrão) prepara o livro (cria o padrão se faltar, aplica o plano de serviços, cria as contas de Pix, cartões e aportes, vincula as chaves `med_finance.*`), cria a tabela de preços e o caixa padrão, privados e do administrador, dá ao papel `member` leitura e alteração das duas tabelas e concede: leitura do caixa e da tabela aos grupos de leitura, leitura e alteração do caixa aos de escrita, alteração da tabela de preços aos gestores de preço.
+
+O livro autoriza títulos, baixas e lançamentos de regra pelo registro de origem (a conta, o movimento): quem trabalha no caixa não precisa de acesso ao livro. O caixa guarda as contas do livro de cada forma de pagamento (`payment_accounts`), resolvidas no `setup` por quem gere o livro.
+
+### Modelo de dados
+
+Valores sempre em inteiros de centavos.
+
+**`PriceList`** (contêiner): `name`, `currency` (`BRL`, imutável), `is_default`.
+
+**`PriceItem`** (derivada da tabela de preços): `code` (único por tabela entre os vivos; é o `billing_code` dos tipos de atendimento), `description`, `amount`, `is_active`.
+
+**`CashDesk`** (contêiner): `name`, `book` (o livro, imutável), `price_list` (a tabela padrão do caixa), `payment_accounts`, `is_default`.
+
+### Preços
+
+`price_items` lista os itens (da tabela padrão, sem `price_list_id`); `price_for(code)` devolve o item ativo do código ou `None`. `add_price_item` exige alteração na tabela; código repetido é `Conflict`. `update_price_item` muda descrição, valor ou atividade, com CAS; o código nunca muda.
 
 ## Acceptance
-Critérios observáveis a confirmar por testes reais (não por inferência):
 
-- Com organizações A/B, um membro de A não obtém registros de B em lista, detalhe, contagem, sumário, auditoria ou restauração, inclusive por UUID conhecido.
-- Sem `table.read`, página e sumário são negados; com ela, o sumário exclui registros privados de terceiros.
-- Duas alterações com a mesma revisão não vencem ambas.
-- Restaurar um registro cujo `code` colide com outro vivo retorna conflito sem sobrescrevê-lo.
+- O `setup` prepara o livro com as chaves do financeiro vinculadas, é idempotente pela chave e só o administrador o faz; com o livro desativado, nada é criado.
+- A recepção consulta preços e não os altera; a organização B não vê os preços da A.
+- Valor negativo, fracionário ou em texto é recusado.

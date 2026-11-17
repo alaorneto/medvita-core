@@ -1,22 +1,18 @@
-from django.shortcuts import render
-from rest_framework.response import Response
+"""Pages of the finance app: every read and write goes through FinanceService."""
 
-from skeleton.api.views import TenantAPI
+from __future__ import annotations
+
+from uuid import UUID
+
+from django.http import HttpRequest, HttpResponse
+from django.shortcuts import render
+
 from skeleton.web.views import tenant_page
 
-from .service_api import CashDeskService
+from .service_api import FinanceService
 
 
 @tenant_page()
-def home(request, organization_id):
-    count = CashDeskService().cashdesk_count(actor=request.user)
-    return render(
-        request,
-        "med_finance/home.html",
-        {"heading": "Financeiro", "count": count, "organization_id": organization_id},
-    )
-
-
-class SummaryView(TenantAPI):
-    def get(self, request, organization_id):
-        return Response({"count": CashDeskService().cashdesk_count(actor=request.user)})
+def home(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    desks = FinanceService().desks(actor=request.user)
+    return render(request, "med_finance/home.html", {"organization_id": organization_id, "desks": desks})
