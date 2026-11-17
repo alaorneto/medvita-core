@@ -94,6 +94,15 @@ scheduled ──confirm──► confirmed ──check_in──► arrived ─�
 
 Outras apps põem botões na consulta com `register_appointment_action(AppointmentAction(code, label, url_name, statuses, order))`; `appointment_actions` devolve os das apps ativas para a situação atual, em ordem.
 
+### Lista de espera
+
+**`WaitlistEntry`** (derivada do consultório): `patient` (imutável), `appointment_type` e `schedule` (preferências opcionais), `preferred_period` (`any`, `morning`, `afternoon`, `evening`), `earliest_date`, `latest_date`, `priority` (`normal`, `high`), `status` (`waiting`, `booked`, `cancelled`, `expired`), `note` (**sensível**), `booked_appointment`.
+
+- Incluir, cancelar e marcar a partir da lista exigem alteração no consultório: a lista é do grupo de gestão do consultório (em geral, a recepção).
+- `waitlist_candidates` devolve as entradas aguardando que cabem num horário livre (agenda preferida, período do dia, datas, duração do tipo), alta prioridade primeiro, depois a mais antiga. Ninguém é marcado sozinho: a recepção escolhe.
+- `book_from_waitlist` marca a consulta e muda a entrada para "agendado" na mesma transação; com o horário ocupado, a entrada continua aguardando.
+- O job diário `med_scheduling.expire_waitlist` (uma organização por job) marca como expiradas as entradas com a última data vencida; repetir não muda nada.
+
 ### Horários livres
 
 `available_slots(schedule_id, start_date, end_date, appointment_type_id=None)` devolve os horários livres de até 62 dias (`slots.py`, funções puras):

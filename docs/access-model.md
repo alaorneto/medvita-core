@@ -5,7 +5,7 @@
 | App | Contêiner | O que representa | Quem costuma receber `read` | Quem costuma receber `update` |
 |---|---|---|---|---|
 | `med_patients` | `PatientRegistry` | O cadastro de pacientes da clínica | todos os grupos | Recepção, Profissionais |
-| `med_scheduling` | `Practice` | O consultório: estabelecimento, profissionais, salas, tipos de atendimento, lista de espera | todos os grupos | administrador; opcionalmente um grupo de gestão |
+| `med_scheduling` | `Practice` | O consultório: estabelecimento, profissionais, salas, tipos de atendimento, lista de espera | todos os grupos | administrador e o grupo de gestão (em geral a Recepção, que cuida da lista de espera) |
 | `med_scheduling` | `Schedule` | A agenda de um profissional, sala ou equipamento | Recepção, Profissionais | Recepção, o próprio profissional (dono) |
 | `med_records` | `Archive` | Um arquivo clínico: da clínica inteira ou de um profissional | Profissionais do arquivo | Profissionais do arquivo |
 | `med_finance` | `CashDesk` | Um caixa (ponto de recebimento) | Recepção, Financeiro | Recepção, Financeiro |

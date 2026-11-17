@@ -263,3 +263,47 @@ def register_notifications() -> None:
             group_key="arrived:{target}",
         )
     )
+
+
+EXPIRE_WAITLIST_JOB = "med_scheduling.expire_waitlist"
+
+
+def register_waitlist() -> None:
+    from datetime import time
+
+    from skeleton.jobs.periodic import register_periodic
+    from skeleton.jobs.registry import JobType, register_job_type
+    from skeleton.system.registry import TableSpec, register
+
+    from . import jobs
+    from .models import WaitlistEntry
+
+    register(
+        TableSpec(
+            model=WaitlistEntry,
+            description=_("Lista de espera do consultório; a observação é sensível."),
+            label=_("Lista de espera"),
+            scope="organization",
+            read_fields=(
+                "practice",
+                "patient",
+                "appointment_type",
+                "schedule",
+                "preferred_period",
+                "earliest_date",
+                "latest_date",
+                "priority",
+                "status",
+                "note",
+                "booked_appointment",
+            ),
+            write_fields=(),
+            sensitive_fields=("note",),
+            expose_api=False,
+            access_parent="practice",
+        )
+    )
+    register_job_type(
+        JobType(code=EXPIRE_WAITLIST_JOB, handler=jobs.expire_waitlist, run_as="system", owner_app=APP_LABEL)
+    )
+    register_periodic(EXPIRE_WAITLIST_JOB, EXPIRE_WAITLIST_JOB, daily_at=time(6, 17))

@@ -37,6 +37,7 @@ from .models import (
     Room,
     Schedule,
     ScheduleBlock,
+    WaitlistEntry,
 )
 
 APP_LABEL = common.APP_LABEL
@@ -64,6 +65,7 @@ __all__ = [
     "ScheduleInfo",
     "SchedulingService",
     "Slot",
+    "WaitlistInfo",
     "register_appointment_action",
 ]
 
@@ -364,6 +366,41 @@ class AppointmentActionInfo:
     label: str
     url_name: str
     order: int
+
+
+@dataclass(frozen=True, slots=True)
+class WaitlistInfo:
+    sysid: UUID
+    patient_id: UUID
+    appointment_type_id: UUID | None
+    schedule_id: UUID | None
+    preferred_period: str
+    earliest_date: date
+    latest_date: date | None
+    priority: str
+    status: str
+    note: str
+    booked_appointment_id: UUID | None
+    created_at: datetime
+    revision: int
+
+
+def waitlist_info(row: WaitlistEntry) -> WaitlistInfo:
+    return WaitlistInfo(
+        row.pk,
+        row.patient_id,
+        row.appointment_type_id,
+        row.schedule_id,
+        row.preferred_period,
+        row.earliest_date,
+        row.latest_date,
+        row.priority,
+        row.status,
+        row.note,
+        row.booked_appointment_id,
+        as_utc(row.created_at),
+        row.revision,
+    )
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -742,6 +779,25 @@ def _notify_arrival(actor: Any, row: Appointment) -> None:
         target_id=row.pk,
         dedupe_key=f"arrived:{row.pk}",
     )
+
+
+PERIODS = {"morning": (0, 12 * 60), "afternoon": (12 * 60, 18 * 60), "evening": (18 * 60, 24 * 60), "any": (0, 24 * 60)}
+
+
+def _priority_first() -> Any:
+    """High priority first: an explicit order (the codes do not sort by importance)."""
+    from django.db.models import Case, IntegerField, Value, When
+
+    return Case(When(priority="high", then=Value(0)), default=Value(1), output_field=IntegerField())
+
+
+def _fits_period(period: str, starts_at: datetime, timezone: str) -> bool:
+    from zoneinfo import ZoneInfo
+
+    local = starts_at.astimezone(ZoneInfo(timezone))
+    minute = local.hour * 60 + local.minute
+    start, end = PERIODS.get(period, PERIODS["any"])
+    return start <= minute < end
 
 
 # ------------------------------------------------------------------------------------ service
@@ -1887,3 +1943,184 @@ class SchedulingService(ServiceAPI):
             AppointmentActionInfo(action.code, str(action.label), action.url_name, action.order)
             for action in active_actions(actor, row.status)
         )
+
+    # ------------------------------------------------------------------ waitlist
+
+    @service_method(read_only=True, since="0.1.0")
+    def waitlist(
+        self, *, actor: Any, status: str = "waiting", cursor: str | None = None, page_size: int = 50
+    ) -> Page[WaitlistInfo]:
+        """The waitlist of the practice, high priority first, then the oldest.
+
+        Autorização: leitura do consultório.
+        Erros: NotFound sem consultório; InvalidInput para situação, cursor ou página inválidos.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        if status not in WaitlistEntry.Status.values:
+            raise InvalidInput({"status": [gettext("Situação desconhecida.")]})
+        practice = _practice(actor)
+        rows = authorized_queryset(WaitlistEntry, user=actor, action="read").filter(practice=practice, status=status)
+        return paginate(
+            rows.order_by(_priority_first(), "created_at", "sysid"),
+            convert=waitlist_info,
+            cursor=cursor,
+            page_size=page_size,
+        )
+
+    @service_method(read_only=False, since="0.1.0")
+    def add_to_waitlist(
+        self,
+        *,
+        actor: Any,
+        patient_id: UUID,
+        earliest_date: date,
+        appointment_type_id: UUID | None = None,
+        schedule_id: UUID | None = None,
+        preferred_period: str = "any",
+        latest_date: date | None = None,
+        priority: str = "normal",
+        note: str = "",
+        idempotency_key: str,
+    ) -> WaitlistInfo:
+        """Put a patient on the waitlist of the practice.
+
+        Autorização: alteração no consultório e leitura do paciente.
+        Erros: NotFound (consultório, paciente, tipo ou agenda ilegível); Forbidden se só lê o
+        consultório; InvalidInput para período, prioridade, datas ou observação inválidos;
+        Conflict("patient_inactive", "processing_restricted").
+        Efeitos: grava a entrada; a mesma chave do mesmo ator devolve a já criada.
+        """
+        from skeleton.access.policies import require_parent_action
+
+        key = common.key(idempotency_key)
+        if preferred_period not in WaitlistEntry.Period.values:
+            raise InvalidInput({"preferred_period": [gettext("Período desconhecido.")]})
+        if priority not in WaitlistEntry.Priority.values:
+            raise InvalidInput({"priority": [gettext("Prioridade desconhecida.")]})
+        if not isinstance(earliest_date, date) or (latest_date is not None and latest_date < earliest_date):
+            raise InvalidInput({"latest_date": [gettext("A última data é antes da primeira.")]})
+        if len(str(note)) > 200:
+            raise InvalidInput({"note": [gettext("Texto longo demais.")]})
+        sysid = common.deterministic_id("waitlist", actor, key)
+        existing = WaitlistEntry.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return waitlist_info(existing)
+        practice = _practice(actor, write=True)
+        require_parent_action(WaitlistEntry, practice, user=actor, action="create")
+        patient = _readable_patient(actor, patient_id)
+        if appointment_type_id is not None:
+            common.row(actor, AppointmentType, appointment_type_id, field="appointment_type_id", write=False)
+        if schedule_id is not None:
+            _schedule(actor, schedule_id)
+        row = WaitlistEntry(
+            sysid=sysid,
+            organization_id=practice.organization_id,
+            practice=practice,
+            patient_id=patient.sysid,
+            appointment_type_id=appointment_type_id,
+            schedule_id=schedule_id,
+            preferred_period=preferred_period,
+            earliest_date=earliest_date,
+            latest_date=latest_date,
+            priority=priority,
+            note=str(note).strip(),
+        )
+        row.save()
+        return waitlist_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def cancel_waitlist_entry(self, *, actor: Any, entry_id: UUID, expected_revision: int) -> WaitlistInfo:
+        """Take a patient off the waitlist, with CAS.
+
+        Autorização: alteração no consultório.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "invalid_transition") fora de "aguardando".
+        Efeitos: grava a situação "cancelado".
+        """
+        row = common.row(actor, WaitlistEntry, entry_id, field="entry_id", write=True, lock=True)
+        common.check_revision(row, expected_revision)
+        if row.status != WaitlistEntry.Status.WAITING:
+            raise Conflict("invalid_transition")
+        common.apply_changes(row, {"status": WaitlistEntry.Status.CANCELLED})
+        return waitlist_info(row)
+
+    @service_method(read_only=True, since="0.1.0")
+    def waitlist_candidates(
+        self, *, actor: Any, schedule_id: UUID, starts_at: datetime, ends_at: datetime
+    ) -> tuple[WaitlistInfo, ...]:
+        """Waiting patients that fit a free time of a schedule: type, schedule, period and dates.
+
+        High priority first, then the oldest. The reception decides; nobody is booked automatically.
+        Autorização: leitura da agenda e do consultório.
+        Erros: NotFound; InvalidInput para horário sem fuso ou invertido.
+        Efeitos: nenhum.
+        """
+        from django.db.models import Q
+
+        from skeleton.access.policies import authorized_queryset
+
+        starts_at, ends_at = _aware(starts_at, "starts_at"), _aware(ends_at, "ends_at")
+        if ends_at <= starts_at:
+            raise InvalidInput({"ends_at": [gettext("O fim precisa ser depois do início.")]})
+        schedule = _schedule(actor, schedule_id)
+        timezone = schedule.practice.timezone
+        from zoneinfo import ZoneInfo
+
+        day = starts_at.astimezone(ZoneInfo(timezone)).date()
+        minutes = int((ends_at - starts_at).total_seconds() // 60)
+        rows = authorized_queryset(WaitlistEntry, user=actor, action="read").filter(
+            Q(schedule__isnull=True) | Q(schedule=schedule),
+            Q(latest_date__isnull=True) | Q(latest_date__gte=day),
+            practice=schedule.practice,
+            status=WaitlistEntry.Status.WAITING,
+            earliest_date__lte=day,
+        )
+        rows = rows.select_related("appointment_type").order_by(_priority_first(), "created_at", "sysid")[:200]
+        return tuple(
+            waitlist_info(row)
+            for row in rows
+            if _fits_period(row.preferred_period, starts_at, timezone)
+            and (row.appointment_type is None or row.appointment_type.duration_minutes <= minutes)
+        )
+
+    @service_method(read_only=False, since="0.1.0")
+    def book_from_waitlist(
+        self,
+        *,
+        actor: Any,
+        entry_id: UUID,
+        schedule_id: UUID,
+        starts_at: datetime,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> AppointmentInfo:
+        """Book the appointment of a waiting patient and mark the entry booked, in one transaction.
+
+        Autorização: alteração no consultório e na agenda.
+        Erros: NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada;
+        Conflict("stale_revision", "invalid_transition", "slot_unavailable"): com o horário ocupado
+        a entrada continua aguardando.
+        Efeitos: os de ``book`` e a entrada em "agendado" com a consulta.
+        """
+        entry = common.row(actor, WaitlistEntry, entry_id, field="entry_id", write=True, lock=True)
+        common.check_revision(entry, expected_revision)
+        if entry.status != WaitlistEntry.Status.WAITING:
+            raise Conflict("invalid_transition")
+        if entry.appointment_type_id is None:
+            raise InvalidInput({"appointment_type_id": [gettext("Escolha o tipo de atendimento da entrada.")]})
+        appointment = _book(
+            actor,
+            schedule_id=schedule_id,
+            patient_id=entry.patient_id,
+            appointment_type_id=entry.appointment_type_id,
+            starts_at=starts_at,
+            duration_minutes=None,
+            fit_in=False,
+            notes="",
+            payment_kind="private",
+            room_id=None,
+            idempotency_key=idempotency_key,
+        )
+        common.apply_changes(entry, {"status": WaitlistEntry.Status.BOOKED, "booked_appointment_id": appointment.pk})
+        return appointment_info(appointment)

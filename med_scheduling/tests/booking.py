@@ -21,7 +21,7 @@ def prepare(clinic: Any) -> Prepared:
     """Practice, Dra. Ana's schedule (reception writes, 08:00-12:00 on Mondays), a type and a patient."""
     for side in (clinic.a, clinic.b):
         setup_patients(clinic, side)
-        setup_practice(clinic, side)
+        setup_practice(clinic, side, managers=("reception",))
     service = SchedulingService()
     with as_admin(clinic) as admin:
         doctor = service.register_professional(

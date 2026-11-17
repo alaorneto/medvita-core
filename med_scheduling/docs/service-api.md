@@ -40,6 +40,14 @@ Add a room or a piece of equipment.
 - **Erros:** NotFound; Forbidden; InvalidInput.
 - **Efeitos:** grava a sala; a mesma chave do mesmo ator devolve a já criada.
 
+#### `add_to_waitlist(*, actor, patient_id, earliest_date, appointment_type_id=None, schedule_id=None, preferred_period='any', latest_date=None, priority='normal', note='', idempotency_key) -> WaitlistInfo`
+
+Put a patient on the waitlist of the practice.
+
+- **Autorização:** alteração no consultório e leitura do paciente.
+- **Erros:** NotFound (consultório, paciente, tipo ou agenda ilegível); Forbidden se só lê o consultório; InvalidInput para período, prioridade, datas ou observação inválidos; Conflict("patient_inactive", "processing_restricted").
+- **Efeitos:** grava a entrada; a mesma chave do mesmo ator devolve a já criada.
+
 #### `appointment(*, actor, appointment_id) -> AppointmentDetail`
 
 One appointment with its notes and the times of each state.
@@ -104,6 +112,14 @@ Book an appointment; a fit-in skips the grid and the overlap check, never a bloc
 - **Erros:** NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda; InvalidInput (horário sem fuso, duração fora de 5 a 480, forma de pagamento, observação longa, sala exigida pelo tipo); Conflict("slot_unavailable", "room_unavailable", "patient_inactive", "processing_restricted").
 - **Efeitos:** código da sequência sem lacunas, consulta gravada, evento no calendário e ``med_scheduling.appointment_booked`` publicados; a mesma chave devolve a já marcada.
 
+#### `book_from_waitlist(*, actor, entry_id, schedule_id, starts_at, expected_revision, idempotency_key) -> AppointmentInfo`
+
+Book the appointment of a waiting patient and mark the entry booked, in one transaction.
+
+- **Autorização:** alteração no consultório e na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada; Conflict("stale_revision", "invalid_transition", "slot_unavailable"): com o horário ocupado a entrada continua aguardando.
+- **Efeitos:** os de ``book`` e a entrada em "agendado" com a consulta.
+
 #### `cancel(*, actor, appointment_id, reason, expected_revision, note='') -> AppointmentInfo`
 
 Cancel an appointment (scheduled, confirmed or arrived), with CAS.
@@ -111,6 +127,14 @@ Cancel an appointment (scheduled, confirmed or arrived), with CAS.
 - **Autorização:** alteração na agenda.
 - **Erros:** NotFound; Forbidden; InvalidInput para motivo desconhecido ou observação acima de 200 caracteres; Conflict("stale_revision", "invalid_transition").
 - **Efeitos:** grava a situação e o motivo, remove o evento do calendário e publica ``med_scheduling.appointment_cancelled``.
+
+#### `cancel_waitlist_entry(*, actor, entry_id, expected_revision) -> WaitlistInfo`
+
+Take a patient off the waitlist, with CAS.
+
+- **Autorização:** alteração no consultório.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "invalid_transition") fora de "aguardando".
+- **Efeitos:** grava a situação "cancelado".
 
 #### `check_in(*, actor, appointment_id, expected_revision) -> AppointmentInfo`
 
@@ -320,6 +344,22 @@ Rename a schedule, change its slot, booking horizon or activity, with CAS.
 - **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
 - **Efeitos:** grava só os campos que mudaram.
 
+#### `waitlist(*, actor, status='waiting', cursor=None, page_size=50) -> Page[WaitlistInfo]`
+
+The waitlist of the practice, high priority first, then the oldest.
+
+- **Autorização:** leitura do consultório.
+- **Erros:** NotFound sem consultório; InvalidInput para situação, cursor ou página inválidos.
+- **Efeitos:** nenhum.
+
+#### `waitlist_candidates(*, actor, schedule_id, starts_at, ends_at) -> tuple[WaitlistInfo, ...]`
+
+Waiting patients that fit a free time of a schedule: type, schedule, period and dates.
+
+- **Autorização:** leitura da agenda e do consultório.
+- **Erros:** NotFound; InvalidInput para horário sem fuso ou invertido.
+- **Efeitos:** nenhum.
+
 ## DTOs
 
 ### `AppointmentAction`
@@ -512,6 +552,24 @@ A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice
 | `starts_at` | `datetime` |
 | `ends_at` | `datetime` |
 | `schedule_id` | `UUID` |
+
+### `WaitlistInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `patient_id` | `UUID` |
+| `appointment_type_id` | `UUID | None` |
+| `schedule_id` | `UUID | None` |
+| `preferred_period` | `str` |
+| `earliest_date` | `date` |
+| `latest_date` | `date | None` |
+| `priority` | `str` |
+| `status` | `str` |
+| `note` | `str` |
+| `booked_appointment_id` | `UUID | None` |
+| `created_at` | `datetime` |
+| `revision` | `int` |
 
 <!-- END GENERATED -->
 

@@ -21,13 +21,15 @@ def setup_patients(clinic: Any, side: Any = None) -> Any:
         )
 
 
-def setup_practice(clinic: Any, side: Any = None) -> Any:
+def setup_practice(clinic: Any, side: Any = None, *, managers: tuple[str, ...] = ()) -> Any:
+    """The default practice: every group reads; the groups in ``managers`` also change it (and the waitlist)."""
     side = side or clinic.a
     with clinic.as_user(side.admin, side.organization) as admin:
         return SchedulingService().setup(
             actor=admin,
             practice_name="Consultório Central",
             reader_group_ids=tuple(side.groups.values()),
+            manager_group_ids=tuple(side.groups[name] for name in managers),
             idempotency_key="practice",
         )
 

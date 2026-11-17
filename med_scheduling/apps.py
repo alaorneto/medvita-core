@@ -20,3 +20,4 @@ class MedSchedulingConfig(AppConfig):
         registration.register_schedule_tables()
         registration.register_appointments()
         registration.register_notifications()
+        registration.register_waitlist()

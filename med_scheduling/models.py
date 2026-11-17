@@ -319,3 +319,55 @@ class Appointment(OrganizationRecord):
 
     def __str__(self) -> str:
         return self.code
+
+
+class WaitlistEntry(OrganizationRecord):
+    """A patient waiting for a slot; the reception books from here, nobody is booked automatically."""
+
+    class Period(models.TextChoices):
+        ANY = "any", gettext_lazy("Qualquer horário")
+        MORNING = "morning", gettext_lazy("Manhã")
+        AFTERNOON = "afternoon", gettext_lazy("Tarde")
+        EVENING = "evening", gettext_lazy("Noite")
+
+    class Priority(models.TextChoices):
+        NORMAL = "normal", gettext_lazy("Normal")
+        HIGH = "high", gettext_lazy("Alta")
+
+    class Status(models.TextChoices):
+        WAITING = "waiting", gettext_lazy("Aguardando")
+        BOOKED = "booked", gettext_lazy("Agendado")
+        CANCELLED = "cancelled", gettext_lazy("Cancelado")
+        EXPIRED = "expired", gettext_lazy("Expirado")
+
+    practice = models.ForeignKey(Practice, on_delete=models.PROTECT, related_name="+")
+    patient = models.ForeignKey(
+        "med_patients.Patient", on_delete=models.PROTECT, related_name="med_scheduling_waitlist"
+    )
+    appointment_type = models.ForeignKey(
+        AppointmentType, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    schedule = models.ForeignKey(Schedule, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    preferred_period = models.CharField(max_length=10, choices=Period.choices, default=Period.ANY)
+    earliest_date = models.DateField()
+    latest_date = models.DateField(null=True, blank=True)
+    priority = models.CharField(max_length=8, choices=Priority.choices, default=Priority.NORMAL)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.WAITING)
+    note = models.CharField(max_length=200, blank=True)
+    booked_appointment = models.ForeignKey(
+        Appointment, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    immutable_fields = ("practice_id", "patient_id")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(
+                condition=Q(latest_date__isnull=True) | Q(latest_date__gte=models.F("earliest_date")),
+                name="med_scheduling_waitlist_dates",
+            ),
+            models.CheckConstraint(
+                condition=Q(status__in=("waiting", "booked", "cancelled", "expired")),
+                name="med_scheduling_waitlist_status",
+            ),
+        ]
+        ordering = ("created_at", "sysid")
