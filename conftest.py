@@ -205,3 +205,15 @@ def skeleton_db(_schema_template: str | None, tmp_path: Path, django_db_blocker:
         finally:
             connections.close_all()
             _configure(original)
+
+
+@pytest.fixture
+def clinic(skeleton_db: None) -> Any:
+    """Organizations A and B with the suite apps active and admin, reception, doctor and finance in each.
+
+    Each organization has the groups Recepção (reception), Profissionais de saúde (doctor) and
+    Financeiro (finance). No container exists: each app creates its own through its setup service.
+    """
+    from tests.support import build_clinic
+
+    return build_clinic()

@@ -96,3 +96,17 @@ Ninguém edita `version` dos manifestos nem o `CHANGELOG.md`: a automação do `
 | `CI` | agregador: falha se qualquer job falhar. É o check que o ruleset da `main` exige, ao lado de "Verificação do PR" |
 
 Trocar o núcleo é uma mudança própria: suba `SKELETON_REF` (ou, com release, troque pelo wheel da release) junto com `compatibility.skeleton` dos manifestos. O job de publicação dos pacotes assinados não existe ainda: ele nasce com a primeira release, junto com o guia de publicação.
+
+## Testes
+
+| Fixture (`conftest.py` da raiz) | O que entrega |
+|---|---|
+| `skeleton_db` | O banco isolado da seção acima, com o schema recém-migrado e as asserções na role runtime |
+| `clinic` | As organizações A e B com as quatro apps, `skeleton_calendar` e `skeleton_ledger` abertas e ativas; em cada uma, `admin` (dono), `reception`, `doctor` e `finance`, e os grupos Recepção, Profissionais de saúde e Financeiro (`clinic.a.groups["reception"]` etc.). `clinic.as_user(user, organization)` abre o contexto de requisição do ator. Nenhum contêiner: cada app cria os seus pelo próprio `setup` |
+
+Regras:
+
+- Pré-requisito de outra app se cria pelo serviço público dela (um paciente num teste da agenda nasce de `PatientService().create(...)`), nunca por `Model.objects.create` de outra app.
+- Testes de leitura dividem um preparo com `subtests`. Nada de `sleep`, porta fixa, arquivo fora de `tmp_path` ou dependência de ordem: a suíte roda em paralelo.
+- Toda asserção de isolamento roda na role runtime.
+- O código das apps e os testes delas importam do núcleo só as superfícies públicas (o check W019 aponta o resto). `tests/support.py` é a exceção: monta pessoas, organizações e grupos com as funções de provisionamento que o próprio kit do núcleo usa, porque o kit ainda não tem um helper público para isso. Ele não entra em pacote nenhum.
