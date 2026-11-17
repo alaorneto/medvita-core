@@ -34,6 +34,14 @@ Add a guardian or contact person to a patient.
 - **Erros:** NotFound; Forbidden se só lê; InvalidInput com o nome do campo; Conflict("processing_restricted", "anonymized").
 - **Efeitos:** grava o responsável; a mesma chave do mesmo ator devolve o já criado.
 
+#### `anonymize(*, actor, patient_id, expected_revision) -> PatientInfo`
+
+Erase the identification of a patient for good, when no retention guard vetoes, with CAS.
+
+- **Autorização:** ``manage_access`` no cadastro.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision", "anonymized"); Conflict("retention", motivo) quando uma guarda veta.
+- **Efeitos:** grava o cadastro anonimizado e as exclusões lógicas; nenhum evento de domínio.
+
 #### `apply_import(*, actor, batch_id, expected_revision) -> ImportStatus`
 
 Create the patients of a validated batch, by jobs of 200 rows, with CAS.
@@ -73,6 +81,14 @@ Register a patient in a registry (the default one when not given).
 - **Autorização:** alteração (``update``) no cadastro.
 - **Erros:** NotFound para cadastro inexistente ou ilegível; Forbidden se só lê o cadastro; InvalidInput com o nome do campo inválido (nunca o valor); Conflict("integrity_conflict") para CPF já cadastrado entre os vivos.
 - **Efeitos:** valida tudo, depois tira o código da sequência sem lacunas, grava o paciente e publica ``med_patients.patient_created``. A mesma chave do mesmo ator devolve o paciente já criado.
+
+#### `data_report(*, actor, patient_id) -> PatientDataReport`
+
+Everything the suite keeps about a patient, for the data subject (LGPD art. 18).
+
+- **Autorização:** ``manage_access`` no cadastro (permissão de tabela mais dono ou administrador).
+- **Erros:** NotFound para paciente ilegível; Forbidden para quem lê sem gerir o acesso.
+- **Efeitos:** registra no log estruturado que o relatório foi gerado (sem nome nem dados).
 
 #### `delete(*, actor, patient_id, expected_revision) -> None`
 
@@ -185,6 +201,14 @@ Bring back a deleted patient with the same identifier, code and data, with CAS.
 - **Autorização:** alteração no cadastro do paciente (o cadastro precisa estar vivo).
 - **Erros:** NotFound para paciente inexistente, vivo-ilegível ou de outra organização; Conflict("stale_revision"); Conflict("integrity_conflict") quando o CPF já voltou a ser de outro paciente vivo.
 - **Efeitos:** desfaz a exclusão lógica; responsáveis, convênios e consentimentos voltam junto.
+
+#### `restrict_processing(*, actor, patient_id, restricted, expected_revision) -> PatientInfo`
+
+Restrict (or lift the restriction on) the processing of a patient's data, with CAS.
+
+- **Autorização:** ``manage_access`` no cadastro.
+- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "anonymized").
+- **Efeitos:** grava a marcação (auditada pelo núcleo).
 
 #### `revoke_consent(*, actor, consent_id, expected_revision) -> ConsentInfo`
 
@@ -397,6 +421,17 @@ A CSV import: counts and a report of (row, error code); never the cells.
 | `created_at` | `datetime` |
 | `finished_at` | `datetime | None` |
 
+### `PatientDataReport`
+
+| Campo | Tipo |
+|---|---|
+| `patient` | `PatientInfo` |
+| `guardians` | `tuple[GuardianInfo, ...]` |
+| `coverages` | `tuple[CoverageInfo, ...]` |
+| `consents` | `tuple[ConsentInfo, ...]` |
+| `sections` | `tuple[ReportSection, ...]` |
+| `generated_at` | `datetime` |
+
 ### `PatientInfo`
 
 | Campo | Tipo |
@@ -503,6 +538,17 @@ What other apps show of a patient in a list: never contacts, documents or addres
 | `is_default` | `bool` |
 | `revision` | `int` |
 | `writable` | `bool` |
+
+### `ReportSection`
+
+One section of the data subject report: a title and (label, value) lines.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `title` | `str` |
+| `lines` | `tuple[tuple[str, str], ...]` |
+| `available` | `bool` |
 
 ### `SetupStep`
 

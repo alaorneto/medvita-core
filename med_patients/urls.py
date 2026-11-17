@@ -23,4 +23,7 @@ urlpatterns = [
     path("<uuid:patient_id>/consents/<uuid:row_id>/revoke/", views.consent_revoke, name="consent-revoke"),
     path("<uuid:patient_id>/consents/<uuid:row_id>/term/", views.consent_term, name="consent-term"),
     path("<uuid:patient_id>/timeline/", views.patient_timeline, name="timeline"),
+    path("<uuid:patient_id>/privacy/", views.patient_privacy, name="privacy"),
+    path("<uuid:patient_id>/privacy/restrict/", views.patient_restrict, name="restrict"),
+    path("<uuid:patient_id>/privacy/anonymize/", views.patient_anonymize, name="anonymize"),
 ]

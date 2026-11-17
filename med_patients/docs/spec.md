@@ -101,6 +101,18 @@ O cadastro aceita uma lista de pacientes em CSV (exemplo com dados fictícios em
 | Permissão | Se quem enviou perdeu a escrita no cadastro, o lote termina em `failed` com o código `forbidden` |
 | Dados | O relatório guarda só o número da linha e o código, nunca o valor de uma célula; célula é sempre texto (o relatório baixado neutraliza fórmula com `'`); o texto do arquivo fica no lote só até ele terminar; o arquivo original fica anexo ao lote, com nome fixo, e segue a retenção de anexos do núcleo |
 
+### Direitos do titular
+
+Só quem tem `manage_access` no cadastro (permissão de tabela mais dono ou administrador) vê a aba Privacidade e usa estas operações:
+
+| Operação | Comportamento |
+|---|---|
+| Relatório do titular (`data_report`) | Cadastro, responsáveis, convênios, consentimentos e as seções das apps ativas (`register_patient_data_provider`); página imprimível. Gerar não altera dado: fica registrado só no log estruturado, com o `sysid` do paciente e do ator |
+| Restrição de tratamento (`restrict_processing`) | O cadastro continua legível e encontrável, mas nada sobre o paciente muda até a restrição sair |
+| Anonimização (`anonymize`) | Só quando nenhuma guarda de retenção veta. O nome vira "Paciente anonimizado <código>", todo campo pessoal é limpo, responsáveis e convênios recebem tombstone, consentimentos perdem a observação, o paciente fica inativo e somente leitura. A auditoria anterior já está redigida. Irreversível: a tela pede o código do paciente |
+
+Com o prontuário dentro do prazo de guarda, a guarda do `med_records` veta a anonimização; a tela explica e oferece só a restrição de tratamento.
+
 ### Telas
 
 Todas em `/o/<org>/apps/med_patients/`, pelo `PatientService`; paciente inexistente, de outra organização ou ilegível responde 404.
@@ -114,6 +126,7 @@ Todas em `/o/<org>/apps/med_patients/`, pelo `PatientService`; paciente inexiste
 | `med_patients:guardians`, `:coverages`, `:consents` | Abas com lista e formulário de inclusão; consentimento aceita o termo digitalizado |
 | `med_patients:timeline` | Linha do tempo das apps ativas |
 | `med_patients:imports`, `:import` | Envio, mapeamento das colunas, conferência, aplicação e relatório da importação |
+| `med_patients:privacy` | Relatório do titular, restrição de tratamento e anonimização (quem gere o acesso do cadastro) |
 | `med_patients:setup` | Configuração inicial (administradores) |
 
 As abas das outras apps (`register_patient_section`) entram depois das próprias, em ordem, e somem com a app desativada. O título da aba do navegador leva o código do paciente, nunca o nome. O termo anexado recebe um nome fixo, porque o nome do arquivo enviado pode trazer o nome da pessoa.
@@ -138,3 +151,7 @@ Sem exclusão nem anonimização pela API.
 - Sem concessão no cadastro, o paciente é invisível; leitura no cadastro lê e não altera; alteração no cadastro altera.
 - Com o cadastro excluído, os pacientes somem; sem a permissão de tabela do cadastro, são recusados até ao dono.
 - O `setup` é idempotente pela chave, só existe um cadastro padrão por organização e só o administrador o faz.
+- Nenhum evento, log ou mensagem de erro leva nome, documento, contato ou endereço; a auditoria mostra esses campos `[REDACTED]`.
+- Duas alterações com a mesma revisão: uma vence, a outra recebe `Conflict("stale_revision")`.
+- Um CSV de 500 linhas com 10 inválidas e 5 CPFs repetidos cria 485 pacientes; repetir um lote não duplica.
+- Anonimizar com uma guarda que veta é recusado; sem guarda, nenhuma busca pelos dados antigos acha o paciente.

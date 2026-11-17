@@ -1,0 +1,8 @@
+/* Patients app: only what the core components do not cover. */
+@media print {
+  .link-tabs,
+  .toolbar,
+  .med-patients-no-print {
+    display: none !important;
+  }
+}

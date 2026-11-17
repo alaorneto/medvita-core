@@ -65,6 +65,8 @@ __all__ = [
     "GuardianInfo",
     "GuardianInput",
     "ImportStatus",
+    "PatientDataReport",
+    "ReportSection",
     "PatientInfo",
     "PatientInput",
     "PatientService",
@@ -408,6 +410,26 @@ def import_status(batch: ImportBatch) -> ImportStatus:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ReportSection:
+    """One section of the data subject report: a title and (label, value) lines."""
+
+    code: str
+    title: str
+    lines: tuple[tuple[str, str], ...]
+    available: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class PatientDataReport:
+    patient: PatientInfo
+    guardians: tuple[GuardianInfo, ...]
+    coverages: tuple[CoverageInfo, ...]
+    consents: tuple[ConsentInfo, ...]
+    sections: tuple[ReportSection, ...]
+    generated_at: datetime
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -568,6 +590,18 @@ def _timeline_cursor(cursor: object) -> tuple[datetime | None, str]:
     if parsed.tzinfo is None:
         raise InvalidInput({"cursor": [gettext("Cursor inválido.")]})
     return parsed, source
+
+
+def _require_privacy_manager(actor: Any, patient: Patient) -> None:
+    """Privacy operations need ``manage_access`` on the registry: table permission plus owner or admin."""
+    from django.core.exceptions import PermissionDenied
+
+    from skeleton.access.policies import require_record_action
+
+    try:
+        require_record_action(patient.registry, user=actor, action="manage_access")
+    except PermissionDenied:
+        raise Forbidden() from None
 
 
 # ------------------------------------------------------------------------------------ service
@@ -1427,3 +1461,125 @@ class PatientService(ServiceAPI):
 
         rows = authorized_queryset(ImportBatch, user=actor, action="read").order_by("-created_at", "sysid")[:50]
         return tuple(import_status(row) for row in rows)
+
+    # ------------------------------------------------------------------ data subject rights
+
+    @service_method(read_only=True, since="0.1.0")
+    def data_report(self, *, actor: Any, patient_id: UUID) -> PatientDataReport:
+        """Everything the suite keeps about a patient, for the data subject (LGPD art. 18).
+
+        The core sections (registry, guardians, coverages, consents) come with the sections of
+        the active apps (``register_patient_data_provider``); a provider that fails is marked
+        unavailable. The report is logged with the patient and actor identifiers only.
+        Autorização: ``manage_access`` no cadastro (permissão de tabela mais dono ou administrador).
+        Erros: NotFound para paciente ilegível; Forbidden para quem lê sem gerir o acesso.
+        Efeitos: registra no log estruturado que o relatório foi gerado (sem nome nem dados).
+        """
+        import logging
+
+        from django.utils import timezone
+
+        from .extension import DATA_PROVIDERS, call_safely
+
+        patient = _readable(actor, patient_id)
+        _require_privacy_manager(actor, patient)
+        sections = []
+        for code, provider in DATA_PROVIDERS.active(actor):
+            ok, lines = call_safely(code, provider, actor=actor, patient_id=patient.pk)
+            valid = ok and isinstance(lines, tuple)
+            sections.append(
+                ReportSection(
+                    code=code,
+                    title=code.split(".", 1)[0],
+                    lines=tuple((str(label), str(value)) for label, value in lines) if valid else (),
+                    available=valid,
+                )
+            )
+        logging.getLogger("med_patients.privacy").info(
+            "med_patients.data_report_generated", extra={"patient": str(patient.pk), "actor": str(actor.pk)}
+        )
+        return PatientDataReport(
+            patient=patient_info(patient, writable=False),
+            guardians=self.guardians(actor=actor, patient_id=patient.pk),
+            coverages=self.coverages(actor=actor, patient_id=patient.pk),
+            consents=self.consents(actor=actor, patient_id=patient.pk),
+            sections=tuple(sections),
+            generated_at=timezone.now(),
+        )
+
+    @service_method(read_only=False, since="0.1.0")
+    def restrict_processing(
+        self, *, actor: Any, patient_id: UUID, restricted: bool, expected_revision: int
+    ) -> PatientInfo:
+        """Restrict (or lift the restriction on) the processing of a patient's data, with CAS.
+
+        While restricted, the record keeps being read and found, but nothing about the patient
+        changes (``Conflict("processing_restricted")``) until the restriction is lifted.
+        Autorização: ``manage_access`` no cadastro.
+        Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "anonymized").
+        Efeitos: grava a marcação (auditada pelo núcleo).
+        """
+        if type(restricted) is not bool:
+            raise InvalidInput({"restricted": [gettext("Informe verdadeiro ou falso.")]})
+        patient = _readable(actor, patient_id)
+        _require_privacy_manager(actor, patient)
+        patient = _writable(actor, patient_id, lock=True)
+        _check_revision(patient, expected_revision)
+        if patient.anonymized_at is not None:
+            raise Conflict("anonymized")
+        if patient.processing_restricted != restricted:
+            patient.processing_restricted = restricted
+            patient.save(update_fields={"processing_restricted"})
+        return patient_info(patient, writable=True)
+
+    @service_method(read_only=False, since="0.1.0")
+    def anonymize(self, *, actor: Any, patient_id: UUID, expected_revision: int) -> PatientInfo:
+        """Erase the identification of a patient for good, when no retention guard vetoes, with CAS.
+
+        Name becomes "Paciente anonimizado <código>", every personal field is emptied, guardians and
+        coverages get a tombstone, consents lose their evidence note and the patient becomes
+        inactive and read-only. The audit history was already redacted. Irreversible.
+        Autorização: ``manage_access`` no cadastro.
+        Erros: NotFound; Forbidden; Conflict("stale_revision", "anonymized"); Conflict("retention",
+        motivo) quando uma guarda veta.
+        Efeitos: grava o cadastro anonimizado e as exclusões lógicas; nenhum evento de domínio.
+        """
+        from django.utils import timezone
+
+        from skeleton.access.policies import authorized_queryset
+
+        from .extension import retention_vetoes
+        from .registration import PATIENT_PERSONAL_FIELDS
+
+        patient = _readable(actor, patient_id)
+        _require_privacy_manager(actor, patient)
+        patient = _writable(actor, patient_id, lock=True)
+        _check_revision(patient, expected_revision)
+        if patient.anonymized_at is not None:
+            raise Conflict("anonymized")
+        reasons = retention_vetoes(actor=actor, patient=patient)
+        if reasons:
+            raise Conflict("retention", "; ".join(reasons))
+        for model in (PatientGuardian, PatientCoverage):
+            for row in authorized_queryset(model, user=actor, action="delete").filter(patient=patient):
+                row.delete()
+        for consent in (
+            authorized_queryset(Consent, user=actor, action="update").filter(patient=patient).exclude(evidence_note="")
+        ):
+            consent.evidence_note = ""
+            consent.save(update_fields={"evidence_note"})
+        cleared = set()
+        for name in PATIENT_PERSONAL_FIELDS:
+            field = Patient._meta.get_field(name)
+            empty = None if field.null else ("unknown" if name == "sex" else "")
+            setattr(patient, name, empty)
+            cleared.add(name)
+        patient.full_name = gettext("Paciente anonimizado %(code)s") % {"code": patient.code}
+        patient.search_name = patient.full_name.lower()
+        patient.status = Patient.Status.INACTIVE
+        patient.processing_restricted = False
+        patient.anonymized_at = timezone.now()
+        patient.save(
+            update_fields=cleared | {"full_name", "search_name", "status", "processing_restricted", "anonymized_at"}
+        )
+        return patient_info(patient, writable=False)

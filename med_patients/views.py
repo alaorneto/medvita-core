@@ -106,6 +106,15 @@ def _tabs(request: HttpRequest, organization_id: UUID, patient: Any, active: str
         }
         for code, label, name in own
     ]
+    if _privacy_manager(request, patient):
+        tabs.append(
+            {
+                "code": "privacy",
+                "label": gettext("Privacidade"),
+                "url": reverse("med_patients:privacy", args=(organization_id, patient.sysid)),
+                "current": active == "privacy",
+            }
+        )
     for section in _service().patient_sections(actor=request.user):
         try:
             url = reverse(section.url_name, args=(organization_id, patient.sysid))
@@ -776,3 +785,69 @@ def import_report(request: HttpRequest, organization_id: UUID, batch_id: UUID) -
     for row, code in batch.report:
         writer.writerow([row, safe_cell(code)])
     return response
+
+
+# ----------------------------------------------------------------------------------- privacy
+
+
+def _privacy_manager(request: HttpRequest, patient: Any) -> bool:
+    from skeleton.service_api.access import AccessService
+
+    return AccessService().can(
+        actor=request.user,
+        action="manage_access",
+        table_key="med_patients.patientregistry",
+        record_id=patient.registry_id,
+    )
+
+
+@tenant_page()
+def patient_privacy(request: HttpRequest, organization_id: UUID, patient_id: UUID) -> HttpResponse:
+    patient = _patient_or_404(request, patient_id)
+    try:
+        report = _service().data_report(actor=request.user, patient_id=patient_id)
+    except (Forbidden, NotFound):
+        raise Http404 from None
+    context = patient_context(request, organization_id, patient, "privacy")
+    context.update({"report": report})
+    return render(request, "med_patients/privacy.html", context)
+
+
+@require_POST
+@tenant_page()
+def patient_restrict(request: HttpRequest, organization_id: UUID, patient_id: UUID) -> HttpResponse:
+    try:
+        with transaction.atomic():
+            _service().restrict_processing(
+                actor=request.user,
+                patient_id=patient_id,
+                restricted=request.POST.get("restricted") == "1",
+                expected_revision=_revision(request),
+            )
+    except (Forbidden, NotFound):
+        raise Http404 from None
+    except Conflict as error:
+        messages.error(request, conflict_text(error))
+    else:
+        messages.success(request, gettext("Restrição de tratamento atualizada."))
+    return redirect("med_patients:privacy", organization_id, patient_id)
+
+
+@require_POST
+@tenant_page()
+def patient_anonymize(request: HttpRequest, organization_id: UUID, patient_id: UUID) -> HttpResponse:
+    patient = _patient_or_404(request, patient_id)
+    if request.POST.get("confirm_code", "").strip().upper() != patient.code:
+        messages.error(request, gettext("Digite o código do paciente para confirmar a anonimização."))
+        return redirect("med_patients:privacy", organization_id, patient_id)
+    try:
+        with transaction.atomic():
+            _service().anonymize(actor=request.user, patient_id=patient_id, expected_revision=_revision(request))
+    except (Forbidden, NotFound):
+        raise Http404 from None
+    except Conflict as error:
+        detail = str(error.detail) if error.code == "retention" else conflict_text(error)
+        messages.error(request, detail)
+    else:
+        messages.success(request, gettext("Paciente anonimizado."))
+    return redirect("med_patients:privacy", organization_id, patient_id)
