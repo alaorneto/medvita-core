@@ -83,3 +83,16 @@ O hospedeiro dos testes não serve páginas. Para navegar nas apps, use um clone
 ## Versão
 
 Ninguém edita `version` dos manifestos nem o `CHANGELOG.md`: a automação do `dev-workflow` escreve o mesmo número nos quatro manifestos e as faixas entre as apps (`.github/dev-workflow.toml`, `[[versioning.files]]`). O trem começa em 0.0.0; a primeira release sai 0.1.0.
+
+## CI
+
+`.github/workflows/ci.yml` roda em todo PR e push na `main`:
+
+| Job | O que faz |
+|---|---|
+| `lint` | `ruff check .` e `ruff format --check .` |
+| `test` | PostgreSQL 16 de serviço; instala o núcleo de `SKELETON_REF`; provisiona `ci_skeleton_test` e um banco por worker; `django check --fail-level WARNING`; `makemigrations --check`; `pytest -n 4`. Em Python 3.12 e 3.14 |
+| `packages` | `package doctor <pacote> --git-ref HEAD` dos quatro pacotes |
+| `CI` | agregador: falha se qualquer job falhar. É o check que o ruleset da `main` exige, ao lado de "Verificação do PR" |
+
+Trocar o núcleo é uma mudança própria: suba `SKELETON_REF` (ou, com release, troque pelo wheel da release) junto com `compatibility.skeleton` dos manifestos. O job de publicação dos pacotes assinados não existe ainda: ele nasce com a primeira release (`docs/releasing.md`).
