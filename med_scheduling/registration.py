@@ -106,3 +106,72 @@ def register_practice_tables() -> None:
             access_parent="practice",
         )
     )
+
+
+def register_schedule_tables() -> None:
+    from skeleton.system.record_operations import RecordOperations, register_record_operations
+    from skeleton.system.registry import TableSpec, register
+
+    from .models import AvailabilityRule, Schedule, ScheduleBlock
+
+    register(
+        TableSpec(
+            model=Schedule,
+            description=_(
+                "Agendas de profissionais, salas e equipamentos; cada uma projeta as consultas num calendário."
+            ),
+            label=_("Agendas"),
+            scope="organization",
+            read_fields=(
+                "practice",
+                "name",
+                "professional",
+                "room",
+                "calendar",
+                "slot_minutes",
+                "booking_horizon_days",
+                "is_active",
+                "owner",
+                "visibility",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=True,
+        )
+    )
+    # Schedules are created and shared only by SchedulingService (the calendar mirror depends on it).
+    register_record_operations("med_scheduling.schedule", RecordOperations())
+    register(
+        TableSpec(
+            model=AvailabilityRule,
+            description=_("Grade semanal de cada agenda."),
+            label=_("Grade de horários"),
+            scope="organization",
+            read_fields=(
+                "schedule",
+                "weekday",
+                "start_minute",
+                "end_minute",
+                "valid_from",
+                "valid_until",
+                "appointment_type",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="schedule",
+        )
+    )
+    register(
+        TableSpec(
+            model=ScheduleBlock,
+            description=_("Bloqueios das agendas: férias, feriados, reuniões."),
+            label=_("Bloqueios"),
+            scope="organization",
+            read_fields=("schedule", "starts_at", "ends_at", "reason", "note"),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="schedule",
+        )
+    )

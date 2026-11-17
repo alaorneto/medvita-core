@@ -39,8 +39,24 @@ O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do
 
 **`AppointmentType`** (derivada do consultório): `code` (minúsculas, único no consultório entre os vivos, imutável), `name`, `duration_minutes` (5 a 480), `color` (uma de oito chaves fixas, pintada pelo CSS da app), `billing_code`, `requires_room`, `is_active`.
 
+**`Schedule`** (contêiner): `practice`, `name`, `professional` ou `room` (pelo menos um), `calendar` (o calendário compartilhado do `skeleton_calendar` que projeta a agenda; imutável), `slot_minutes` (5 a 120), `booking_horizon_days` (1 a 730), `is_active`, e os grupos e pessoas com que a agenda foi compartilhada (`writer_groups`, `reader_groups`, `writer_users`).
+
+**`AvailabilityRule`** (derivada da agenda): `weekday` (0 = segunda a 6 = domingo), `start_minute` e `end_minute` (minutos do dia no fuso do consultório; fim depois do início), `valid_from`, `valid_until` (opcional), `appointment_type` (opcional: a faixa só aceita esse tipo). Faixas da mesma agenda não se sobrepõem no mesmo dia e período de validade.
+
+**`ScheduleBlock`** (derivada da agenda): `starts_at`, `ends_at`, `reason` (`vacation`, `holiday`, `meeting`, `personal`, `other`), `note`.
+
+### Agendas e o calendário do núcleo
+
+- `create_schedule` (só com `access.manage`) cria, numa transação, o calendário compartilhado do núcleo (dono: a pessoa do profissional; numa agenda de sala, quem cria), a agenda e as concessões nas duas: grupos de escrita recebem leitura e alteração, de leitura só leitura, e as pessoas de escrita leitura e alteração.
+- `set_schedule_access` é o único caminho para mudar o acesso de uma agenda: ele iguala as concessões da agenda e do calendário. Mudar só um lado pela tela de acesso do núcleo quebra a projeção.
+- `set_availability` troca a grade inteira, com a revisão da agenda como CAS.
+- Um bloqueio vira evento gerenciado no calendário (título "Bloqueio"); removê-lo remove o evento.
+- O `setup` também dá ao papel `member` leitura e alteração da tabela de calendários do núcleo: quem tem concessão numa agenda precisa enxergar o calendário dela.
+
 ## Acceptance
 
 - Só o administrador configura o consultório; a configuração é idempotente pela chave e única por organização.
 - A recepção lê profissionais, salas e tipos e não os altera; a organização B não vê nada da A.
 - Nome, número do conselho e CPF do profissional saem `[REDACTED]` na auditoria.
+- Um grupo removido por `set_schedule_access` perde o acesso à agenda e ao calendário dela.
+- Com o `skeleton_calendar` desativado, a agenda médica fica indisponível.

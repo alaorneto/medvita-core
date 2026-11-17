@@ -17,3 +17,4 @@ class MedSchedulingConfig(AppConfig):
         from . import registration
 
         registration.register_practice_tables()
+        registration.register_schedule_tables()

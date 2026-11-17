@@ -148,3 +148,95 @@ class AppointmentType(OrganizationRecord):
             models.CheckConstraint(condition=Q(color__in=COLORS), name="med_scheduling_type_color"),
         ]
         ordering = ("name", "sysid")
+
+
+class Schedule(SecuredRecord):
+    """The agenda of a professional, a room or a piece of equipment, mirrored by a core calendar.
+
+    ``writer_groups``, ``reader_groups`` and ``writer_users`` record the access the schedule was
+    shared with; ``SchedulingService.set_schedule_access`` keeps the schedule and its calendar equal.
+    """
+
+    practice = models.ForeignKey(Practice, on_delete=models.PROTECT, related_name="+")
+    name = models.CharField(max_length=120)
+    professional = models.ForeignKey(Professional, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    room = models.ForeignKey(Room, on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    calendar = models.ForeignKey("skeleton_calendar.Calendar", on_delete=models.PROTECT, related_name="+")
+    slot_minutes = models.PositiveSmallIntegerField(default=30)
+    booking_horizon_days = models.PositiveSmallIntegerField(default=180)
+    is_active = models.BooleanField(default=True)
+    writer_groups = models.JSONField(default=list, blank=True)
+    reader_groups = models.JSONField(default=list, blank=True)
+    writer_users = models.JSONField(default=list, blank=True)
+    immutable_fields = ("practice_id", "calendar_id")
+
+    class Meta(SecuredRecord.Meta):
+        constraints = SecuredRecord.Meta.constraints + [
+            models.CheckConstraint(
+                condition=Q(professional__isnull=False) | Q(room__isnull=False), name="med_scheduling_schedule_target"
+            ),
+            models.CheckConstraint(
+                condition=Q(slot_minutes__gte=5, slot_minutes__lte=120), name="med_scheduling_schedule_slot"
+            ),
+            models.CheckConstraint(
+                condition=Q(booking_horizon_days__gte=1, booking_horizon_days__lte=730),
+                name="med_scheduling_schedule_horizon",
+            ),
+        ]
+        ordering = ("name", "sysid")
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class AvailabilityRule(OrganizationRecord):
+    """A weekly working window of a schedule, in minutes of the day of the practice's time zone."""
+
+    schedule = models.ForeignKey(Schedule, on_delete=models.PROTECT, related_name="+")
+    weekday = models.PositiveSmallIntegerField()  # 0 = Monday ... 6 = Sunday
+    start_minute = models.PositiveSmallIntegerField()
+    end_minute = models.PositiveSmallIntegerField()
+    valid_from = models.DateField()
+    valid_until = models.DateField(null=True, blank=True)
+    appointment_type = models.ForeignKey(
+        AppointmentType, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    immutable_fields = ("schedule_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(condition=Q(weekday__lte=6), name="med_scheduling_rule_weekday"),
+            models.CheckConstraint(
+                condition=Q(start_minute__lt=models.F("end_minute"), end_minute__lte=1440),
+                name="med_scheduling_rule_window",
+            ),
+            models.CheckConstraint(
+                condition=Q(valid_until__isnull=True) | Q(valid_until__gte=models.F("valid_from")),
+                name="med_scheduling_rule_validity",
+            ),
+        ]
+        ordering = ("weekday", "start_minute", "sysid")
+
+
+class ScheduleBlock(OrganizationRecord):
+    """A period in which the schedule takes no appointment (vacation, holiday, meeting)."""
+
+    class Reason(models.TextChoices):
+        VACATION = "vacation", gettext_lazy("Férias")
+        HOLIDAY = "holiday", gettext_lazy("Feriado")
+        MEETING = "meeting", gettext_lazy("Reunião")
+        PERSONAL = "personal", gettext_lazy("Compromisso pessoal")
+        OTHER = "other", gettext_lazy("Outro")
+
+    schedule = models.ForeignKey(Schedule, on_delete=models.PROTECT, related_name="+")
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField()
+    reason = models.CharField(max_length=12, choices=Reason.choices, default=Reason.OTHER)
+    note = models.CharField(max_length=200, blank=True)
+    immutable_fields = ("schedule_id",)
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(condition=Q(starts_at__lt=models.F("ends_at")), name="med_scheduling_block_window"),
+        ]
+        ordering = ("starts_at", "sysid")

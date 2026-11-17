@@ -24,6 +24,14 @@ Add a kind of appointment; the code is unique in the practice.
 - **Erros:** NotFound; Forbidden; InvalidInput; Conflict("integrity_conflict") para código já usado.
 - **Efeitos:** grava o tipo; a mesma chave do mesmo ator devolve o já criado.
 
+#### `add_block(*, actor, schedule_id, starts_at, ends_at, reason='other', note='', idempotency_key=None) -> BlockInfo`
+
+Block a period of a schedule; it shows as busy in the schedule's calendar too.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput para período sem fuso ou invertido, motivo desconhecido ou observação acima de 200 caracteres.
+- **Efeitos:** grava o bloqueio e o projeta no calendário como evento gerenciado ("Bloqueio").
+
 #### `add_room(*, actor, name, kind='room', idempotency_key=None) -> RoomInfo`
 
 Add a room or a piece of equipment.
@@ -39,6 +47,30 @@ Kinds of appointment of the practice.
 - **Autorização:** leitura do consultório.
 - **Erros:** NotFound sem consultório legível.
 - **Efeitos:** nenhum.
+
+#### `availability(*, actor, schedule_id) -> tuple[AvailabilityRuleInfo, ...]`
+
+The weekly grid of a schedule, by weekday and start.
+
+- **Autorização:** leitura da agenda.
+- **Erros:** NotFound para agenda ilegível.
+- **Efeitos:** nenhum.
+
+#### `blocks(*, actor, schedule_id, start, end) -> tuple[BlockInfo, ...]`
+
+Blocks of a schedule that overlap a window.
+
+- **Autorização:** leitura da agenda.
+- **Erros:** NotFound; InvalidInput para janela sem fuso, invertida ou acima de 400 dias.
+- **Efeitos:** nenhum.
+
+#### `create_schedule(*, actor, name, professional_id=None, room_id=None, slot_minutes=30, writer_group_ids=(), reader_group_ids=(), writer_user_ids=(), idempotency_key) -> ScheduleInfo`
+
+Create the schedule of a professional or room, with its shared calendar and the same access.
+
+- **Autorização:** a capacidade ``access.manage`` e ``create`` em med_scheduling.schedule.
+- **Erros:** Forbidden; NotFound para profissional ou sala ilegível; InvalidInput para nome vazio, sem profissional nem sala, intervalo fora de 5 a 120 minutos, mais de 20 grupos ou pessoas; Unavailable com a agenda do núcleo desativada.
+- **Efeitos:** cria o calendário compartilhado, a agenda e as concessões nas duas, na transação do chamador; a mesma chave do mesmo ator devolve a agenda já criada.
 
 #### `my_professional(*, actor) -> ProfessionalInfo | None`
 
@@ -80,6 +112,14 @@ Register a professional of the practice, optionally linked to a member of the or
 - **Erros:** NotFound sem consultório; Forbidden se só lê; InvalidInput com o nome do campo ou para pessoa que não é membro ativo; Conflict("integrity_conflict") para pessoa já ligada a outro profissional vivo.
 - **Efeitos:** grava o profissional; a mesma chave do mesmo ator devolve o já criado.
 
+#### `remove_block(*, actor, block_id, expected_revision) -> None`
+
+Remove a block of a schedule, with CAS, and its calendar event.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision").
+- **Efeitos:** exclusão lógica do bloqueio e do evento projetado.
+
 #### `rooms(*, actor, active_only=True) -> tuple[RoomInfo, ...]`
 
 Rooms and equipment of the practice.
@@ -88,6 +128,30 @@ Rooms and equipment of the practice.
 - **Erros:** NotFound sem consultório legível.
 - **Efeitos:** nenhum.
 
+#### `schedule(*, actor, schedule_id) -> ScheduleInfo`
+
+One schedule.
+
+- **Autorização:** leitura da agenda.
+- **Erros:** NotFound para agenda inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
+#### `schedules(*, actor, active_only=True) -> tuple[ScheduleInfo, ...]`
+
+Schedules the actor reads, by name.
+
+- **Autorização:** leitura de cada agenda.
+- **Erros:** Forbidden sem a permissão de tabela das agendas.
+- **Efeitos:** nenhum.
+
+#### `set_availability(*, actor, schedule_id, rules, expected_revision) -> tuple[AvailabilityRuleInfo, ...]`
+
+Replace the whole weekly grid of a schedule, with the schedule's revision as CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput para faixa inválida, sobreposta ou com tipo de outro consultório; Conflict("stale_revision").
+- **Efeitos:** exclusão lógica das faixas antigas, as novas gravadas e uma revisão nova da agenda.
+
 #### `set_professional_active(*, actor, professional_id, active, expected_revision) -> ProfessionalInfo`
 
 Deactivate (or reactivate) a professional, with CAS.
@@ -95,6 +159,14 @@ Deactivate (or reactivate) a professional, with CAS.
 - **Autorização:** alteração no consultório.
 - **Erros:** NotFound; Forbidden; Conflict("stale_revision").
 - **Efeitos:** grava a situação; um profissional inativo some das listas e não recebe agenda nova.
+
+#### `set_schedule_access(*, actor, schedule_id, writer_group_ids, reader_group_ids, writer_user_ids=(), expected_revision) -> ScheduleInfo`
+
+Share a schedule and its calendar, together, with exactly these groups and people, with CAS.
+
+- **Autorização:** a capacidade ``access.manage``.
+- **Erros:** Forbidden; NotFound; InvalidInput; Conflict("stale_revision").
+- **Efeitos:** revoga nas duas o que saiu e concede o que entrou; vale na requisição seguinte.
 
 #### `setup(*, actor, practice_name, timezone='America/Sao_Paulo', reader_group_ids=(), manager_group_ids=(), idempotency_key) -> PracticeInfo`
 
@@ -136,6 +208,14 @@ Rename, change the kind or (de)activate a room, with CAS.
 - **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
 - **Efeitos:** grava só os campos que mudaram.
 
+#### `update_schedule(*, actor, schedule_id, changes, expected_revision) -> ScheduleInfo`
+
+Rename a schedule, change its slot, booking horizon or activity, with CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
+- **Efeitos:** grava só os campos que mudaram.
+
 ## DTOs
 
 ### `AppointmentTypeInfo`
@@ -151,6 +231,44 @@ Rename, change the kind or (de)activate a room, with CAS.
 | `billing_code` | `str` |
 | `requires_room` | `bool` |
 | `is_active` | `bool` |
+| `revision` | `int` |
+
+### `AvailabilityRuleInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `schedule_id` | `UUID` |
+| `weekday` | `int` |
+| `start_minute` | `int` |
+| `end_minute` | `int` |
+| `valid_from` | `date` |
+| `valid_until` | `date | None` |
+| `appointment_type_id` | `UUID | None` |
+
+### `AvailabilityRuleInput`
+
+A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice's time zone.
+
+| Campo | Tipo |
+|---|---|
+| `weekday` | `int` |
+| `start_minute` | `int` |
+| `end_minute` | `int` |
+| `valid_from` | `date` |
+| `valid_until` | `date | None` |
+| `appointment_type_id` | `UUID | None` |
+
+### `BlockInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `schedule_id` | `UUID` |
+| `starts_at` | `datetime` |
+| `ends_at` | `datetime` |
+| `reason` | `str` |
+| `note` | `str` |
 | `revision` | `int` |
 
 ### `PracticeInfo`
@@ -198,6 +316,22 @@ Rename, change the kind or (de)activate a room, with CAS.
 | `kind` | `str` |
 | `is_active` | `bool` |
 | `revision` | `int` |
+
+### `ScheduleInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `practice_id` | `UUID` |
+| `name` | `str` |
+| `professional_id` | `UUID | None` |
+| `room_id` | `UUID | None` |
+| `calendar_id` | `UUID` |
+| `slot_minutes` | `int` |
+| `booking_horizon_days` | `int` |
+| `is_active` | `bool` |
+| `revision` | `int` |
+| `writable` | `bool` |
 
 <!-- END GENERATED -->
 

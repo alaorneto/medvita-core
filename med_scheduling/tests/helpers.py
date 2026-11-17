@@ -42,3 +42,14 @@ def new_patient(clinic: Any, side: Any = None, **values: Any) -> Any:
 def as_admin(clinic: Any, side: Any = None) -> Any:
     side = side or clinic.a
     return clinic.as_user(side.admin, side.organization)
+
+
+class Prepared:
+    """The clinic fixture plus what a test prepared (``ready.schedule``), forwarding everything else."""
+
+    def __init__(self, clinic: Any, **extra: Any) -> None:
+        self._clinic = clinic
+        self.__dict__.update(extra)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._clinic, name)
