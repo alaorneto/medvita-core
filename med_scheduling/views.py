@@ -71,6 +71,13 @@ def _key(request: HttpRequest) -> str:
     return (request.POST.get("idempotency_key") or "")[:150] or uuid.uuid4().hex
 
 
+def _uuid_or_404(value: str) -> UUID:
+    try:
+        return UUID(value)
+    except ValueError:
+        raise Http404 from None
+
+
 def _practice_or_none(request: HttpRequest) -> Any:
     try:
         return _service().practice(actor=request.user)
@@ -197,6 +204,7 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         raise Http404
     query = request.GET.get("q", "")[:200]
     patient_id = request.GET.get("patient") or request.POST.get("patient") or ""
+    entry_id = request.GET.get("entry") or request.POST.get("entry") or ""
     patients: tuple[Any, ...] = ()
     patient = None
     if query:
@@ -231,17 +239,27 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             else:
                 try:
                     with transaction.atomic():
-                        appointment = _service().book(
-                            actor=request.user,
-                            schedule_id=schedule_id,
-                            patient_id=patient.sysid,
-                            appointment_type_id=type_id,
-                            starts_at=starts_at,
-                            fit_in=values["fit_in"],
-                            notes=values["notes"],
-                            payment_kind=values["payment_kind"] or "private",
-                            idempotency_key=_key(request),
-                        )
+                        if entry_id:
+                            appointment = _service().book_from_waitlist(
+                                actor=request.user,
+                                entry_id=_uuid_or_404(entry_id),
+                                schedule_id=schedule_id,
+                                starts_at=starts_at,
+                                expected_revision=_revision(request),
+                                idempotency_key=_key(request),
+                            )
+                        else:
+                            appointment = _service().book(
+                                actor=request.user,
+                                schedule_id=schedule_id,
+                                patient_id=patient.sysid,
+                                appointment_type_id=type_id,
+                                starts_at=starts_at,
+                                fit_in=values["fit_in"],
+                                notes=values["notes"],
+                                payment_kind=values["payment_kind"] or "private",
+                                idempotency_key=_key(request),
+                            )
                 except (Forbidden, NotFound):
                     raise Http404 from None
                 except InvalidInput as error:
@@ -276,6 +294,8 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             form=form,
             slots=[{"value": slot.isoformat(), "local": slot.astimezone(zone)} for slot in slots],
             idempotency_key=_key(request),
+            entry_id=entry_id,
+            entry_revision=request.GET.get("revision") or request.POST.get("revision") or "",
         ),
         status=status,
     )

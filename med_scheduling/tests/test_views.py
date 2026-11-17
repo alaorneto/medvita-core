@@ -210,3 +210,53 @@ def test_day_page_query_count_does_not_grow(ready):
     for hour, minute in ((8, 30), (9, 0), (9, 30), (10, 0), (10, 30), (11, 0)):
         book(ready, hour, minute)
     assert count() == one
+
+
+def test_start_and_complete_through_the_pages(ready):
+    appointment = book(ready, 9)
+    client = client_for(ready.a.reception)
+    for name, status in (("check_in", "arrived"), ("start", "in_progress"), ("complete", "completed")):
+        current = detail(ready, appointment.sysid)
+        response = client.post(url(ready, "transition", appointment.sysid, name), {"revision": current.revision})
+        assert response.status_code == 302
+        assert detail(ready, appointment.sysid).status == status
+    page = assert_safe(client.get(url(ready, "appointment", appointment.sysid)))
+    assert "Concluir" not in page and "Cancelar consulta" not in page
+
+
+def test_waitlist_add_and_book_from_it_through_the_pages(ready):
+    client = client_for(ready.a.reception)
+    response = client.post(
+        url(ready, "waitlist"),
+        {
+            "patient_code": ready.patient.code,
+            "appointment_type": ready.kind.sysid,
+            "preferred_period": "any",
+            "earliest_date": ready.monday.isoformat(),
+            "priority": "high",
+            "note": "",
+            "idempotency_key": "page-wait",
+        },
+    )
+    assert response.status_code == 302
+    with ready.as_user(ready.a.reception) as actor:
+        (entry,) = SchedulingService().waitlist(actor=actor).items
+    page = assert_safe(client.get(url(ready, "waitlist")))
+    assert f"entry={entry.sysid}" in page
+
+    query = {
+        "patient": ready.patient.sysid,
+        "entry": entry.sysid,
+        "revision": entry.revision,
+        "schedule": ready.schedule.sysid,
+        "appointment_type": ready.kind.sysid,
+        "day": ready.monday.isoformat(),
+    }
+    html = assert_safe(client.get(url(ready, "book"), query))
+    offered = {datetime.fromisoformat(value): value for value in re.findall(r'name="slot" value="([^"]+)"', html)}
+    response = client.post(url(ready, "book"), {**query, "slot": offered[at(ready, 11)], "idempotency_key": "w-1"})
+    assert response.status_code == 302
+    with ready.as_user(ready.a.reception) as actor:
+        assert SchedulingService().waitlist(actor=actor).items == ()
+        (row,) = SchedulingService().appointments(actor=actor, patient_id=ready.patient.sysid).items
+    assert row.starts_at == at(ready, 11)
