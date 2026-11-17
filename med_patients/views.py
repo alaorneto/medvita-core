@@ -90,37 +90,13 @@ def _patient_or_404(request: HttpRequest, patient_id: UUID) -> Any:
 
 
 def _tabs(request: HttpRequest, organization_id: UUID, patient: Any, active: str) -> list[dict[str, Any]]:
-    own = [
-        ("detail", gettext("Cadastro"), "med_patients:detail"),
-        ("guardians", gettext("Responsáveis"), "med_patients:guardians"),
-        ("coverages", gettext("Convênios"), "med_patients:coverages"),
-        ("consents", gettext("Consentimentos"), "med_patients:consents"),
-        ("timeline", gettext("Linha do tempo"), "med_patients:timeline"),
-    ]
-    tabs = [
-        {
-            "code": code,
-            "label": label,
-            "url": reverse(name, args=(organization_id, patient.sysid)),
-            "current": code == active,
-        }
-        for code, label, name in own
-    ]
-    if _privacy_manager(request, patient):
-        tabs.append(
-            {
-                "code": "privacy",
-                "label": gettext("Privacidade"),
-                "url": reverse("med_patients:privacy", args=(organization_id, patient.sysid)),
-                "current": active == "privacy",
-            }
-        )
-    for section in _service().patient_sections(actor=request.user):
+    tabs = []
+    for tab in _service().page_tabs(actor=request.user, patient_id=patient.sysid):
         try:
-            url = reverse(section.url_name, args=(organization_id, patient.sysid))
+            url = reverse(tab.url_name, args=(organization_id, patient.sysid))
         except NoReverseMatch:
             continue
-        tabs.append({"code": section.code, "label": section.label, "url": url, "current": section.code == active})
+        tabs.append({"code": tab.code, "label": tab.label, "url": url, "current": tab.code == active})
     return tabs
 
 
@@ -788,17 +764,6 @@ def import_report(request: HttpRequest, organization_id: UUID, batch_id: UUID) -
 
 
 # ----------------------------------------------------------------------------------- privacy
-
-
-def _privacy_manager(request: HttpRequest, patient: Any) -> bool:
-    from skeleton.service_api.access import AccessService
-
-    return AccessService().can(
-        actor=request.user,
-        action="manage_access",
-        table_key="med_patients.patientregistry",
-        record_id=patient.registry_id,
-    )
 
 
 @tenant_page()

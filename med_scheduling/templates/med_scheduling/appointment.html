@@ -1,0 +1,30 @@
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format med_scheduling_labels %}{% block title %}{{ row.code }} · {% translate "Consulta" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_scheduling:day' organization_id %}?date={{ local_start|date:'Y-m-d' }}">{% translate "Agenda" %}</a> · {{ row.code }}</p>
+<h1>{% if patient %}{{ patient.display_name }}{% else %}{% translate "Paciente não disponível" %}{% endif %}</h1>
+<p class="page-description">{{ local_start|date:"l, d/m/Y" }} · {{ local_start|time:"H:i" }}–{{ local_end|time:"H:i" }} · {% with label=row.status|scheduling_label:"status" %}{{ row.status|status_badge:label }}{% endwith %}{% if row.is_fit_in %} · <span class="badge badge-warning">{% translate "Encaixe" %}</span>{% endif %}</p></div>
+{% if transitions or registered %}<nav class="toolbar" aria-label="{% translate "Ações" %}">{% for action in registered %}<a class="btn btn-primary" href="{{ action.url }}">{{ action.label }}</a>{% endfor %}{% for transition in transitions %}<form method="post" action="{% url 'med_scheduling:transition' organization_id row.sysid transition.name %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ row.revision }}"><button type="submit" class="btn btn-secondary">{{ transition.label }}</button></form>{% endfor %}</nav>{% endif %}</div>
+{% include "med_scheduling/_nav.html" %}
+<dl class="meta-list mb-6">
+  {% if patient %}<dt>{% translate "Paciente" %}</dt><dd><a href="{% url 'med_patients:detail' organization_id row.patient_id %}">{{ patient.code }}</a></dd>{% endif %}
+  <dt>{% translate "Pagamento" %}</dt><dd>{{ row.payment_kind|scheduling_label:"payment_kind" }}</dd>
+  <dt>{% translate "Observação da recepção" %}</dt><dd class="whitespace-pre-line">{{ detail.notes|default:"—" }}</dd>
+  {% if detail.confirmed_at %}<dt>{% translate "Confirmada em" %}</dt><dd>{{ detail.confirmed_at|date:"SHORT_DATETIME_FORMAT" }}</dd>{% endif %}
+  {% if detail.arrived_at %}<dt>{% translate "Chegada" %}</dt><dd>{{ detail.arrived_at|date:"SHORT_DATETIME_FORMAT" }}</dd>{% endif %}
+  {% if detail.started_at %}<dt>{% translate "Início do atendimento" %}</dt><dd>{{ detail.started_at|date:"SHORT_DATETIME_FORMAT" }}</dd>{% endif %}
+  {% if detail.completed_at %}<dt>{% translate "Concluída em" %}</dt><dd>{{ detail.completed_at|date:"SHORT_DATETIME_FORMAT" }}</dd>{% endif %}
+  {% if detail.cancelled_at %}<dt>{% translate "Cancelada em" %}</dt><dd>{{ detail.cancelled_at|date:"SHORT_DATETIME_FORMAT" }} · {{ detail.cancel_reason|scheduling_label:"cancel_reason" }}{% if detail.cancel_note %} · {{ detail.cancel_note }}{% endif %}</dd>{% endif %}
+</dl>
+{% if can_reschedule %}
+<section class="card max-w-xl mb-6" aria-labelledby="reschedule-heading"><h2 id="reschedule-heading">{% translate "Remarcar" %}</h2>
+<form method="post" action="{% url 'med_scheduling:reschedule' organization_id row.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ row.revision }}">
+{% include "skeleton/web/components/form-fields.html" with form=reschedule_form hide_marks=True %}
+<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Remarcar" %}</button></div></form></section>
+{% endif %}
+{% if can_cancel %}
+<section class="card max-w-xl" aria-labelledby="cancel-heading"><h2 id="cancel-heading">{% translate "Cancelar" %}</h2>
+<form method="post" action="{% url 'med_scheduling:cancel' organization_id row.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ row.revision }}">
+{% include "skeleton/web/components/form-fields.html" with form=cancel_form hide_marks=True %}
+<div class="form-actions"><button type="submit" class="btn btn-danger">{% translate "Cancelar consulta" %}</button></div></form></section>
+{% endif %}
+{% endblock %}

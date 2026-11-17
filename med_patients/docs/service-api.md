@@ -162,6 +162,14 @@ Say which column feeds which patient field, with CAS, and queue the validation o
 - **Erros:** NotFound; Forbidden; InvalidInput para coluna inexistente, campo que não é de ``PatientInput``, campo repetido ou ``full_name`` sem coluna; Conflict("stale_revision"); Conflict("import_state") fora de "enviado" ou "validado".
 - **Efeitos:** grava o mapeamento e enfileira o job de validação (situação "validando").
 
+#### `page_tabs(*, actor, patient_id) -> tuple[PatientSectionInfo, ...]`
+
+Every tab of the patient page, in order: the app's own, Privacidade for who manages access to the registry, then the sections of active apps. A page of another app renders the same navigation from it (the route of each tab receives ``org`` and ``patient_id``).
+
+- **Autorização:** leitura do cadastro do paciente.
+- **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
 #### `patient_sections(*, actor) -> tuple[PatientSectionInfo, ...]`
 
 Tabs and shortcuts other apps add to the patient page, in order; only active apps.

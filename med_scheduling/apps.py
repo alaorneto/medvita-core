@@ -21,3 +21,6 @@ class MedSchedulingConfig(AppConfig):
         registration.register_appointments()
         registration.register_notifications()
         registration.register_waitlist()
+        from . import integration
+
+        integration.register()

@@ -214,9 +214,15 @@ def retention_vetoes(*, actor: Any, patient: Any) -> list[str]:
 
 
 @contextmanager
-def isolated_registries() -> Iterator[None]:
-    """Tests only: changes to the registries inside the block are undone afterwards."""
+def isolated_registries(*, empty: bool = False) -> Iterator[None]:
+    """Tests only: changes to the registries inside the block are undone afterwards.
+
+    With ``empty=True`` the block starts without the contributions the installed apps registered.
+    """
     saved = [(registry, registry.snapshot()) for registry in REGISTRIES]
+    if empty:
+        for registry, _items in saved:
+            registry.restore({})
     try:
         yield
     finally:
