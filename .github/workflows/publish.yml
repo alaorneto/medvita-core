@@ -1,0 +1,71 @@
+# Publica os quatro pacotes .skapp, assinados pela chave do publicador katua-tech, numa tag de versão.
+# A tag e a GitHub Release são criadas pelo workflow "Versão e release" (dev-workflow); este só anexa
+# os pacotes, o índice assinado e a chave pública. A chave privada vem do secret SKAPP_SIGNING_KEY,
+# vive só num arquivo temporário com permissão restrita e é apagada no fim; nunca é impressa.
+name: Publicação dos pacotes
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag da versão a publicar (por exemplo, v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  SKELETON_REPOSITORY: alaorneto/skeleton
+  SKELETON_REF: f38c9a02166d63e402d2c7708e616ae842441665
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tag
+        id: tag
+        run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "${GITHUB_OUTPUT}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.14"
+      - run: python -m pip install "django-skeleton @ git+https://github.com/${SKELETON_REPOSITORY}@${SKELETON_REF}"
+      - name: Pacotes assinados e índice
+        env:
+          SKAPP_SIGNING_KEY: ${{ secrets.SKAPP_SIGNING_KEY }}
+          SKAPP_PUBLIC_KEY: ${{ vars.SKAPP_PUBLIC_KEY }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set +x
+          set -euo pipefail
+          test -n "${SKAPP_SIGNING_KEY}" || { echo "Secret SKAPP_SIGNING_KEY ausente."; exit 1; }
+          test -n "${SKAPP_PUBLIC_KEY}" || { echo "Variável SKAPP_PUBLIC_KEY ausente."; exit 1; }
+          umask 077
+          key="$(mktemp)"
+          trap 'rm -f "${key}"' EXIT
+          printf '%s\n' "${SKAPP_SIGNING_KEY}" > "${key}"
+          mkdir -p dist
+          printf '%s\n' "${SKAPP_PUBLIC_KEY}" > dist/katua-tech.pub.pem
+          printf '{"katua-tech": "katua-tech.pub.pem"}' > dist/trust.json
+          version="${TAG#v}"
+          for package in med_patients med_scheduling med_records med_finance; do
+            python -m skeleton.system.packages build --app-root "${package}" --git-ref "${TAG}" \
+              --output "dist/${package}-${version}.skapp" --private-key "${key}"
+            python tools/check_package.py "dist/${package}-${version}.skapp" "${package}"
+            python -m skeleton.system.packages validate --trust-store dist/trust.json "dist/${package}-${version}.skapp"
+          done
+          python -m skeleton.system.packages index --output dist/index.json --private-key "${key}" \
+            --trust-store dist/trust.json --publisher katua-tech \
+            --expires-at "$(date -u -d '+180 days' +%Y-%m-%dT%H:%M:%SZ)" --generation "$(date -u +%s)" \
+            dist/med_*.skapp
+          rm -f "${key}"
+      - name: Anexar à release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: gh release upload "${TAG}" dist/med_*.skapp dist/index.json dist/katua-tech.pub.pem --clobber

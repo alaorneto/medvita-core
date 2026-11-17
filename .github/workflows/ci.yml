@@ -117,6 +117,17 @@ jobs:
             python -m skeleton.system.packages build --app-root "${package}" --git-ref HEAD               --output "${RUNNER_TEMP}/${package}.skapp" --private-key "${RUNNER_TEMP}/ci.pem"
             python tools/check_package.py "${RUNNER_TEMP}/${package}.skapp" "${package}"
           done
+      - name: Ensaio da publicação (validar, inspecionar, extrair e indexar com a chave descartável)
+        run: |
+          printf '{"katua-tech": "ci.pub.pem"}' > "${RUNNER_TEMP}/trust.json"
+          for package in med_patients med_scheduling med_records med_finance; do
+            python -m skeleton.system.packages validate --trust-store "${RUNNER_TEMP}/trust.json" "${RUNNER_TEMP}/${package}.skapp"
+            python -m skeleton.system.packages inspect --trust-store "${RUNNER_TEMP}/trust.json" "${RUNNER_TEMP}/${package}.skapp" > /dev/null
+            python -m skeleton.system.packages extract --trust-store "${RUNNER_TEMP}/trust.json"               --destination "${RUNNER_TEMP}/extracted/${package}" "${RUNNER_TEMP}/${package}.skapp" > /dev/null
+            test -f "${RUNNER_TEMP}/extracted/${package}/manifest.json" || find "${RUNNER_TEMP}/extracted/${package}" -name manifest.json | grep -q .
+          done
+          python -m skeleton.system.packages index --output "${RUNNER_TEMP}/index.json"             --private-key "${RUNNER_TEMP}/ci.pem" --trust-store "${RUNNER_TEMP}/trust.json" --publisher katua-tech             --expires-at "$(date -u -d '+7 days' +%Y-%m-%dT%H:%M:%SZ)" --generation 1             "${RUNNER_TEMP}"/med_*.skapp
+          python -m skeleton.system.packages validate-index --trust-store "${RUNNER_TEMP}/trust.json" "${RUNNER_TEMP}/index.json"
 
   # Agregador exigido pelo ruleset da main: falha se qualquer job acima falhar.
   ci:
