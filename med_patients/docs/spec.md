@@ -73,6 +73,19 @@ Paciente menor de 18 anos (pela data de nascimento) sem responsável vivo marcad
 | `valid_until` | | validade |
 | `is_primary` | | no máximo um principal vivo por paciente; marcar outro desmarca o anterior na mesma transação |
 
+**`Consent`** (derivada do paciente; aceita anexo: o termo digitalizado, em PDF, JPEG ou PNG, até 10 MB)
+
+| Campo | P | Regra |
+|---|---|---|
+| `patient`, `purpose`, `granted_at` | | imutáveis; a finalidade é um código registrado por uma app ativa |
+| `status` | | `granted` ou `revoked`; no máximo um `granted` vivo por paciente e finalidade |
+| `revoked_at` | | preenchido na revogação |
+| `collected_via` | | `in_person`, `paper`, `digital`, `verbal` |
+| `term_version` | | versão do termo apresentado |
+| `evidence_note` | P | observação sobre a coleta |
+
+Revogar não apaga: a linha fica com a hora da revogação, e conceder de novo cria outra linha (o histórico é completo). A própria app registra a finalidade `med_patients.contact` ("Contato por telefone, mensagem e email para assuntos do atendimento"); outras apps registram as delas com `register_consent_purpose`. O tratamento para a assistência à saúde em si não depende de consentimento (tem base legal própria): consentimento aqui é para finalidades adicionais.
+
 As linhas que pertencem a um paciente (responsáveis, convênios, consentimentos) não impedem a exclusão lógica dele: a autorização derivada as esconde junto e a restauração do paciente as traz de volta. Registros de outras apps que apontam para o paciente (consultas, prontuários, contas) continuam impedindo a exclusão.
 
 ## Acceptance

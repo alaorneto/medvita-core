@@ -34,6 +34,22 @@ Add a guardian or contact person to a patient.
 - **Erros:** NotFound; Forbidden se só lê; InvalidInput com o nome do campo; Conflict("processing_restricted", "anonymized").
 - **Efeitos:** grava o responsável; a mesma chave do mesmo ator devolve o já criado.
 
+#### `consent_purposes(*, actor) -> tuple[ConsentPurposeInfo, ...]`
+
+Consent purposes declared by the apps active in the organization.
+
+- **Autorização:** vínculo ativo do ator.
+- **Erros:** nenhum além do contrato.
+- **Efeitos:** nenhum.
+
+#### `consents(*, actor, patient_id) -> tuple[ConsentInfo, ...]`
+
+Every consent of a patient, granted and revoked, the most recent first.
+
+- **Autorização:** leitura do cadastro do paciente.
+- **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
 #### `coverages(*, actor, patient_id) -> tuple[CoverageInfo, ...]`
 
 Health plan cards of a patient, the primary one first.
@@ -74,9 +90,25 @@ Everything the app keeps about one patient.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível (a mesma resposta).
 - **Efeitos:** nenhum.
 
+#### `grant_consent(*, actor, patient_id, purpose, collected_via, term_version='', evidence_note='', idempotency_key) -> ConsentInfo`
+
+Record a granted consent for a purpose; the digitized term goes as an attachment of it.
+
+- **Autorização:** alteração no cadastro do paciente.
+- **Erros:** NotFound; Forbidden se só lê; InvalidInput para finalidade não registrada (ou de app desativada) e forma de coleta desconhecida; Conflict("already_granted") com um consentimento vivo para a mesma finalidade; Conflict("processing_restricted", "anonymized").
+- **Efeitos:** grava o consentimento e publica ``med_patients.consent_changed``; a mesma chave do mesmo ator devolve o já criado.
+
 #### `guardians(*, actor, patient_id) -> tuple[GuardianInfo, ...]`
 
 Guardians and contact people of a patient, in the order they were added.
+
+- **Autorização:** leitura do cadastro do paciente.
+- **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
+#### `has_consent(*, actor, patient_id, purpose) -> bool`
+
+Whether the patient has a live granted consent for the purpose.
 
 - **Autorização:** leitura do cadastro do paciente.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
@@ -113,6 +145,14 @@ Bring back a deleted patient with the same identifier, code and data, with CAS.
 - **Autorização:** alteração no cadastro do paciente (o cadastro precisa estar vivo).
 - **Erros:** NotFound para paciente inexistente, vivo-ilegível ou de outra organização; Conflict("stale_revision"); Conflict("integrity_conflict") quando o CPF já voltou a ser de outro paciente vivo.
 - **Efeitos:** desfaz a exclusão lógica; responsáveis, convênios e consentimentos voltam junto.
+
+#### `revoke_consent(*, actor, consent_id, expected_revision) -> ConsentInfo`
+
+Revoke a granted consent, with CAS; the row stays, with the revocation time.
+
+- **Autorização:** alteração no cadastro do paciente.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision"); Conflict("already_revoked").
+- **Efeitos:** grava a revogação e publica ``med_patients.consent_changed``.
 
 #### `search(*, actor, query='', status=None, cursor=None, page_size=25) -> Page[PatientSummary]`
 
@@ -179,6 +219,39 @@ Replace the data of a guardian, with CAS.
 - **Efeitos:** grava só os campos que mudaram; sem mudança real, não grava.
 
 ## DTOs
+
+### `ConsentInfo`
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `patient_id` | `UUID` |
+| `purpose` | `str` |
+| `status` | `str` |
+| `granted_at` | `datetime` |
+| `revoked_at` | `datetime | None` |
+| `collected_via` | `str` |
+| `term_version` | `str` |
+| `evidence_note` | `str` |
+| `revision` | `int` |
+
+### `ConsentPurpose`
+
+A purpose of data processing a patient may consent to (beyond care itself).
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `description` | `Any` |
+
+### `ConsentPurposeInfo`
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `str` |
+| `description` | `str` |
 
 ### `CoverageInfo`
 
@@ -325,15 +398,25 @@ What other apps show of a patient in a list: never contacts, documents or addres
 
 <!-- END GENERATED -->
 
+## Pontos de extensão
+
+Funções reexportadas por este módulo, chamadas no `ready()` da app que se pluga. O código é `<app_label>.<nome>` da própria app chamadora; registrar o mesmo código com outro conteúdo é `ValueError`; a contribuição só aparece com a app dela ativa na organização.
+
+| Função | Para quê |
+|---|---|
+| `register_consent_purpose(ConsentPurpose(code, label, description))` | Finalidade de consentimento LGPD |
+| `register_retention_guard(code, guard)` | Veto à exclusão ou anonimização; `guard(patient_id=...)` devolve o motivo ou `None` e roda no contexto da organização do chamador |
+
 ## Eventos publicados
 
-Payload só com `code`, `status` e `registry` (o `sysid` do cadastro, em texto): nunca nome, documento, contato ou endereço.
+Payload dos eventos de paciente só com `code`, `status` e `registry` (o `sysid` do cadastro, em texto): nunca nome, documento, contato ou endereço.
 
 | Tipo | Quando |
 |---|---|
 | `med_patients.patient_created` | `create` |
 | `med_patients.patient_updated` | `update` com mudança real |
 | `med_patients.patient_status_changed` | `set_status` com mudança real |
+| `med_patients.consent_changed` | `grant_consent` e `revoke_consent`; payload `patient`, `purpose`, `status` |
 
 ## Histórico de versões
 | Versão | Mudança |

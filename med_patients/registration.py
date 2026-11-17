@@ -171,3 +171,57 @@ def register_patient_rows() -> None:
             access_parent="patient",
         )
     )
+
+
+CONSENT_TERM_TYPES = ("application/pdf", "image/jpeg", "image/png")
+CONSENT_TERM_MAX_BYTES = 10 * 1024 * 1024
+
+
+def register_consents() -> None:
+    from django.utils.translation import gettext_lazy as _
+
+    from skeleton.events.registry import EventType, register_event_type
+    from skeleton.system.registry import AttachmentPolicy, TableSpec, register
+
+    from .extension import ConsentPurpose, register_consent_purpose
+    from .models import Consent
+
+    register(
+        TableSpec(
+            model=Consent,
+            description=_("Consentimentos dos pacientes por finalidade; o termo digitalizado vai anexo."),
+            label=_("Consentimentos"),
+            scope="organization",
+            read_fields=(
+                "patient",
+                "purpose",
+                "status",
+                "granted_at",
+                "revoked_at",
+                "collected_via",
+                "term_version",
+                "evidence_note",
+            ),
+            write_fields=(),
+            sensitive_fields=(),
+            personal_fields=("evidence_note",),
+            expose_api=False,
+            access_parent="patient",
+            attachments=AttachmentPolicy(max_bytes=CONSENT_TERM_MAX_BYTES, types=CONSENT_TERM_TYPES),
+        )
+    )
+    register_event_type(
+        EventType(
+            code=f"{APP_LABEL}.consent_changed",
+            table_key="med_patients.consent",
+            payload_fields=("patient", "purpose", "status"),
+            owner_app=APP_LABEL,
+        )
+    )
+    register_consent_purpose(
+        ConsentPurpose(
+            code="med_patients.contact",
+            label=_("Contato com o paciente"),
+            description=_("Contato por telefone, mensagem e email para assuntos do atendimento."),
+        )
+    )

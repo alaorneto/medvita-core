@@ -197,3 +197,43 @@ class PatientCoverage(OrganizationRecord):
             ),
         ]
         ordering = ("-is_primary", "insurer_name", "sysid")
+
+
+class Consent(OrganizationRecord):
+    """A consent of a patient for one purpose; revoking keeps the row, granting again adds another."""
+
+    class Status(models.TextChoices):
+        GRANTED = "granted", gettext_lazy("Concedido")
+        REVOKED = "revoked", gettext_lazy("Revogado")
+
+    class CollectedVia(models.TextChoices):
+        IN_PERSON = "in_person", gettext_lazy("Presencial")
+        PAPER = "paper", gettext_lazy("Termo em papel")
+        DIGITAL = "digital", gettext_lazy("Digital")
+        VERBAL = "verbal", gettext_lazy("Verbal")
+
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name="+")
+    purpose = models.CharField(max_length=80)
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.GRANTED)
+    granted_at = models.DateTimeField()
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    collected_via = models.CharField(max_length=12, choices=CollectedVia.choices, default=CollectedVia.IN_PERSON)
+    term_version = models.CharField(max_length=40, blank=True)
+    evidence_note = models.TextField(blank=True)
+    immutable_fields = ("patient_id", "purpose", "granted_at")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("patient", "purpose"),
+                condition=Q(status="granted", deleted_at__isnull=True),
+                name="med_patients_one_granted_consent",
+                violation_error_code="unique",
+            ),
+            models.CheckConstraint(condition=Q(status__in=("granted", "revoked")), name="med_patients_consent_status"),
+            models.CheckConstraint(
+                condition=Q(status="granted", revoked_at__isnull=True) | Q(status="revoked", revoked_at__isnull=False),
+                name="med_patients_consent_revoked_at",
+            ),
+        ]
+        ordering = ("-granted_at", "sysid")

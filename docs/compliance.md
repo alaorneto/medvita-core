@@ -28,7 +28,9 @@ O que o produto faz e o que não faz em relação às normas que se aplicam a um
 
 ## O que o produto cobre
 
-Preenchido por epic, à medida que as entregas chegam.
+### Consentimento
+
+O tratamento de dados para a assistência à saúde em si tem base legal própria (tutela da saúde) e não depende de consentimento. O `med_patients` registra consentimento para finalidades adicionais, declaradas em código pelas apps (por exemplo `med_patients.contact`, contato por telefone, mensagem e email): quem coletou, como (presencial, papel, digital, verbal), a versão do termo e o termo digitalizado anexo. Revogar guarda a linha com a hora; conceder de novo cria outra linha, então o histórico de cada finalidade é completo.
 
 ## O que o produto não cobre
 

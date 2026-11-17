@@ -27,7 +27,8 @@ from skeleton.service_api import (
 )
 from skeleton.service_api.dto import DEFAULT_PAGE_SIZE
 
-from .models import Patient, PatientCoverage, PatientGuardian, PatientRegistry
+from .extension import ConsentPurpose, register_consent_purpose, register_retention_guard
+from .models import Consent, Patient, PatientCoverage, PatientGuardian, PatientRegistry
 from .policies import (
     REGISTRY_TABLE,
     ids_allowed,
@@ -45,6 +46,9 @@ Scalar = str | int | bool | date | None
 
 __all__ = [
     "APP_ID",
+    "ConsentInfo",
+    "ConsentPurpose",
+    "ConsentPurposeInfo",
     "CoverageInfo",
     "CoverageInput",
     "GuardianInfo",
@@ -54,6 +58,8 @@ __all__ = [
     "PatientService",
     "PatientSummary",
     "RegistryInfo",
+    "register_consent_purpose",
+    "register_retention_guard",
 ]
 
 
@@ -273,6 +279,42 @@ class CoverageInput:
     is_primary: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class ConsentInfo:
+    sysid: UUID
+    patient_id: UUID
+    purpose: str
+    status: str
+    granted_at: datetime
+    revoked_at: datetime | None
+    collected_via: str
+    term_version: str
+    evidence_note: str
+    revision: int
+
+
+def consent_info(row: Consent) -> ConsentInfo:
+    return ConsentInfo(
+        row.pk,
+        row.patient_id,
+        row.purpose,
+        row.status,
+        as_utc(row.granted_at),
+        as_utc(row.revoked_at) if row.revoked_at else None,
+        row.collected_via,
+        row.term_version,
+        row.evidence_note,
+        row.revision,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ConsentPurposeInfo:
+    code: str
+    label: str
+    description: str
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -409,6 +451,17 @@ def _unmark_other_primary(actor: Any, patient_id: UUID, keep: UUID | None) -> No
     for row in rows.select_for_update():
         row.is_primary = False
         row.save(update_fields={"is_primary"})
+
+
+def _publish_consent(actor: Any, row: Consent) -> None:
+    from skeleton.service_api.events import EventService
+
+    EventService().publish(
+        actor=actor,
+        event_type=f"{APP_LABEL}.consent_changed",
+        record_id=row.pk,
+        data=(("patient", str(row.patient_id)), ("purpose", row.purpose), ("status", row.status)),
+    )
 
 
 # ------------------------------------------------------------------------------------ service
@@ -913,3 +966,130 @@ class PatientService(ServiceAPI):
         _check_revision(row, expected_revision)
         _require_changeable(_readable(actor, row.patient_id))
         row.delete()
+
+    # ------------------------------------------------------------------ consents
+
+    @service_method(read_only=True, since="0.1.0")
+    def consent_purposes(self, *, actor: Any) -> tuple[ConsentPurposeInfo, ...]:
+        """Consent purposes declared by the apps active in the organization.
+
+        Autorização: vínculo ativo do ator.
+        Erros: nenhum além do contrato.
+        Efeitos: nenhum.
+        """
+        from .extension import CONSENT_PURPOSES
+
+        return tuple(
+            ConsentPurposeInfo(purpose.code, str(purpose.label), str(purpose.description))
+            for _code, purpose in CONSENT_PURPOSES.active(actor)
+        )
+
+    @service_method(read_only=True, since="0.1.0")
+    def consents(self, *, actor: Any, patient_id: UUID) -> tuple[ConsentInfo, ...]:
+        """Every consent of a patient, granted and revoked, the most recent first.
+
+        Autorização: leitura do cadastro do paciente.
+        Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        patient = _readable(actor, patient_id)
+        rows = authorized_queryset(Consent, user=actor, action="read").filter(patient=patient)
+        return tuple(consent_info(row) for row in rows.order_by("-granted_at", "sysid")[:200])
+
+    @service_method(read_only=True, since="0.1.0")
+    def has_consent(self, *, actor: Any, patient_id: UUID, purpose: str) -> bool:
+        """Whether the patient has a live granted consent for the purpose.
+
+        Autorização: leitura do cadastro do paciente.
+        Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        patient = _readable(actor, patient_id)
+        rows = authorized_queryset(Consent, user=actor, action="read")
+        return rows.filter(patient=patient, purpose=purpose, status=Consent.Status.GRANTED).exists()
+
+    @service_method(read_only=False, since="0.1.0")
+    def grant_consent(
+        self,
+        *,
+        actor: Any,
+        patient_id: UUID,
+        purpose: str,
+        collected_via: str,
+        term_version: str = "",
+        evidence_note: str = "",
+        idempotency_key: str,
+    ) -> ConsentInfo:
+        """Record a granted consent for a purpose; the digitized term goes as an attachment of it.
+
+        Autorização: alteração no cadastro do paciente.
+        Erros: NotFound; Forbidden se só lê; InvalidInput para finalidade não registrada (ou de app
+        desativada) e forma de coleta desconhecida; Conflict("already_granted") com um consentimento
+        vivo para a mesma finalidade; Conflict("processing_restricted", "anonymized").
+        Efeitos: grava o consentimento e publica ``med_patients.consent_changed``; a mesma chave do
+        mesmo ator devolve o já criado.
+        """
+        from django.utils import timezone
+
+        from skeleton.access.policies import authorized_queryset, require_parent_action
+
+        from .extension import CONSENT_PURPOSES
+        from .services import deterministic_id
+
+        key = _key(idempotency_key)
+        if purpose not in dict(CONSENT_PURPOSES.active(actor)):
+            raise InvalidInput({"purpose": [gettext("Finalidade não registrada.")]})
+        if collected_via not in Consent.CollectedVia.values:
+            raise InvalidInput({"collected_via": [gettext("Escolha uma das opções.")]})
+        if len(str(term_version)) > 40 or len(str(evidence_note)) > 2000:
+            raise InvalidInput({"evidence_note": [gettext("Texto longo demais.")]})
+        patient = _readable(actor, patient_id)
+        require_parent_action(Consent, patient, user=actor, action="create")
+        _require_changeable(patient)
+        sysid = deterministic_id("consent", actor, key)
+        existing = Consent.objects.filter(pk=sysid).first()
+        if existing is not None:
+            return consent_info(existing)
+        live = authorized_queryset(Consent, user=actor, action="read").filter(
+            patient=patient, purpose=purpose, status=Consent.Status.GRANTED
+        )
+        if live.exists():
+            raise Conflict("already_granted")
+        row = Consent(
+            sysid=sysid,
+            organization_id=patient.organization_id,
+            patient=patient,
+            purpose=purpose,
+            status=Consent.Status.GRANTED,
+            granted_at=timezone.now(),
+            collected_via=collected_via,
+            term_version=str(term_version).strip(),
+            evidence_note=str(evidence_note).strip(),
+        )
+        row.save()
+        _publish_consent(actor, row)
+        return consent_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def revoke_consent(self, *, actor: Any, consent_id: UUID, expected_revision: int) -> ConsentInfo:
+        """Revoke a granted consent, with CAS; the row stays, with the revocation time.
+
+        Autorização: alteração no cadastro do paciente.
+        Erros: NotFound; Forbidden; Conflict("stale_revision"); Conflict("already_revoked").
+        Efeitos: grava a revogação e publica ``med_patients.consent_changed``.
+        """
+        from django.utils import timezone
+
+        row = _row(actor, Consent, consent_id, field="consent_id", write=True)
+        _check_revision(row, expected_revision)
+        if row.status == Consent.Status.REVOKED:
+            raise Conflict("already_revoked")
+        row.status = Consent.Status.REVOKED
+        row.revoked_at = timezone.now()
+        row.save(update_fields={"status", "revoked_at"})
+        _publish_consent(actor, row)
+        return consent_info(row)
