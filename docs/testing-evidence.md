@@ -48,3 +48,8 @@ Mesmo ambiente.
 - Integração com o livro contábil provada pelos serviços do livro: título por conta, baixa por pagamento com estorno, lançamento por suprimento e sangria, saldo da conta de dinheiro igual ao resumo do dia.
 - Valor por extenso sem banco (`med_finance/tests/unit`); páginas e API em `test_views.py`, com varredura de script inline, `style=` e `on*`.
 - `python -m django check --fail-level WARNING`, `makemigrations --check`, `tools/service_reference.py --check` e `tools/sync_leaves.py --check` → limpos.
+
+## Epic F: integração (2026-11-17)
+
+- `tests/test_clinic_journey.py`: o dia inteiro da clínica pelos serviços públicos (cadastro, marcação, chegada, atendimento assinado, atestado, conta da consulta, Pix e dinheiro, recibos, fechamento do caixa), seguido da varredura de privacidade: nenhum nome, CPF, telefone, queixa ou alergia do cenário em eventos de domínio, evento do calendário, título do livro, auditoria (redigida) ou logs.
+- `tests/test_isolation_matrix.py`: matriz papel × registro, organização B sem nada da A, escrita pelos contêineres, apps desligadas e paciente com registros não excluído.
