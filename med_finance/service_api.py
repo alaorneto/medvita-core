@@ -1660,3 +1660,43 @@ class FinanceService(ServiceAPI):
 
         receipt = common.row(actor, Receipt, receipt_id, field="receipt_id", write=False)
         return verify_seal(receipt, extra=receipt_extra(receipt))
+
+    # ------------------------------------------------------------------ agenda
+
+    @service_method(read_only=False, since="0.1.0")
+    def charge_for_appointment(
+        self, *, actor: Any, appointment_id: UUID, confirm: bool = True, idempotency_key: str
+    ) -> ChargeDetail:
+        """The charge of a private appointment, created on first use from its billing code and the desk's price list.
+
+        The same appointment always returns the same charge (origin ``med_scheduling``).
+        Autorização: leitura da consulta e do paciente; alteração no caixa padrão.
+        Erros: NotFound; Forbidden; InvalidInput("not_private") para convênio ou cortesia,
+        InvalidInput para consulta cancelada ou sem preço ativo para o código de cobrança.
+        Efeitos: os de ``create_charge``.
+        """
+        from applications.med_scheduling.service_api import SchedulingService
+
+        key = common.key(idempotency_key)
+        appointment = (
+            SchedulingService()
+            .appointment(actor=actor, appointment_id=as_uuid(appointment_id, field="appointment_id"))
+            .appointment
+        )
+        existing = Charge.objects.filter(origin_app="med_scheduling", origin_key=str(appointment.sysid)).first()
+        if existing is not None:
+            return _charge_detail(actor, _charge(actor, existing.pk))
+        if appointment.payment_kind != "private":
+            raise InvalidInput({"appointment_id": [gettext("Consulta de convênio ou cortesia não gera conta.")]})
+        if appointment.status in ("cancelled", "no_show"):
+            raise InvalidInput({"appointment_id": [gettext("A consulta foi cancelada ou o paciente faltou.")]})
+        return self.create_charge(
+            actor=actor,
+            patient_id=appointment.patient_id,
+            items=(ChargeItemInput(code=appointment.billing_code),),
+            appointment_id=appointment.sysid,
+            origin_app="med_scheduling",
+            origin_key=str(appointment.sysid),
+            confirm=confirm,
+            idempotency_key=key,
+        )

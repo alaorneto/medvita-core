@@ -61,6 +61,9 @@ Os recibos do financeiro são numerados por ano sem lacunas, selados na emissão
 
 ## Pendências do negócio
 
+- Confirmar com o contador o prazo de guarda dos registros financeiros (o produto veta anonimizar o paciente com conta dos últimos 5 anos).
+
+
 Fora do software, a resolver pelo responsável:
 
 1. Responsável técnico médico da plataforma e inscrição no CRM (Resolução CFM 2.299/2021).

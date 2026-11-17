@@ -22,4 +22,7 @@ class MedFinanceConfig(AppConfig):
         registration.register_charges()
         registration.register_payments()
         registration.register_receipts()
+        from . import integration
+
+        integration.register()
         registration.register_contributions()

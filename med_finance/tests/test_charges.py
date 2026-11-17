@@ -118,7 +118,8 @@ def test_cancel(ready):
 
 def test_origin_returns_the_same_charge(ready):
     patient = new_patient(ready)
-    with isolated_origins():
+    with isolated_origins() as origins:
+        origins.clear()  # Start without the origins the installed apps registered.
         register_charge_origin(ChargeOrigin("med_scheduling", "Agenda"))
         first = create(ready, patient, key="o1", origin_app="med_scheduling", origin_key="appointment-1").charge
         again = create(ready, patient, key="o2", origin_app="med_scheduling", origin_key="appointment-1").charge

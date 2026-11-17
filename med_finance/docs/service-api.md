@@ -56,6 +56,14 @@ One charge with its items.
 - **Erros:** NotFound para conta inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
+#### `charge_for_appointment(*, actor, appointment_id, confirm=True, idempotency_key) -> ChargeDetail`
+
+The charge of a private appointment, created on first use from its billing code and the desk's price list.
+
+- **Autorização:** leitura da consulta e do paciente; alteração no caixa padrão.
+- **Erros:** NotFound; Forbidden; InvalidInput("not_private") para convênio ou cortesia, InvalidInput para consulta cancelada ou sem preço ativo para o código de cobrança.
+- **Efeitos:** os de ``create_charge``.
+
 #### `charges(*, actor, patient_id=None, status=None, desk_id=None, start=None, end=None, cursor=None, page_size=50) -> Page[ChargeInfo]`
 
 Charges of the desks the actor reads, newest first, filtered by patient, status, desk or due date.

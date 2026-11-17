@@ -76,6 +76,13 @@ Valores sempre em inteiros de centavos.
 - `void_receipt` grava a anulação; o recibo continua íntegro (`verify_receipt` válido), aparece como anulado e o número não volta. O pagamento só é estornado com o recibo anulado.
 - O recibo não substitui documento fiscal (NFS-e, Receita Saúde).
 
+### Agenda e página do paciente
+
+- "Receber" (`med_finance.collect`) aparece nas consultas em "chegou", "em atendimento" e "concluída". `charge_for_appointment` cria (ou devolve) a conta da consulta particular com o código de cobrança do tipo de atendimento e o preço da tabela do caixa padrão, origem `med_scheduling`; convênio, cortesia, consulta cancelada ou falta não geram conta.
+- **Sem conta automática por evento.** A conta não nasce sozinha na chegada ou na conclusão: o consumidor de eventos do núcleo roda em contexto de sistema, sem ator, e nesse contexto não há como numerar a conta (`SequenceService`) nem ler o título do livro. A recepção usa "Receber"; a lacuna está registrada no núcleo.
+- Aba "Financeiro" (`med_finance.account`, ordem 40), visível só para quem lê algum caixa; linha do tempo "Conta emitida" e "Pagamento recebido", sem valores; relatório do titular com contas (código, vencimento, total, situação) e recibos (número, valor).
+- Guarda de retenção `med_finance.retention`: veta excluir ou anonimizar o paciente com conta dos últimos 5 anos (guarda fiscal; confirme o prazo com o contador).
+
 ## Acceptance
 
 - O `setup` prepara o livro com as chaves do financeiro vinculadas, é idempotente pela chave e só o administrador o faz; com o livro desativado, nada é criado.
@@ -85,3 +92,4 @@ Valores sempre em inteiros de centavos.
 - O título da conta confirmada não leva nome nem documento do pagador; a mesma origem devolve a mesma conta.
 - Pagamento parcial e depois o restante quitam a conta e o título; o estorno reabre os dois.
 - Recibos emitidos têm números consecutivos no ano; a anulação mantém o recibo e o número.
+- A mesma consulta particular gera uma conta só; convênio não gera conta; a conta recente veta anonimizar o paciente.
