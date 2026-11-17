@@ -3,4 +3,5 @@
 <a href="{% url 'med_finance:charges' organization_id %}"{% if section == "charges" %} aria-current="page"{% endif %}>{% translate "Contas" %}</a>
 <a href="{% url 'med_finance:charge_new' organization_id %}"{% if section == "new" %} aria-current="page"{% endif %}>{% translate "Nova conta" %}</a>
 <a href="{% url 'med_finance:prices' organization_id %}"{% if section == "prices" %} aria-current="page"{% endif %}>{% translate "Preços" %}</a>
+<a href="{% url 'med_finance:daily' organization_id %}"{% if section == "reports" %} aria-current="page"{% endif %}>{% translate "Relatórios" %}</a>
 </nav>

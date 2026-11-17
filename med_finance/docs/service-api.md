@@ -112,6 +112,14 @@ The open session of a cash desk (the default one when not informed), or ``None``
 - **Erros:** NotFound para caixa ilegível ou sem caixa padrão.
 - **Efeitos:** nenhum.
 
+#### `daily_summary(*, actor, date, desk_id=None) -> DailySummary`
+
+One local day of the desks the actor reads: received by method, reversals, charges created and open.
+
+- **Autorização:** leitura de cada caixa.
+- **Erros:** InvalidInput para data inválida; NotFound para caixa ilegível.
+- **Efeitos:** nenhum.
+
 #### `desks(*, actor) -> tuple[DeskInfo, ...]`
 
 The cash desks the actor reads, the default first.
@@ -192,6 +200,14 @@ Receipts of the desks the actor reads, newest first, by charge or year.
 - **Erros:** InvalidInput para ano, cursor ou tamanho inválidos.
 - **Efeitos:** nenhum.
 
+#### `receivables(*, actor, as_of=None) -> ReceivablesReport`
+
+Open balances of the charges by days overdue: to come, 1–30, 31–60, 61–90 and over 90.
+
+- **Autorização:** leitura de cada caixa.
+- **Erros:** InvalidInput para data inválida.
+- **Efeitos:** nenhum.
+
 #### `register_payment(*, actor, charge_id, method, amount, expected_revision, idempotency_key, installments=1, authorization_code='', issue_receipt=True) -> PaymentInfo`
 
 Receive a payment of a charge in the open session of its desk and settle the title in the ledger.
@@ -266,6 +282,14 @@ Void a receipt: it stays intact, marked as voided; the number is never reused.
 
 ## DTOs
 
+### `AgingRow`
+
+| Campo | Tipo |
+|---|---|
+| `name` | `str` |
+| `amount` | `int` |
+| `count` | `int` |
+
 ### `ChargeDetail`
 
 | Campo | Tipo |
@@ -329,6 +353,18 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 |---|---|
 | `app_label` | `str` |
 | `label` | `Any` |
+
+### `DailySummary`
+
+| Campo | Tipo |
+|---|---|
+| `date` | `date` |
+| `by_method` | `tuple[MethodTotal, ...]` |
+| `received` | `int` |
+| `reversed` | `int` |
+| `charges_created` | `int` |
+| `charged` | `int` |
+| `open_due` | `int` |
 
 ### `DeskInfo`
 
@@ -430,6 +466,14 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 | `voided_at` | `datetime | None` |
 | `revision` | `int` |
 
+### `ReceivablesReport`
+
+| Campo | Tipo |
+|---|---|
+| `as_of` | `date` |
+| `buckets` | `tuple[AgingRow, ...]` |
+| `total` | `int` |
+
 ### `SessionInfo`
 
 | Campo | Tipo |
@@ -461,9 +505,27 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 
 <!-- END GENERATED -->
 
+## Eventos publicados
+
+| Tipo | Quando | Payload |
+|---|---|---|
+| `med_finance.charge_confirmed`, `_paid`, `_cancelled` | confirmação, quitação e cancelamento da conta | `code`, `desk`, `patient`, `status`, `total`, `origin_app`, `origin_key` |
+| `med_finance.payment_registered`, `_reversed` | `register_payment`, `reverse_payment` | `charge`, `method`, `amount`, `status` |
+| `med_finance.receipt_issued`, `_voided` | emissão e anulação do recibo | `number`, `charge`, `amount`, `seal_digest` |
+
+Nunca nome nem documento do paciente ou do pagador.
+
+## Pontos de extensão
+
+`register_charge_origin(ChargeOrigin(app_label, label))`, reexportada por este módulo e chamada no `ready()`: declara uma app que cria contas por `create_charge(origin_app=..., origin_key=...)`; a mesma origem devolve a mesma conta. O financeiro registra a origem `med_scheduling` (a consulta).
+
 ## Contribuições a outras apps
 
-Registradas no `ready()`: o passo de configuração `med_finance.desk` de `med_patients` e as chaves de conta `med_finance.*` do livro contábil.
+Registradas no `ready()`: o passo de configuração `med_finance.desk`, a aba `med_finance.account` (com `visible`), a linha do tempo e o relatório do titular `med_finance.finance` e a guarda `med_finance.retention` de `med_patients`; a ação `med_finance.collect` das consultas de `med_scheduling`; as chaves de conta `med_finance.*` e as regras `med_finance.cash_supply` e `cash_withdrawal` do livro.
+
+## API REST
+
+As rotas de `/api/v1/o/<org>/apps/med_finance/` estão em `docs/spec.md` (seção "API REST").
 
 ## Histórico de versões
 | Versão | Mudança |

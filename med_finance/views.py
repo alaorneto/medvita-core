@@ -580,3 +580,31 @@ def setup_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                 messages.success(request, gettext("Financeiro configurado."))
                 return redirect("med_finance:desk", organization_id)
     return render(request, "med_finance/setup.html", _context(organization_id, form=form), status=status)
+
+
+# ------------------------------------------------------------------------------------ reports
+
+
+@tenant_page()
+def daily_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    from datetime import date as day_type
+
+    from django.utils import timezone
+
+    value = request.GET.get("date")
+    try:
+        day = day_type.fromisoformat(value) if value else timezone.localdate()
+    except ValueError:
+        raise Http404 from None
+    if not _service().desks(actor=request.user):
+        raise Http404
+    summary = _service().daily_summary(actor=request.user, date=day)
+    return render(request, "med_finance/daily.html", _context(organization_id, summary=summary))
+
+
+@tenant_page()
+def receivables_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    if not _service().desks(actor=request.user):
+        raise Http404
+    report = _service().receivables(actor=request.user)
+    return render(request, "med_finance/receivables.html", _context(organization_id, report=report))

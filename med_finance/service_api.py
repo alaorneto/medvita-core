@@ -52,6 +52,9 @@ MEMBER_TABLES = (PRICE_LIST_TABLE, DESK_TABLE)
 MAX_AMOUNT = 10**11  # R$ 1 bilhão em centavos: a sanity bound, not a business rule.
 
 __all__ = [
+    "ReceivablesReport",
+    "DailySummary",
+    "AgingRow",
     "ReceiptInfo",
     "PaymentInfo",
     "ChargeDetail",
@@ -621,6 +624,31 @@ def _confirm(actor: Any, charge: Charge) -> None:
 
 def _charge(actor: Any, charge_id: object, *, write: bool = False, lock: bool = False) -> Charge:
     return common.row(actor, Charge, charge_id, field="charge_id", write=write, lock=lock)
+
+
+@dataclass(frozen=True, slots=True)
+class DailySummary:
+    date: date
+    by_method: tuple[MethodTotal, ...]
+    received: int
+    reversed: int
+    charges_created: int
+    charged: int
+    open_due: int
+
+
+@dataclass(frozen=True, slots=True)
+class AgingRow:
+    name: str
+    amount: int
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReceivablesReport:
+    as_of: date
+    buckets: tuple[AgingRow, ...]
+    total: int
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -1700,3 +1728,93 @@ class FinanceService(ServiceAPI):
             confirm=confirm,
             idempotency_key=key,
         )
+
+    # ------------------------------------------------------------------ reports
+
+    @service_method(read_only=True, since="0.1.0")
+    def daily_summary(self, *, actor: Any, date: date, desk_id: UUID | None = None) -> DailySummary:
+        """One local day of the desks the actor reads: received by method, reversals, charges created and open.
+
+        Consultas agregadas no banco: o número de consultas não cresce com o de contas.
+        Autorização: leitura de cada caixa.
+        Erros: InvalidInput para data inválida; NotFound para caixa ilegível.
+        Efeitos: nenhum.
+        """
+        from datetime import datetime as moment
+        from datetime import time, timedelta
+
+        from django.db.models import Count, Sum
+
+        from skeleton.access.policies import authorized_queryset
+
+        if not isinstance(date, type(timezone.localdate())):
+            raise InvalidInput({"date": [gettext("Informe uma data.")]})
+        zone = timezone.get_current_timezone()
+        start = moment.combine(date, time(0), tzinfo=zone)
+        end = start + timedelta(days=1)
+        payments = authorized_queryset(Payment, user=actor, action="read").filter(
+            received_at__gte=start, received_at__lt=end
+        )
+        charges = authorized_queryset(Charge, user=actor, action="read")
+        if desk_id is not None:
+            desk = _container(actor, CashDesk, desk_id, field="desk_id")
+            payments = payments.filter(charge__desk=desk)
+            charges = charges.filter(desk=desk)
+        received = (
+            payments.filter(status="registered")
+            .values("method")
+            .annotate(total=Sum("amount"), count=Count("sysid"))
+            .order_by("method")
+        )
+        reversed_total = payments.filter(status="reversed").aggregate(total=Sum("amount"))["total"] or 0
+        created = charges.filter(created_at__gte=start, created_at__lt=end).exclude(status="draft")
+        open_rows = charges.filter(due_date=date, status__in=("open", "partially_paid"))
+        by_method = tuple(MethodTotal(row["method"], row["total"] or 0, row["count"]) for row in received)
+        return DailySummary(
+            date,
+            by_method,
+            sum(item.amount for item in by_method),
+            int(reversed_total),
+            created.count(),
+            int(created.aggregate(total=Sum("total"))["total"] or 0),
+            open_rows.count(),
+        )
+
+    @service_method(read_only=True, since="0.1.0")
+    def receivables(self, *, actor: Any, as_of: date | None = None) -> ReceivablesReport:
+        """Open balances of the charges by days overdue: to come, 1–30, 31–60, 61–90 and over 90.
+
+        Calculado das contas desta app; o relatório de vencimentos do livro (``aging``) é o da contabilidade.
+        Autorização: leitura de cada caixa.
+        Erros: InvalidInput para data inválida.
+        Efeitos: nenhum.
+        """
+        from datetime import timedelta
+
+        from django.db.models import Case, CharField, Count, F, Sum, Value, When
+
+        from skeleton.access.policies import authorized_queryset
+
+        day = as_of or timezone.localdate()
+        if not isinstance(day, type(timezone.localdate())):
+            raise InvalidInput({"as_of": [gettext("Informe uma data.")]})
+        bucket = Case(
+            When(due_date__gte=day, then=Value("current")),
+            When(due_date__gte=day - timedelta(days=30), then=Value("1-30")),
+            When(due_date__gte=day - timedelta(days=60), then=Value("31-60")),
+            When(due_date__gte=day - timedelta(days=90), then=Value("61-90")),
+            default=Value("90+"),
+            output_field=CharField(),
+        )
+        rows = (
+            authorized_queryset(Charge, user=actor, action="read")
+            .filter(status__in=("open", "partially_paid"))
+            .annotate(bucket=bucket)
+            .values("bucket")
+            .annotate(total=Sum(F("total") - F("paid_total")), count=Count("sysid"))
+        )
+        found = {row["bucket"]: (int(row["total"] or 0), row["count"]) for row in rows}
+        buckets = tuple(
+            AgingRow(name, *found.get(name, (0, 0))) for name in ("current", "1-30", "31-60", "61-90", "90+")
+        )
+        return ReceivablesReport(day, buckets, sum(item.amount for item in buckets))

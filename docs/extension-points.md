@@ -38,7 +38,7 @@ Funções exportadas pelo `service_api` da app dona, chamadas no `ready()` da ap
 | `med_scheduling` | `register_appointment_action(AppointmentAction(code, label, url_name, statuses, order))` | Botão numa consulta ("Atender", "Receber") |
 | `med_records` | `register_section_type(SectionType(code, label, fields, version, has_text))` | Tipo de seção estruturada do atendimento; `fields` são `SectionField(name, label, kind, required, unit, min, max, choices)` com `kind` em `text`, `long_text`, `integer`, `decimal`, `boolean`, `choice`, `date`, `icd10_list`. Uma `version` nova convive com as antigas: o formulário usa a maior, a seção gravada guarda a dela |
 | `med_records` | `register_document_kind(DocumentKind(code, label, default_body, notice))` | Tipo de documento clínico; o texto padrão aceita só os marcadores `{{patient_name}}`, `{{date}}` e `{{professional_name}}`, trocados literalmente |
-| `med_finance` | `register_charge_origin(ChargeOrigin(app_label, label))` | App que cria contas por `FinanceService.create_charge(origin_app=...)` |
+| `med_finance` | `register_charge_origin(ChargeOrigin(app_label, label))` | App que cria contas por `FinanceService.create_charge(origin_app=..., origin_key=...)`; a mesma origem devolve a mesma conta |
 
 Um pacote de especialidade registra os próprios tipos de seção (por exemplo, `<app>.ophthalmic_exam` com acuidade visual e pressão intraocular) e de documento; o prontuário os valida e mostra como os básicos, sem mudar nada em `med_records`.
 

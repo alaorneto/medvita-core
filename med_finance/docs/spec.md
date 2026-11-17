@@ -83,6 +83,12 @@ Valores sempre em inteiros de centavos.
 - Aba "Financeiro" (`med_finance.account`, ordem 40), visível só para quem lê algum caixa; linha do tempo "Conta emitida" e "Pagamento recebido", sem valores; relatório do titular com contas (código, vencimento, total, situação) e recibos (número, valor).
 - Guarda de retenção `med_finance.retention`: veta excluir ou anonimizar o paciente com conta dos últimos 5 anos (guarda fiscal; confirme o prazo com o contador).
 
+### Relatórios
+
+- `daily_summary(date)`: num dia local, o recebido por forma de pagamento, os estornos, as contas emitidas (quantidade e total) e as contas do dia em aberto; os totais em dinheiro batem com o saldo da conta de dinheiro no livro.
+- `receivables(as_of)`: saldos em aberto por faixa de atraso (a vencer, 1–30, 31–60, 61–90, acima de 90 dias), calculados das contas desta app; o relatório de vencimentos do livro (`aging`) é o da contabilidade.
+- As duas consultas são agregadas no banco: o número de consultas não cresce com o de contas.
+
 ### Páginas
 
 Em `/o/<org>/apps/med_finance/` (nomes `med_finance:<nome>`); toda leitura e escrita passa pelo `FinanceService`. Valores são digitados em reais com vírgula ("250,00"), convertidos para centavos por `skeleton.common.money.parse` (nunca `float`), e mostrados com o filtro `brl`.
@@ -95,6 +101,7 @@ Em `/o/<org>/apps/med_finance/` (nomes `med_finance:<nome>`); toda leitura e esc
 | `collect` | Entrada pela consulta ("Receber"): a conta da consulta |
 | `receipt`, `receipt_print` | Recibo com o valor por extenso, o resumo do selo, o aviso fiscal e "ANULADO" quando for o caso; anular |
 | `prices` | Tabela de preços: itens, incluir, desativar |
+| `daily`, `receivables` | Resumo do dia e contas a receber por atraso |
 | `patient_section` | Aba "Financeiro" do paciente: contas e saldo |
 | `setup` | Configuração inicial (administradores) |
 
