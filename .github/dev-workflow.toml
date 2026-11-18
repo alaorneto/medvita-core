@@ -132,10 +132,49 @@ require_analysis = false
 # Onde a versão é escrita. `search` é texto literal com {current}; a troca padrão põe {new} no
 # lugar. Use `regex` + `replace` quando o texto não contém a versão corrente inteira.
 # Marcadores: {current} {new} e, para cada um, _pep440 _core _major _minor _patch _next_minor _next_major.
-# Nenhum arquivo de versão reconhecido: a versão vive só nas tags. Para escrevê-la em arquivos:
-# [[versioning.files]]
-# path = "caminho/do/arquivo"
-# search = 'version = "{current}"'
+# As quatro apps andam num só trem de versão: a automação escreve o mesmo número nos quatro
+# manifestos e prende ao minor corrente as faixas de dependência entre elas.
+[[versioning.files]]
+path = "med_patients/manifest.json"
+search = '"version": "{current}"'
+
+[[versioning.files]]
+path = "med_scheduling/manifest.json"
+search = '"version": "{current}"'
+
+[[versioning.files]]
+path = "med_records/manifest.json"
+search = '"version": "{current}"'
+
+[[versioning.files]]
+path = "med_finance/manifest.json"
+search = '"version": "{current}"'
+
+[[versioning.files]]
+path = "med_scheduling/manifest.json"
+regex = '"io\.katua\.sk\.med\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.katua.sk.med.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+
+[[versioning.files]]
+path = "med_records/manifest.json"
+regex = '"io\.katua\.sk\.med\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.katua.sk.med.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+
+[[versioning.files]]
+path = "med_records/manifest.json"
+regex = '"io\.katua\.sk\.med\.scheduling": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.katua.sk.med.scheduling": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+
+[[versioning.files]]
+path = "med_finance/manifest.json"
+regex = '"io\.katua\.sk\.med\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.katua.sk.med.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+
+[[versioning.files]]
+path = "med_finance/manifest.json"
+regex = '"io\.katua\.sk\.med\.scheduling": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.katua.sk.med.scheduling": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+
 
 # Contratos que outras apps consomem. Remover um arquivo pede major (minor em 0.x).
 [[versioning.public_surfaces]]

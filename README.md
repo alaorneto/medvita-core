@@ -1,5 +1,7 @@
 # sk_med_core
 
+[![CI](https://github.com/alaorneto/sk_med_core/actions/workflows/ci.yml/badge.svg)](https://github.com/alaorneto/sk_med_core/actions/workflows/ci.yml)
+
 Suíte proprietária de apps para consultórios e pequenas clínicas sobre o [Skeleton](https://github.com/alaorneto/skeleton). O repositório guarda as quatro apps do plano base; cada uma é publicada como um pacote `.skapp` assinado.
 
 | Pacote e label | `app_id` | Nome exibido | Depende de |

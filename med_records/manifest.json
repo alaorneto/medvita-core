@@ -1,0 +1,65 @@
+{
+  "app_config": "applications.med_records.apps.MedRecordsConfig",
+  "app_id": "io.katua.sk.med.records",
+  "app_label": "med_records",
+  "compatibility": {
+    "django": ">=6.1,<6.2",
+    "python": ">=3.12,<3.15",
+    "skeleton": ">=0.0.0,<0.1.0"
+  },
+  "conflicts": {},
+  "dependencies": {
+    "io.katua.sk.med.patients": ">=0.0.0,<0.1.0",
+    "io.katua.sk.med.scheduling": ">=0.0.0,<0.1.0"
+  },
+  "description": "Prontuário: arquivos clínicos, atendimentos selados, alergias, medicamentos e documentos simples.",
+  "files": [],
+  "kind": "app",
+  "lifecycle": {
+    "backup": true,
+    "data_retention": "retain",
+    "maintenance": true
+  },
+  "manifest_version": 2,
+  "migrations": {
+    "from_versions": ">=0.0.0",
+    "labels": [
+      "med_records"
+    ],
+    "leaves": [
+      "0002_record_infrastructure"
+    ]
+  },
+  "name": "Prontuário",
+  "package_name": "med_records",
+  "publisher": "katua-tech",
+  "python_dependencies": [],
+  "runtime": {
+    "administration": {
+      "configuration_sections": [],
+      "screens": [],
+      "sections": []
+    },
+    "api_urls": "applications.med_records.api_urls",
+    "configuration_fields": [],
+    "default_enabled": false,
+    "documentation_root": "docs",
+    "model_ui": [],
+    "navigation": [
+      {
+        "action": "read",
+        "label": "Prontuário",
+        "table_key": "med_records.archive",
+        "url_name": "med_records:home"
+      }
+    ],
+    "service_api": {
+      "classes": [
+        "ArchiveService"
+      ],
+      "module": "applications.med_records.service_api"
+    },
+    "urls": "applications.med_records.urls"
+  },
+  "version": "0.0.0"
+}

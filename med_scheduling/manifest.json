@@ -1,0 +1,65 @@
+{
+  "app_config": "applications.med_scheduling.apps.MedSchedulingConfig",
+  "app_id": "io.katua.sk.med.scheduling",
+  "app_label": "med_scheduling",
+  "compatibility": {
+    "django": ">=6.1,<6.2",
+    "python": ">=3.12,<3.15",
+    "skeleton": ">=0.0.0,<0.1.0"
+  },
+  "conflicts": {},
+  "dependencies": {
+    "io.katua.sk.med.patients": ">=0.0.0,<0.1.0",
+    "org.skeleton.calendar": ">=0.0.0,<0.1.0"
+  },
+  "description": "Agenda médica: consultório, profissionais, salas, grade de horários, consultas e lista de espera.",
+  "files": [],
+  "kind": "app",
+  "lifecycle": {
+    "backup": true,
+    "data_retention": "retain",
+    "maintenance": true
+  },
+  "manifest_version": 2,
+  "migrations": {
+    "from_versions": ">=0.0.0",
+    "labels": [
+      "med_scheduling"
+    ],
+    "leaves": [
+      "0002_record_infrastructure"
+    ]
+  },
+  "name": "Agenda médica",
+  "package_name": "med_scheduling",
+  "publisher": "katua-tech",
+  "python_dependencies": [],
+  "runtime": {
+    "administration": {
+      "configuration_sections": [],
+      "screens": [],
+      "sections": []
+    },
+    "api_urls": "applications.med_scheduling.api_urls",
+    "configuration_fields": [],
+    "default_enabled": false,
+    "documentation_root": "docs",
+    "model_ui": [],
+    "navigation": [
+      {
+        "action": "read",
+        "label": "Agenda médica",
+        "table_key": "med_scheduling.practice",
+        "url_name": "med_scheduling:home"
+      }
+    ],
+    "service_api": {
+      "classes": [
+        "PracticeService"
+      ],
+      "module": "applications.med_scheduling.service_api"
+    },
+    "urls": "applications.med_scheduling.urls"
+  },
+  "version": "0.0.0"
+}

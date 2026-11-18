@@ -1,0 +1,4 @@
+# Arquivos do repositório que não fazem parte do pacote: package build/doctor --git-ref
+# exportam esta subárvore com git archive, que respeita export-ignore.
+.gitattributes export-ignore
+AGENTS.md export-ignore
