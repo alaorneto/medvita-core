@@ -1,0 +1,6 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Configuração da clínica" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Administração" %}</p><h1>{% translate "Configuração da clínica" %}</h1><p class="page-description">{% if done %}{% translate "Tudo configurado." %}{% else %}{% translate "Siga os passos na ordem; cada um abre a configuração da app correspondente." %}{% endif %}</p></div></div>
+<ol class="mb-6">{% for row in rows %}<li class="mb-2">{% if row.step.done %}<span class="badge badge-success">{% translate "Feito" %}</span>{% else %}<span class="badge badge-warning">{% translate "Pendente" %}</span>{% endif %} {% if row.url %}<a href="{{ row.url }}">{{ row.step.label }}</a>{% else %}{{ row.step.label }}{% endif %}</li>{% empty %}<li>{% translate "Nenhuma app ativa com configuração." %}</li>{% endfor %}</ol>
+<p class="helptext">{% translate "Antes, crie os grupos Recepção, Profissionais de saúde e Financeiro na tela de acesso da organização." %}</p>
+{% endblock %}

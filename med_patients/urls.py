@@ -7,6 +7,7 @@ urlpatterns = [
     path("", views.patient_list, name="list"),
     path("new/", views.patient_create, name="create"),
     path("setup/", views.registry_setup, name="setup"),
+    path("setup/clinic/", views.clinic_setup, name="clinic_setup"),
     path("files/<uuid:attachment_id>/", views.attachment_download, name="attachment"),
     path("imports/", views.imports, name="imports"),
     path("imports/<uuid:batch_id>/", views.import_detail, name="import"),

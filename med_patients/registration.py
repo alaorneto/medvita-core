@@ -286,3 +286,33 @@ def register_imports() -> None:
                 owner_app=APP_LABEL,
             )
         )
+
+
+def register_setup_steps() -> None:
+    """The first step of the clinic setup list: the patient registry."""
+    from django.utils.translation import gettext_lazy
+
+    from .extension import SetupStep, register_setup_step
+
+    register_setup_step(
+        SetupStep("med_patients.registry", gettext_lazy("Pacientes"), "med_patients:setup", _has_registry, order=10)
+    )
+
+
+def _has_registry(*, actor) -> bool:
+    from .service_api import PatientService
+
+    return bool(PatientService().registries(actor=actor))
+
+
+def register_quota_metrics() -> None:
+    """The number of active patients: measured for the plans, never limited by this app."""
+    from skeleton.service_api.billing import register_quota_metric
+
+    register_quota_metric("med_patients.active_patients", count_active_patients)
+
+
+def count_active_patients(organization_id) -> int:
+    from .models import Patient
+
+    return Patient.objects.filter(organization_id=organization_id, status="active").count()

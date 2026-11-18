@@ -92,7 +92,7 @@ def test_draft_items_confirmation_and_validation(ready, subtests):
         "bad discount": {"items": (ChargeItemInput(description="X", unit_amount=100, discount_amount=200),)},
         "bad payer": {"payer_document": "123"},
         "zero total": {"items": (ChargeItemInput(description="X", unit_amount=0),)},
-        "unregistered origin": {"origin_app": "med_example", "origin_key": "x"},
+        "unregistered origin": {"origin_app": "med_unknown", "origin_key": "x"},
     }
     for name, values in cases.items():
         with subtests.test(name), pytest.raises(InvalidInput):

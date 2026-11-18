@@ -307,3 +307,16 @@ def register_waitlist() -> None:
         JobType(code=EXPIRE_WAITLIST_JOB, handler=jobs.expire_waitlist, run_as="system", owner_app=APP_LABEL)
     )
     register_periodic(EXPIRE_WAITLIST_JOB, EXPIRE_WAITLIST_JOB, daily_at=time(6, 17))
+
+
+def register_quota_metrics() -> None:
+    """The number of active professionals, a metric a plan of the platform billing can limit."""
+    from skeleton.service_api.billing import register_quota_metric
+
+    register_quota_metric("med_scheduling.active_professionals", count_active_professionals)
+
+
+def count_active_professionals(organization_id) -> int:
+    from .models import Professional
+
+    return Professional.objects.filter(organization_id=organization_id, is_active=True).count()

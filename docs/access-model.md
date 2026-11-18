@@ -23,14 +23,17 @@
 
 ## Acesso em espelho
 
-Dois contêineres andam com uma tabela de outra app e o acesso das duas tem de coincidir:
+A agenda anda com uma tabela de outra app e o acesso das duas tem de coincidir:
 
 | Contêiner | Espelho | Quem iguala |
 |---|---|---|
 | `Schedule` | o calendário dele no `skeleton_calendar` | `SchedulingService.set_schedule_access` |
-| `CashDesk` | o livro dele no `skeleton_ledger` | `FinanceService.set_desk_access` |
 
-Mudar o acesso de um lado só, pela tela genérica de acesso do núcleo, quebra a projeção (consultas que não aparecem no calendário, recebimentos recusados pelo livro). Use sempre o método da app.
+Mudar o acesso de um lado só, pela tela genérica de acesso do núcleo, quebra a projeção (consultas que não aparecem no calendário). Use sempre o método da app.
+
+O caixa (`CashDesk`) **não** tem espelho: o livro contábil autoriza títulos, baixas e lançamentos de regra pelo registro de origem do financeiro (a conta, o pagamento, o movimento), e o caixa guarda as contas do livro de cada forma de pagamento, resolvidas no `setup` (ADR-002 do financeiro).
+
+A matriz "quem lê o quê" do exemplo abaixo é conferida por `tests/test_isolation_matrix.py`: recepção lê paciente, consulta e conta; profissional lê paciente, consulta, prontuário e atendimento; financeiro lê paciente e conta; administrador lê tudo; ninguém da organização B lê nada da A.
 
 ## Grupos sugeridos
 
