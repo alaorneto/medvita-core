@@ -1,0 +1,7 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Configurar a agenda" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Agenda médica" %}</p><h1>{% translate "Configurar a agenda" %}</h1><p class="page-description">{% translate "Crie o consultório e escolha quem consulta e quem gere a configuração e a lista de espera." %}</p></div></div>
+<form method="post" class="card max-w-3xl">{% csrf_token %}
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Configurar" %}</button></div></form>
+{% endblock %}

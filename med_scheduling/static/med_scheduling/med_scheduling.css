@@ -1,0 +1,15 @@
+/* Scheduling app: the colors of the appointment types and the day columns. */
+.appt { border-left-width: 4px; border-left-style: solid; padding: 0.25rem 0.5rem; margin-bottom: 0.25rem; }
+.appt-color-blue { border-left-color: #2563eb; }
+.appt-color-green { border-left-color: #16a34a; }
+.appt-color-amber { border-left-color: #d97706; }
+.appt-color-red { border-left-color: #dc2626; }
+.appt-color-purple { border-left-color: #7c3aed; }
+.appt-color-teal { border-left-color: #0d9488; }
+.appt-color-gray { border-left-color: #6b7280; }
+.appt-color-pink { border-left-color: #db2777; }
+.day-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+.slot-list { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+@media print {
+  .link-tabs, .toolbar, .med-scheduling-no-print { display: none !important; }
+}

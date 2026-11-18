@@ -27,7 +27,7 @@
       "med_scheduling"
     ],
     "leaves": [
-      "0002_record_infrastructure"
+      "0008_record_infrastructure"
     ]
   },
   "name": "Agenda médica",
@@ -55,7 +55,7 @@
     ],
     "service_api": {
       "classes": [
-        "PracticeService"
+        "SchedulingService"
       ],
       "module": "applications.med_scheduling.service_api"
     },

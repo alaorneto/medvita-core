@@ -19,3 +19,12 @@ Mesmo ambiente.
 - `python -m django check --fail-level WARNING` e `makemigrations --check` → limpos.
 - `tools/service_reference.py --check` e `tools/sync_leaves.py --check` → em dia.
 - Contrato de tabela derivada do núcleo (`assert_derived_access_contract`) para `Patient`, `PatientGuardian` e `PatientCoverage`.
+
+## Epic C: `med_scheduling` (2026-11-17)
+
+Mesmo ambiente.
+
+- `python -m pytest -q -n 4` → suíte inteira verde (número final no PR do epic).
+- Contrato de tabela derivada do núcleo para `Professional`, `Room`, `AppointmentType`, `AvailabilityRule`, `ScheduleBlock` e `WaitlistEntry`; `Appointment` por testes próprios de autorização, isolamento A/B e observação (o preparo do kit não cria paciente).
+- `med_scheduling/tests/unit/test_slots.py` e `test_transitions.py` (sem banco); páginas e API em `test_views.py` e `test_api.py`, com varredura de script inline, `style=` e `on*`.
+- `python -m django check --fail-level WARNING`, `makemigrations --check`, `tools/service_reference.py --check` e `tools/sync_leaves.py --check` → limpos.

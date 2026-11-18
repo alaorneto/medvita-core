@@ -1,0 +1,8 @@
+{% load i18n %}<nav class="link-tabs" aria-label="{% translate "Agenda médica" %}">
+<a href="{% url 'med_scheduling:day' organization_id %}"{% if section == "day" %} aria-current="page"{% endif %}>{% translate "Dia" %}</a>
+<a href="{% url 'med_scheduling:reception' organization_id %}"{% if section == "reception" %} aria-current="page"{% endif %}>{% translate "Recepção" %}</a>
+<a href="{% url 'med_scheduling:book' organization_id %}"{% if section == "book" %} aria-current="page"{% endif %}>{% translate "Marcar" %}</a>
+<a href="{% url 'med_scheduling:waitlist' organization_id %}"{% if section == "waitlist" %} aria-current="page"{% endif %}>{% translate "Lista de espera" %}</a>
+<a href="{% url 'med_scheduling:schedules' organization_id %}"{% if section == "schedules" %} aria-current="page"{% endif %}>{% translate "Agendas" %}</a>
+<a href="{% url 'med_scheduling:settings' organization_id %}"{% if section == "settings" %} aria-current="page"{% endif %}>{% translate "Configuração" %}</a>
+</nav>

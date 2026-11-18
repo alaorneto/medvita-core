@@ -1,12 +1,18 @@
-# Agenda médica: decisões iniciais
-
-Registro de decisão gerado por `skeleton_startapp`. Revise-o e acrescente as decisões próprias da app; veja [a especificação](spec.md).
+# Agenda médica: decisões
 
 ## Context
-A app precisa armazenar `Practice` por organização sem inserir regras de negócio no núcleo e sem contornar isolamento tenant, autorização e auditoria.
+
+A recepção marca consultas na agenda de vários profissionais, e cada profissional manda na própria agenda; a configuração do consultório (profissionais, salas, tipos) é de quem administra. Uma concessão do núcleo vale num registro e só o administrador concede.
 
 ## Decision
-`Practice` deriva de `SecuredRecord` e é registrado com um `TableSpec` de allowlists explícitas. A infraestrutura de banco (guards, FK tenant, RLS e triggers de auditoria) é instalada por migration gerada com `record_infrastructure`, a partir de modelos históricos. Rotas próprias ficam sob o prefixo tenant da app e consultam somente `authorized_queryset`.
+
+- **ADR-001, dois contêineres.** `Practice` guarda a configuração e `Schedule` as consultas. A recepção recebe leitura do consultório e escrita nas agendas em que marca; o profissional é dono da própria agenda. Tudo o mais é tabela derivada de um dos dois.
+- O profissional aponta para a pessoa (`sk_accounts.User`), não para o vínculo: o vínculo ativo é conferido pelo `OrganizationService` do núcleo, sem tocar em modelos internos.
+
+- **ADR-002, sobreposição resolvida por trava na agenda.** A marcação trava a linha da agenda e confere o intervalo, em vez de uma restrição de exclusão no banco: o encaixe precisa sobrepor, e a regra de sala cruza agendas. A conferência de sobreposição olha todas as consultas vivas da agenda (e da sala), mesmo as que o ator não poderia listar, porque só responde se o horário está livre.
+- **ADR-003, projeção no calendário sem dado do paciente.** O evento gerenciado leva o tipo e o código da consulta; o detalhe fica na app, alcançado pelo caminho do evento.
 
 ## Consequences
-O viewer genérico do núcleo oferece CRUD sem formulários próprios; telas específicas, se surgirem, continuam limitadas pelo `TableSpec`. Toda nova coluna exige revisar allowlists, sensibilidade e a infraestrutura da migration correspondente.
+
+- Mudar quem administra a configuração é conceder `update` no consultório; mudar quem marca numa agenda é conceder `update` na agenda.
+- Toda coluna nova revisa `read_fields`, `personal_fields`, `sensitive_fields` e a migration de infraestrutura.

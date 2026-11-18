@@ -113,11 +113,18 @@ class PatientSummary:
     birth_date: date | None
     status: str
     revision: int
+    processing_restricted: bool = False
 
 
 def patient_summary(patient: Patient) -> PatientSummary:
     return PatientSummary(
-        patient.pk, patient.code, patient.display_name, patient.birth_date, patient.status, patient.revision
+        patient.pk,
+        patient.code,
+        patient.display_name,
+        patient.birth_date,
+        patient.status,
+        patient.revision,
+        patient.processing_restricted,
     )
 
 
@@ -1251,6 +1258,32 @@ class PatientService(ServiceAPI):
             PatientSectionInfo(row.code, str(row.label), row.url_name, row.order)
             for row in sorted(rows, key=lambda row: (row.order, row.code))
         )
+
+    @service_method(read_only=True, since="0.1.0")
+    def page_tabs(self, *, actor: Any, patient_id: UUID) -> tuple[PatientSectionInfo, ...]:
+        """Every tab of the patient page, in order: the app's own, Privacidade for who manages
+        access to the registry, then the sections of active apps. A page of another app renders
+        the same navigation from it (the route of each tab receives ``org`` and ``patient_id``).
+
+        Autorização: leitura do cadastro do paciente.
+        Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from skeleton.service_api.access import AccessService
+
+        patient = _readable(actor, patient_id)
+        own = [
+            PatientSectionInfo("detail", gettext("Cadastro"), "med_patients:detail", 0),
+            PatientSectionInfo("guardians", gettext("Responsáveis"), "med_patients:guardians", 1),
+            PatientSectionInfo("coverages", gettext("Convênios"), "med_patients:coverages", 2),
+            PatientSectionInfo("consents", gettext("Consentimentos"), "med_patients:consents", 3),
+            PatientSectionInfo("timeline", gettext("Linha do tempo"), "med_patients:timeline", 4),
+        ]
+        if AccessService().can(
+            actor=actor, action="manage_access", table_key=REGISTRY_TABLE, record_id=patient.registry_id
+        ):
+            own.append(PatientSectionInfo("privacy", gettext("Privacidade"), "med_patients:privacy", 5))
+        return (*own, *self.patient_sections(actor=actor))
 
     @service_method(read_only=True, since="0.1.0")
     def timeline(self, *, actor: Any, patient_id: UUID, cursor: str | None = None, page_size: int = 20) -> TimelinePage:

@@ -1,6 +1,24 @@
 from django.urls import path
 
-from .views import home
+from . import views
 
 app_name = "med_scheduling"
-urlpatterns = [path("", home, name="home")]
+urlpatterns = [
+    path("", views.home, name="home"),
+    path("day/", views.day_view, name="day"),
+    path("book/", views.book_view, name="book"),
+    path("reception/", views.reception_view, name="reception"),
+    path("waitlist/", views.waitlist_view, name="waitlist"),
+    path("waitlist/<uuid:entry_id>/cancel/", views.waitlist_cancel, name="waitlist-cancel"),
+    path("settings/", views.settings_view, name="settings"),
+    path("setup/", views.setup_view, name="setup"),
+    path("schedules/", views.schedules_view, name="schedules"),
+    path("schedules/<uuid:schedule_id>/", views.schedule_view, name="schedule"),
+    path("schedules/<uuid:schedule_id>/week/", views.week_view, name="week"),
+    path("schedules/<uuid:schedule_id>/blocks/<uuid:block_id>/remove/", views.block_remove, name="block-remove"),
+    path("appointments/<uuid:appointment_id>/", views.appointment_view, name="appointment"),
+    path("appointments/<uuid:appointment_id>/reschedule/", views.appointment_reschedule, name="reschedule"),
+    path("appointments/<uuid:appointment_id>/cancel/", views.appointment_cancel, name="cancel"),
+    path("appointments/<uuid:appointment_id>/<slug:name>/", views.appointment_transition, name="transition"),
+    path("patients/<uuid:patient_id>/", views.patient_section, name="patient_section"),
+]

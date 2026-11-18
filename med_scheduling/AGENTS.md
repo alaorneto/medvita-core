@@ -19,6 +19,8 @@ Configuração do consultório (profissionais, salas, tipos de atendimento), gra
 - Oferece `SchedulingService` e o registry `register_appointment_action`.
 - Publica `appointment_booked`, `_rescheduled`, `_confirmed`, `_arrived`, `_started`, `_completed`, `_no_show` e `_cancelled`.
 - Consome `PatientService` e o `CalendarService` do núcleo.
+- Contribui para a página do paciente (aba, linha do tempo, relatório do titular) e para a lista de configuração, em `integration.py`.
+- Superfícies: páginas em `views.py` e API REST em `api.py`; nenhuma consulta modelo, só os serviços.
 
 ## Invariantes do domínio
 
@@ -26,6 +28,8 @@ Configuração do consultório (profissionais, salas, tipos de atendimento), gra
 2. Duas consultas ativas não se sobrepõem na mesma agenda, salvo encaixe; a marcação trava a agenda.
 3. O evento projetado no calendário nunca leva nome, telefone ou observação do paciente.
 4. O acesso de uma agenda e o do calendário dela mudam juntos, só por `set_schedule_access`.
+5. A observação da recepção só sai no detalhe de uma consulta; nunca em lista, evento, notificação, linha do tempo ou log.
+6. A lista de espera é do grupo de gestão do consultório; ninguém é marcado a partir dela sem decisão da recepção.
 
 ## Testes e especificação
 

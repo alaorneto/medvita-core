@@ -1,0 +1,24 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Marcar consulta" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Agenda médica" %}</p><h1>{% translate "Marcar consulta" %}</h1><p class="page-description">{% translate "Escolha o paciente, a agenda, o tipo e o dia; depois o horário." %}</p></div></div>
+{% include "med_scheduling/_nav.html" %}
+{% if not patient %}
+<form method="get" class="filter-bar" aria-label="{% translate "Buscar paciente" %}"><div class="field"><label for="q">{% translate "Paciente (nome, CPF, código ou telefone)" %}</label><input id="q" name="q" value="{{ query }}" maxlength="200"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Buscar" %}</button></div></form>
+{% if query %}<ul class="mb-6">{% for item in patients %}<li><a href="?patient={{ item.sysid }}">{{ item.code }} · {{ item.display_name }}</a></li>{% empty %}<li>{% translate "Nenhum paciente encontrado." %}</li>{% endfor %}</ul>{% endif %}
+{% else %}
+<p class="mb-4">{% translate "Paciente:" %} <strong>{{ patient.code }} · {{ patient.display_name }}</strong> · <a href="?">{% translate "trocar" %}</a></p>
+{% if entry_id %}<p class="mb-4 helptext">{% translate "Marcação a partir da lista de espera: a entrada passa a agendada." %}</p>{% endif %}
+<form method="get" class="card max-w-3xl mb-6"><input type="hidden" name="patient" value="{{ patient.sysid }}">{% if entry_id %}<input type="hidden" name="entry" value="{{ entry_id }}"><input type="hidden" name="revision" value="{{ entry_revision }}">{% endif %}
+{% include "skeleton/web/components/form-errors.html" %}
+<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.schedule %}{% include "skeleton/web/components/form-field.html" with field=form.appointment_type %}{% include "skeleton/web/components/form-field.html" with field=form.day %}</div>
+<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Ver horários" %}</button></div></form>
+{% if form.is_bound %}
+<form method="post" class="card max-w-3xl">{% csrf_token %}<input type="hidden" name="patient" value="{{ patient.sysid }}"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% if entry_id %}<input type="hidden" name="entry" value="{{ entry_id }}"><input type="hidden" name="revision" value="{{ entry_revision }}">{% endif %}
+<input type="hidden" name="schedule" value="{{ form.schedule.value }}"><input type="hidden" name="appointment_type" value="{{ form.appointment_type.value }}"><input type="hidden" name="day" value="{{ form.day.value|default:'' }}">
+<fieldset class="mb-4"><legend>{% translate "Horário" %}</legend>
+<div class="slot-list">{% for slot in slots %}<label class="badge badge-neutral"><input type="radio" name="slot" value="{{ slot.value }}"> {{ slot.local|time:"H:i" }}</label>{% empty %}<p class="helptext">{% translate "Nenhum horário livre neste dia." %}</p>{% endfor %}</div></fieldset>
+<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.fit_in %}{% include "skeleton/web/components/form-field.html" with field=form.fit_in_time %}{% include "skeleton/web/components/form-field.html" with field=form.payment_kind %}{% include "skeleton/web/components/form-field.html" with field=form.notes %}</div>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Marcar" %}</button></div></form>
+{% endif %}
+{% endif %}
+{% endblock %}

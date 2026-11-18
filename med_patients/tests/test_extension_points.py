@@ -26,7 +26,7 @@ BASE = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 @pytest.fixture
 def ready(clinic):
     setup_registry(clinic)
-    with isolated_registries():
+    with isolated_registries(empty=True):
         yield clinic
 
 
