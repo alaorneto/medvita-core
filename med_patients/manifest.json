@@ -24,7 +24,7 @@
       "med_patients"
     ],
     "leaves": [
-      "0002_record_infrastructure"
+      "0008_record_infrastructure"
     ]
   },
   "name": "Pacientes",
@@ -47,12 +47,12 @@
         "action": "read",
         "label": "Pacientes",
         "table_key": "med_patients.patientregistry",
-        "url_name": "med_patients:home"
+        "url_name": "med_patients:list"
       }
     ],
     "service_api": {
       "classes": [
-        "PatientRegistryService"
+        "PatientService"
       ],
       "module": "applications.med_patients.service_api"
     },

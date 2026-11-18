@@ -28,7 +28,17 @@ O que o produto faz e o que não faz em relação às normas que se aplicam a um
 
 ## O que o produto cobre
 
-Preenchido por epic, à medida que as entregas chegam.
+### Consentimento
+
+O tratamento de dados para a assistência à saúde em si tem base legal própria (tutela da saúde) e não depende de consentimento. O `med_patients` registra consentimento para finalidades adicionais, declaradas em código pelas apps (por exemplo `med_patients.contact`, contato por telefone, mensagem e email): quem coletou, como (presencial, papel, digital, verbal), a versão do termo e o termo digitalizado anexo. Revogar guarda a linha com a hora; conceder de novo cria outra linha, então o histórico de cada finalidade é completo.
+
+### Direitos do titular
+
+O `med_patients` gera o relatório dos dados de um paciente (cadastro, responsáveis, convênios, consentimentos e as seções que as outras apps declaram), restringe o tratamento e anonimiza o cadastro quando nenhuma guarda de retenção veta. Limites:
+
+- A geração do relatório não altera dado e por isso não entra na auditoria do núcleo: fica só no log estruturado da aplicação, com os identificadores do paciente e de quem gerou.
+- O relatório automático não traz o conteúdo clínico integral: a cópia do prontuário é entregue pelo profissional, pela impressão dos registros.
+- A anonimização é irreversível e só acontece fora dos prazos de guarda declarados pelas apps.
 
 ## O que o produto não cobre
 

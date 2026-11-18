@@ -1,0 +1,26 @@
+{% extends "skeleton/web/base.html" %}{% load i18n med_patients_labels %}{% block title %}{{ patient.code }} · {% translate "Pacientes" %} · {{ site_name }}{% endblock %}
+{% block content %}
+{% include "med_patients/_patient_header.html" %}
+<dl class="meta-list mb-6">
+  <dt>{% translate "Código" %}</dt><dd>{{ patient.code }}</dd>
+  <dt>{% translate "Nome completo" %}</dt><dd>{{ patient.full_name }}</dd>
+  <dt>{% translate "Nascimento" %}</dt><dd>{% if patient.birth_date %}<time datetime="{{ patient.birth_date|date:'Y-m-d' }}">{{ patient.birth_date|date:"SHORT_DATE_FORMAT" }}</time>{% else %}—{% endif %}</dd>
+  <dt>{% translate "Sexo" %}</dt><dd>{{ patient.sex|patient_label:"sex" }}</dd>
+  <dt>{% translate "CPF" %}</dt><dd>{% if patient.cpf %}{{ patient.cpf|slice:":3" }}.{{ patient.cpf|slice:"3:6" }}.{{ patient.cpf|slice:"6:9" }}-{{ patient.cpf|slice:"9:" }}{% else %}—{% endif %}</dd>
+  <dt>{% translate "Cartão Nacional de Saúde" %}</dt><dd>{{ patient.national_health_card|default:"—" }}</dd>
+  <dt>{% translate "Documento de identidade" %}</dt><dd>{{ patient.identity_document|default:"—" }}</dd>
+  <dt>{% translate "Nome da mãe" %}</dt><dd>{{ patient.mother_name|default:"—" }}</dd>
+  <dt>{% translate "Telefones" %}</dt><dd>{{ patient.phone|default:"—" }}{% if patient.phone_secondary %} · {{ patient.phone_secondary }}{% endif %}</dd>
+  <dt>{% translate "Email" %}</dt><dd>{{ patient.email|default:"—" }}</dd>
+  <dt>{% translate "Preferência de contato" %}</dt><dd>{{ patient.contact_preference|patient_label:"contact_preference" }}</dd>
+  <dt>{% translate "Endereço" %}</dt><dd>{% if patient.street %}{{ patient.street }}, {{ patient.number }}{% if patient.complement %} {{ patient.complement }}{% endif %} · {{ patient.district }} · {{ patient.city }}/{{ patient.state }} · {{ patient.postal_code }}{% else %}—{% endif %}</dd>
+  <dt>{% translate "Observações administrativas" %}</dt><dd class="whitespace-pre-line">{{ patient.notes|default:"—" }}</dd>
+  {% if patient.deceased_on %}<dt>{% translate "Data do óbito" %}</dt><dd>{{ patient.deceased_on|date:"SHORT_DATE_FORMAT" }}</dd>{% endif %}
+</dl>
+{% if patient.writable and not patient.anonymized_at %}
+<section class="card max-w-xl" aria-labelledby="status-heading"><h2 id="status-heading">{% translate "Situação do cadastro" %}</h2>
+<form method="post" action="{% url 'med_patients:status' organization_id patient.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ patient.revision }}">
+{% include "skeleton/web/components/form-fields.html" with form=status_form hide_marks=True %}
+<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Atualizar situação" %}</button></div></form></section>
+{% endif %}
+{% endblock %}

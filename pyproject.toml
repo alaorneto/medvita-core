@@ -4,6 +4,8 @@ DJANGO_SETTINGS_MODULE = "skeleton.testing.host.settings"
 testpaths = ["med_patients/tests", "med_scheduling/tests", "med_records/tests", "med_finance/tests", "tests"]
 # Importa os testes de cada app como applications.<pacote>.tests.*, o nome com que o Django carregou a app.
 addopts = "-p skeleton.testing.host.pytest_plugin"
+# WhiteNoise looks for collected static files, which tests never collect.
+filterwarnings = ["ignore:No directory at:UserWarning"]
 
 [tool.ruff]
 target-version = "py312"

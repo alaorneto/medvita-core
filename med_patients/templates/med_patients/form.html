@@ -1,0 +1,13 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{{ heading }} · {% translate "Pacientes" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:list' organization_id %}">{% translate "Pacientes" %}</a>{% if patient %} · {{ patient.code }}{% endif %}</p><h1>{{ heading }}</h1></div></div>
+{% if duplicates %}<section class="card mb-6" aria-labelledby="duplicates-heading"><h2 id="duplicates-heading">{% translate "Possível paciente já cadastrado" %}</h2>
+<p class="helptext">{% translate "Confira se não é a mesma pessoa antes de criar outro cadastro." %}</p>
+<ul class="mt-2">{% for item in duplicates %}<li><a href="{% url 'med_patients:detail' organization_id item.sysid %}">{{ item.code }} · {{ item.display_name }}</a>{% if item.birth_date %} · {{ item.birth_date|date:"SHORT_DATE_FORMAT" }}{% endif %}</li>{% endfor %}</ul></section>{% endif %}
+<form method="post" class="card max-w-3xl" novalidate>{% csrf_token %}
+  {% if patient %}<input type="hidden" name="revision" value="{{ patient.revision }}">{% else %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% endif %}
+  {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
+  {% if duplicates %}<div class="field mt-4"><label><input type="checkbox" name="confirm_duplicates" value="1"> {% translate "É outra pessoa: cadastrar mesmo assim" %}</label></div>{% endif %}
+  <div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Salvar" %}</button>{% if patient %}<a class="btn btn-secondary" href="{% url 'med_patients:detail' organization_id patient.sysid %}">{% translate "Cancelar" %}</a>{% else %}<a class="btn btn-secondary" href="{% url 'med_patients:list' organization_id %}">{% translate "Cancelar" %}</a>{% endif %}</div>
+</form>
+{% endblock %}

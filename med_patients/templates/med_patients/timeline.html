@@ -1,0 +1,8 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Linha do tempo" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% block content %}
+{% include "med_patients/_patient_header.html" %}
+{% if page.unavailable %}<p class="badge badge-warning mb-4">{% translate "Parte da linha do tempo está indisponível agora." %}</p>{% endif %}
+<ol class="timeline">{% for item in entries %}<li><time datetime="{{ item.entry.at|date:'c' }}">{{ item.entry.at|date:"SHORT_DATETIME_FORMAT" }}</time> · {% if item.url %}<a href="{{ item.url }}">{{ item.entry.title }}</a>{% else %}{{ item.entry.title }}{% endif %}</li>
+{% empty %}<li>{% translate "Nada registrado ainda." %}</li>{% endfor %}</ol>
+{% if page.next_cursor %}<nav class="pagination" aria-label="{% translate "Paginação" %}"><div class="pagination-links"><a class="pagination-next" rel="next" href="?cursor={{ page.next_cursor|urlencode }}">{% translate "Mais antigos" %}</a></div></nav>{% endif %}
+{% endblock %}
