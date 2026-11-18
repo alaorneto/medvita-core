@@ -1,0 +1,9 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{{ header.code }} · {% translate "Documento" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_records/med_records.css' %}">{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% if patient %}<a href="{% url 'med_records:patient_section' organization_id header.patient_id %}">{{ patient.code }}</a>{% endif %} · {{ header.code }} · {{ kind_label }}</p><h1>{{ header.title }}</h1>{% if header.replaced_by_code %}<p class="page-description"><span class="badge badge-neutral">{% blocktranslate with code=header.replaced_by_code %}Substituído por {{ code }}{% endblocktranslate %}</span></p>{% endif %}</div>
+<nav class="toolbar" aria-label="{% translate "Ações" %}">{% if info.writable %}<a class="btn btn-primary" href="{% url 'med_records:document_edit' organization_id header.sysid %}">{% translate "Continuar o rascunho" %}</a>{% endif %}{% if header.issued %}<a class="btn btn-secondary" href="{% url 'med_records:document_print' organization_id header.sysid %}">{% translate "Imprimir" %}</a><form method="post" action="{% url 'med_records:document_replace' organization_id header.sysid %}">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}"><button type="submit" class="btn btn-secondary">{% translate "Substituir" %}</button></form>{% endif %}</nav></div>
+{% include "med_records/_seal.html" with signed=header.issued signed_at=header.issued_at author_name=header.author_name author_council=header.author_council digest=header.seal_digest %}
+{% if info.notice %}<p class="helptext mb-4">{{ info.notice }}</p>{% endif %}
+<div class="card clinical-text">{{ info.body }}</div>
+{% endblock %}

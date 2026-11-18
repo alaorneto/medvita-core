@@ -96,6 +96,7 @@ def test_arrival_notifies_the_professional_once(ready):
 def test_actions_of_active_apps_for_the_state(ready):
     appointment = book(ready, 9)
     with isolated_actions() as actions:
+        actions.clear()  # Start without the actions the installed apps registered.
         register_appointment_action(
             AppointmentAction("med_scheduling.extra", "Extra", "med_scheduling:home", statuses=("arrived",), order=5)
         )

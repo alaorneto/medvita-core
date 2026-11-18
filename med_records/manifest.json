@@ -27,7 +27,7 @@
       "med_records"
     ],
     "leaves": [
-      "0002_record_infrastructure"
+      "0012_record_infrastructure"
     ]
   },
   "name": "Prontuário",
@@ -55,7 +55,7 @@
     ],
     "service_api": {
       "classes": [
-        "ArchiveService"
+        "RecordsService"
       ],
       "module": "applications.med_records.service_api"
     },

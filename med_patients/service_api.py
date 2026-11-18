@@ -1264,6 +1264,7 @@ class PatientService(ServiceAPI):
         """Every tab of the patient page, in order: the app's own, Privacidade for who manages
         access to the registry, then the sections of active apps. A page of another app renders
         the same navigation from it (the route of each tab receives ``org`` and ``patient_id``).
+        A section with ``visible`` shows only when it answers ``True`` for the actor and the patient.
 
         Autorização: leitura do cadastro do paciente.
         Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
@@ -1283,7 +1284,15 @@ class PatientService(ServiceAPI):
             actor=actor, action="manage_access", table_key=REGISTRY_TABLE, record_id=patient.registry_id
         ):
             own.append(PatientSectionInfo("privacy", gettext("Privacidade"), "med_patients:privacy", 5))
-        return (*own, *self.patient_sections(actor=actor))
+        from .extension import PATIENT_SECTIONS, call_safely
+
+        hidden = set()
+        for code, section in PATIENT_SECTIONS.active(actor):
+            if section.visible is not None:
+                ok, shown = call_safely(code, section.visible, actor=actor, patient_id=patient.pk)
+                if not (ok and shown):
+                    hidden.add(code)
+        return (*own, *(row for row in self.patient_sections(actor=actor) if row.code not in hidden))
 
     @service_method(read_only=True, since="0.1.0")
     def timeline(self, *, actor: Any, patient_id: UUID, cursor: str | None = None, page_size: int = 20) -> TimelinePage:

@@ -164,7 +164,7 @@ Say which column feeds which patient field, with CAS, and queue the validation o
 
 #### `page_tabs(*, actor, patient_id) -> tuple[PatientSectionInfo, ...]`
 
-Every tab of the patient page, in order: the app's own, Privacidade for who manages access to the registry, then the sections of active apps. A page of another app renders the same navigation from it (the route of each tab receives ``org`` and ``patient_id``).
+Every tab of the patient page, in order: the app's own, Privacidade for who manages access to the registry, then the sections of active apps. A page of another app renders the same navigation from it (the route of each tab receives ``org`` and ``patient_id``). A section with ``visible`` shows only when it answers ``True`` for the actor and the patient.
 
 - **Autorização:** leitura do cadastro do paciente.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
@@ -514,6 +514,7 @@ A tab or shortcut on the patient page; ``url_name`` receives ``org`` and ``patie
 | `label` | `Any` |
 | `url_name` | `str` |
 | `order` | `int` |
+| `visible` | `Callable[..., bool] | None` |
 
 ### `PatientSectionInfo`
 
