@@ -1,0 +1,5 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Financeiro" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Caixa" %}</h1><p class="page-description">{% translate "Nenhum caixa que você possa ver." %}</p></div></div>
+{% if manager %}<div class="empty-state"><p><a href="{% url 'med_finance:setup' organization_id %}">{% translate "Configurar o financeiro" %}</a></p></div>{% endif %}
+{% endblock %}

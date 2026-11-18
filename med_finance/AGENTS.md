@@ -19,7 +19,11 @@ Frente de caixa do consultório: tabela de preços, caixa com abertura e fechame
 
 - Oferece `FinanceService` e o registry `register_charge_origin`.
 - Publica `charge_confirmed`, `charge_paid`, `charge_cancelled`, `payment_registered`, `payment_reversed`, `receipt_issued` e `receipt_voided`.
-- Consome `PatientService`, `SchedulingService`, o `LedgerService` do núcleo e os eventos da agenda.
+- Consome `PatientService`, `SchedulingService` e o `LedgerService` do núcleo. Não consome os eventos da agenda: um consumidor roda em contexto de sistema, onde o núcleo não numera nem lê o título (alaorneto/skeleton#577); a conta da consulta nasce por "Receber" (`charge_for_appointment`).
+- `ledger_bridge.py` é o único módulo que chama o livro. O livro autoriza título, baixa e lançamento de regra pelo registro de origem desta app; o caixa guarda as contas do livro de cada forma de pagamento (`payment_accounts`), resolvidas no `setup`.
+- Contribui em `integration.py`: origem de conta `med_scheduling`, ação "Receber", aba "Financeiro" (só para quem lê um caixa), linha do tempo, relatório do titular e a guarda de retenção de 5 anos.
+- Superfícies: páginas em `views.py` e API REST em `api.py`; nenhuma consulta modelo.
+- As referências do recibo (conta e pagamento) ficam fora de `seal_fields`, porque já são imutáveis; o resumo as cobre pelo `extra` (`receipt_extra`).
 
 ## Invariantes do domínio
 

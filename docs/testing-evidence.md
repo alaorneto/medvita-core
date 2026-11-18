@@ -38,3 +38,13 @@ Mesmo ambiente.
 - Contrato de selo do núcleo (`assert_sealed_contract`) para `Encounter` (com as seções) e `ClinicalDocument`.
 - Validação de seções e troca de marcadores sem banco (`med_records/tests/unit`); páginas e API em `test_views.py` e `test_api.py`, com varredura de script inline, `style=`, `on*`, título sem o nome do paciente e `Cache-Control: no-store`.
 - `python -m django check --fail-level WARNING`, `makemigrations --check`, `tools/service_reference.py --check` e `tools/sync_leaves.py --check` → limpos.
+
+## Epic E: `med_finance` (2026-11-17)
+
+Mesmo ambiente.
+
+- `python -m pytest -q -n 4` → suíte inteira verde (número final no PR do epic).
+- Contrato de tabela derivada do núcleo, em `tests/test_finance_contracts.py`, para `PriceItem`, `CashSession`, `CashMovement`, `Charge`, `ChargeItem`, `Payment`, `Receipt` e `ReceiptVoid`; contrato de selo para `Receipt`.
+- Integração com o livro contábil provada pelos serviços do livro: título por conta, baixa por pagamento com estorno, lançamento por suprimento e sangria, saldo da conta de dinheiro igual ao resumo do dia.
+- Valor por extenso sem banco (`med_finance/tests/unit`); páginas e API em `test_views.py`, com varredura de script inline, `style=` e `on*`.
+- `python -m django check --fail-level WARNING`, `makemigrations --check`, `tools/service_reference.py --check` e `tools/sync_leaves.py --check` → limpos.
