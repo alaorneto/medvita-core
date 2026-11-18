@@ -97,6 +97,12 @@ Ninguém edita `version` dos manifestos nem o `CHANGELOG.md`: a automação do `
 
 Trocar o núcleo é uma mudança própria: suba `SKELETON_REF` (ou, com release, troque pelo wheel da release) junto com `compatibility.skeleton` dos manifestos. O job de publicação dos pacotes assinados não existe ainda: ele nasce com a primeira release, junto com o guia de publicação.
 
+## PRs empilhados
+
+Um epic com várias issues pode sair em PRs empilhados: a base de cada PR é a branch do anterior. O GitHub só fecha as issues citadas com `Closes`, `Fixes` ou `Resolves` quando o PR entra na branch padrão, então `.github/workflows/close-stacked-issues.yml` fecha as issues no merge de um PR empilhado, comenta em que PR e branch a entrega entrou e reconcilia o epic pai. `Refs #N` não fecha.
+
+Mesclar um PR empilhado leva o código só para a branch de base. Para ele chegar à `main`, mescle a pilha de baixo para cima, apagando a branch de cada PR depois do merge (o GitHub então muda a base do PR seguinte para a `main`), ou abra no fim um PR da branch do topo para a `main`.
+
 ## Testes
 
 | Fixture (`conftest.py` da raiz) | O que entrega |
