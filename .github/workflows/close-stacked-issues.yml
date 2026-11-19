@@ -1,0 +1,37 @@
+name: Issues de PRs empilhados
+
+# O GitHub só fecha as issues citadas com Closes/Fixes/Resolves quando o PR entra na branch padrão.
+# Num PR empilhado (base = branch do PR anterior), este workflow fecha as issues no merge, comenta
+# onde a entrega entrou e reconcilia o epic pai com os comandos do dev-workflow.
+#
+# Segurança: pull_request_target dá token de escrita. O checkout é o da branch de destino (padrão
+# deste gatilho); nenhum código do PR é baixado nem executado, e o corpo do PR é lido pela API.
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: close-stacked-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  close:
+    name: Fechar as issues do PR empilhado
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref != github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Fechar as issues citadas e reconciliar o epic
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: python3 tools/close_stacked_issues.py
