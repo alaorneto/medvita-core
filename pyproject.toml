@@ -1,9 +1,20 @@
 # Só configuração de ferramentas: o repositório não é um pacote pip. Cada app é publicada em .skapp.
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "skeleton.testing.host.settings"
-testpaths = ["med_patients/tests", "med_scheduling/tests", "med_records/tests", "med_finance/tests", "tests"]
+testpaths = [
+    "med_patients/tests",
+    "med_scheduling/tests",
+    "med_records/tests",
+    "med_finance/tests",
+    "tests/apps/med_example/tests",
+    "tests",
+]
+# The reference app is collected by its own test path, under the name Django loads it with.
+norecursedirs = ["tests/apps", ".*", "node_modules", "*.egg", "venv", ".venv"]
 # Importa os testes de cada app como applications.<pacote>.tests.*, o nome com que o Django carregou a app.
 addopts = "-p skeleton.testing.host.pytest_plugin"
+# WhiteNoise looks for collected static files, which tests never collect.
+filterwarnings = ["ignore:No directory at:UserWarning"]
 
 [tool.ruff]
 target-version = "py312"

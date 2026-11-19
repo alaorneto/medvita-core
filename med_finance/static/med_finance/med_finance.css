@@ -1,0 +1,9 @@
+/* Finance app: amounts aligned, receipts printable. */
+.amount { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.voided-stamp { border: 2px solid #dc2626; color: #dc2626; display: inline-block; font-weight: 700; padding: 0.25rem 0.75rem; transform: rotate(-4deg); }
+.print-page { max-width: 48rem; margin: 0 auto; }
+.seal-digest { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+@media print {
+  header, nav, footer, .link-tabs, .toolbar, .med-finance-no-print { display: none !important; }
+  .print-page { max-width: none; }
+}

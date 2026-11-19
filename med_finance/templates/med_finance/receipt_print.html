@@ -1,0 +1,3 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Recibo" %} {{ receipt.number }} · {% translate "Impressão" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
+{% block content %}{% include "med_finance/_receipt_body.html" %}{% endblock %}

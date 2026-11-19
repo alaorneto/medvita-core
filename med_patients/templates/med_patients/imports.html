@@ -1,0 +1,14 @@
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{% translate "Importar pacientes" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:list' organization_id %}">{% translate "Pacientes" %}</a></p><h1>{% translate "Importar pacientes" %}</h1><p class="page-description">{% translate "Envie um CSV, escolha qual coluna vai para cada campo, confira o relatório e aplique. CPFs já cadastrados são pulados, nunca sobrescritos." %}</p></div></div>
+<section class="card max-w-3xl mb-6" aria-labelledby="upload-heading"><h2 id="upload-heading">{% translate "Enviar arquivo" %}</h2>
+<form method="post" enctype="multipart/form-data" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" with hide_marks=True %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Enviar" %}</button></div></form></section>
+<div class="table-scroll"><table>
+  <caption class="sr-only">{% translate "Importações" %}</caption>
+  <thead><tr><th scope="col" class="col-date">{% translate "Enviado em" %}</th><th scope="col">{% translate "Situação" %}</th><th scope="col" class="col-num">{% translate "Linhas" %}</th><th scope="col" class="col-num">{% translate "Criados" %}</th><th scope="col" class="col-num">{% translate "Pulados" %}</th><th scope="col" class="col-num">{% translate "Erros" %}</th></tr></thead>
+  <tbody>{% for row in rows %}<tr><td class="col-date"><a class="cell-primary" href="{% url 'med_patients:import' organization_id row.sysid %}">{{ row.created_at|date:"SHORT_DATETIME_FORMAT" }}</a></td><td>{{ row.status|status_badge }}</td><td class="col-num">{{ row.total_rows }}</td><td class="col-num">{{ row.created_rows }}</td><td class="col-num">{{ row.skipped_rows }}</td><td class="col-num">{{ row.error_rows }}</td></tr>
+  {% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=6 message=_("Nenhuma importação.") %}{% endfor %}</tbody>
+</table></div>
+{% endblock %}

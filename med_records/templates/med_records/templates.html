@@ -1,0 +1,13 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Modelos" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_records:home' organization_id %}">{% translate "Prontuário" %}</a></p><h1>{% translate "Modelos" %}</h1><p class="page-description">{% translate "Modelos do arquivo e os seus pessoais. Modelos de atendimento nascem do editor de um rascunho." %}</p></div></div>
+<div class="table-scroll mb-6"><table><caption class="sr-only">{% translate "Modelos" %}</caption>
+<thead><tr><th scope="col">{% translate "Nome" %}</th><th scope="col">{% translate "Tipo" %}</th><th scope="col">{% translate "Especialidade" %}</th><th scope="col"><span class="sr-only">{% translate "Ações" %}</span></th></tr></thead>
+<tbody>{% for item in templates %}<tr><td>{{ item.name }}{% if item.personal %} <span class="badge badge-neutral">{% translate "Pessoal" %}</span>{% endif %}</td><td>{% if item.kind == "encounter" %}{% translate "Atendimento" %}{% else %}{% translate "Documento" %}{% endif %}</td><td>{{ item.specialty|default:"—" }}</td>
+<td><form method="post">{% csrf_token %}<input type="hidden" name="action" value="deactivate"><input type="hidden" name="id" value="{{ item.sysid }}"><input type="hidden" name="revision" value="{{ item.revision }}"><button type="submit" class="btn btn-secondary">{% translate "Desativar" %}</button></form></td></tr>
+{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=4 message=_("Nenhum modelo.") %}{% endfor %}</tbody></table></div>
+<section class="card max-w-3xl" aria-labelledby="new-heading"><h2 id="new-heading">{% translate "Novo modelo de documento" %}</h2>
+<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Salvar modelo" %}</button></div></form></section>
+{% endblock %}

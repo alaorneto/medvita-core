@@ -1,0 +1,5 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Pedido inválido" %} · {% translate "Pacientes" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Pacientes" %}</p><h1>{% translate "Pedido inválido" %}</h1><p class="page-description">{{ detail }}</p></div></div>
+<p><a class="btn btn-secondary" href="{% url 'med_patients:list' organization_id %}">{% translate "Voltar aos pacientes" %}</a></p>
+{% endblock %}

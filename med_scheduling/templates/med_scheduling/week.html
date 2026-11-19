@@ -1,0 +1,14 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{{ schedule.name }} · {% translate "Semana" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}">{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Semana" %}</p><h1>{{ schedule.name }}</h1></div>
+<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="?start={{ previous|date:'Y-m-d' }}">{% translate "Semana anterior" %}</a><a class="btn btn-secondary" href="?start={{ following|date:'Y-m-d' }}">{% translate "Próxima semana" %}</a></nav></div>
+{% include "med_scheduling/_nav.html" %}
+<div class="table-scroll"><table>
+<caption class="sr-only">{% translate "Consultas da semana" %}</caption>
+<thead><tr><th scope="col" class="col-date">{% translate "Dia" %}</th><th scope="col">{% translate "Consultas" %}</th><th scope="col">{% translate "Horários livres" %}</th></tr></thead>
+<tbody>{% for row in rows %}<tr><td class="col-date"><a href="{% url 'med_scheduling:day' organization_id %}?date={{ row.day|date:'Y-m-d' }}">{{ row.day|date:"D d/m" }}</a></td>
+<td>{% for item in row.appointments %}{% include "med_scheduling/_appointment_item.html" %}{% empty %}—{% endfor %}</td>
+<td><div class="slot-list">{% for slot in row.free %}<span class="badge badge-neutral">{{ slot|time:"H:i" }}</span>{% empty %}—{% endfor %}</div></td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

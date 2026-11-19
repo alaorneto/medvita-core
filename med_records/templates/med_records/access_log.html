@@ -1,0 +1,9 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Trilha de leitura" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_records:patient_section' organization_id chart.patient_id %}">{% translate "Prontuário" %}</a></p><h1>{% translate "Trilha de leitura" %}</h1><p class="page-description">{% translate "Quem leu conteúdo clínico deste prontuário pelo sistema. Uma linha por pessoa e item a cada 5 minutos." %}</p></div></div>
+<div class="table-scroll"><table><caption class="sr-only">{% translate "Leituras" %}</caption>
+<thead><tr><th scope="col" class="col-date">{% translate "Quando" %}</th><th scope="col">{% translate "Quem" %}</th><th scope="col">{% translate "O quê" %}</th></tr></thead>
+<tbody>{% for item in entries %}<tr><td class="col-date">{{ item.entry.at|date:"SHORT_DATETIME_FORMAT" }}</td><td>{{ item.name|default:item.entry.actor_id }}</td><td>{{ item.entry.action }}</td></tr>
+{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=3 message=_("Nenhuma leitura registrada.") %}{% endfor %}</tbody></table></div>
+{% if page.next_cursor %}<p class="mt-4"><a href="?cursor={{ page.next_cursor }}">{% translate "Mais antigas" %}</a></p>{% endif %}
+{% endblock %}

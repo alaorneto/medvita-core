@@ -1,0 +1,12 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format %}{% block title %}{% translate "Preços" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Tabela de preços" %}</h1><p class="page-description">{% translate "O código de cada item é o código de cobrança dos tipos de atendimento." %}</p></div></div>
+{% with section="prices" %}{% include "med_finance/_nav.html" %}{% endwith %}
+<div class="table-scroll mb-6"><table><caption class="sr-only">{% translate "Itens" %}</caption>
+<thead><tr><th scope="col">{% translate "Código" %}</th><th scope="col">{% translate "Descrição" %}</th><th scope="col" class="amount">{% translate "Valor" %}</th><th scope="col">{% translate "Situação" %}</th>{% if writable %}<th scope="col"><span class="sr-only">{% translate "Ações" %}</span></th>{% endif %}</tr></thead>
+<tbody>{% for item in items %}<tr><td>{{ item.code }}</td><td>{{ item.description }}</td><td class="amount">{{ item.amount|brl }}</td><td>{% if item.is_active %}{% translate "Ativo" %}{% else %}{% translate "Inativo" %}{% endif %}</td>
+{% if writable %}<td>{% if item.is_active %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="deactivate"><input type="hidden" name="id" value="{{ item.sysid }}"><input type="hidden" name="revision" value="{{ item.revision }}"><button type="submit" class="btn btn-secondary">{% translate "Desativar" %}</button></form>{% endif %}</td>{% endif %}</tr>
+{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=5 message=_("Nenhum item.") %}{% endfor %}</tbody></table></div>
+{% if writable %}<section class="card max-w-xl"><h2 class="section-heading">{% translate "Novo item" %}</h2><form method="post">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Incluir" %}</button></div></form></section>{% endif %}
+{% endblock %}

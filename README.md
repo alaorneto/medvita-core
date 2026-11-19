@@ -13,6 +13,10 @@ Suíte proprietária de apps para consultórios e pequenas clínicas sobre o [Sk
 
 O núcleo não é copiado para cá: ele vem instalado no ambiente virtual (wheel de uma release ou commit fixo do repositório do Skeleton).
 
+## Como implantar
+
+Veja o [guia de implantação](docs/deployment-guide.md): apps do núcleo, pacotes, CID-10, grupos, a lista "Configuração da clínica" e os dados de demonstração.
+
 ## Como desenvolver
 
 Veja `docs/development.md` (ambiente, variáveis, banco de teste e comandos). As regras para agentes e desenvolvedores estão no `AGENTS.md`.

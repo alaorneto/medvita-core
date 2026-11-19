@@ -1,0 +1,4 @@
+{% load i18n %}{% for item in sections %}<section class="card section-card" aria-labelledby="section-{{ item.section.sysid }}"><h2 id="section-{{ item.section.sysid }}" class="section-heading">{{ item.label }}</h2>
+{% if item.rows %}<dl class="meta-list">{% for row in item.rows %}<dt>{{ row.label }}</dt><dd class="clinical-text">{{ row.value }}</dd>{% endfor %}</dl>{% endif %}
+{% if item.section.text %}<p class="clinical-text">{{ item.section.text }}</p>{% endif %}</section>
+{% empty %}<p class="helptext">{% translate "Nenhuma seção." %}</p>{% endfor %}

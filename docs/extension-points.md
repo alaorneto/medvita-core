@@ -29,16 +29,18 @@ Funções exportadas pelo `service_api` da app dona, chamadas no `ready()` da ap
 
 | App dona | Função | Para quê |
 |---|---|---|
-| `med_patients` | `register_patient_section(PatientSection(code, label, url_name, order))` | Aba ou atalho na página do paciente |
-| `med_patients` | `register_timeline_provider(code, provider)` | Itens na linha do tempo do paciente; o provider autoriza e devolve `TimelineEntry` |
+| `med_patients` | `register_patient_section(PatientSection(code, label, url_name, order, visible))` | Aba ou atalho na página do paciente; `visible(actor=..., patient_id=...)`, opcional, esconde a aba de quem só veria uma página vazia |
+| `med_patients` | `register_timeline_provider(code, provider)` | Itens na linha do tempo do paciente: `provider(*, actor, patient_id, before, limit)` autoriza e devolve até `limit` `TimelineEntry` com `at <= before` |
 | `med_patients` | `register_consent_purpose(ConsentPurpose(code, label, description))` | Finalidade de consentimento LGPD |
 | `med_patients` | `register_retention_guard(code, guard)` | Veto à anonimização ou exclusão de paciente; `guard(patient_id=...)` devolve o motivo ou `None` |
 | `med_patients` | `register_patient_data_provider(code, provider)` | Seção do relatório "dados do titular" |
 | `med_patients` | `register_setup_step(SetupStep(code, label, url_name, is_done, order))` | Passo da lista "Configuração da clínica" |
 | `med_scheduling` | `register_appointment_action(AppointmentAction(code, label, url_name, statuses, order))` | Botão numa consulta ("Atender", "Receber") |
-| `med_records` | `register_section_type(SectionType(code, label, fields, version))` | Tipo de seção estruturada do atendimento |
-| `med_records` | `register_document_kind(DocumentKind(code, label, default_body))` | Tipo de documento clínico |
-| `med_finance` | `register_charge_origin(ChargeOrigin(app_label, label))` | App que cria contas por `FinanceService.create_charge(origin_app=...)` |
+| `med_records` | `register_section_type(SectionType(code, label, fields, version, has_text))` | Tipo de seção estruturada do atendimento; `fields` são `SectionField(name, label, kind, required, unit, min, max, choices)` com `kind` em `text`, `long_text`, `integer`, `decimal`, `boolean`, `choice`, `date`, `icd10_list`. Uma `version` nova convive com as antigas: o formulário usa a maior, a seção gravada guarda a dela |
+| `med_records` | `register_document_kind(DocumentKind(code, label, default_body, notice))` | Tipo de documento clínico; o texto padrão aceita só os marcadores `{{patient_name}}`, `{{date}}` e `{{professional_name}}`, trocados literalmente |
+| `med_finance` | `register_charge_origin(ChargeOrigin(app_label, label))` | App que cria contas por `FinanceService.create_charge(origin_app=..., origin_key=...)`; a mesma origem devolve a mesma conta |
+
+Um pacote de especialidade registra os próprios tipos de seção (por exemplo, `<app>.ophthalmic_exam` com acuidade visual e pressão intraocular) e de documento; o prontuário os valida e mostra como os básicos, sem mudar nada em `med_records`.
 
 ## 4. Selo como base de assinatura
 
@@ -67,4 +69,12 @@ class MedExampleConfig(AppConfig):
         register_consumer("med_records.encounter_signed", "med_example.note_signed", note_signed_encounter)
 ```
 
-A app de referência executável chega com o epic de integração (`tests/apps/med_example/`).
+A app de referência executável está em [`tests/apps/med_example/`](../tests/apps/med_example/): ela usa **todos** os pontos de extensão (aba com `visible` opcional, linha do tempo, finalidade de consentimento, guarda de retenção, relatório do titular, passo de configuração, ação de consulta, tipo de seção, tipo de documento, origem de conta, consumidores de `appointment_completed` e `encounter_signed`, verificação do selo) sem alterar nenhuma das quatro apps, e os testes dela (`tests/apps/med_example/tests/`) provam cada um com a app ativa e desativada. Ela entra em `SKELETON_DEV_APPS` nos testes e nunca é empacotada.
+
+### Como criar um add-on
+
+1. Crie a app no repositório dela, com `skeleton_startapp`, e declare em `dependencies` do manifesto as apps da suíte que ela usa, com a faixa da versão corrente.
+2. Importe das apps da suíte só o `service_api` (o check E019 recusa o resto) e do núcleo só as superfícies públicas.
+3. No `ready()`, chame os `register_*` que precisar, com códigos `<sua_app>.<nome>`; contribuições só aparecem com a app ativa na organização.
+4. Consumidores de evento rodam em contexto de sistema e precisam ser idempotentes; não há como numerar nem chamar serviços de ator nesse contexto (alaorneto/skeleton#577).
+5. Teste com a fixture `clinic` e os serviços públicos, como `tests/apps/med_example/tests/test_extension_points.py`.

@@ -1,0 +1,12 @@
+{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Agendas" %} · {{ site_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Agenda médica" %}</p><h1>{% translate "Agendas" %}</h1><p class="page-description">{% translate "As agendas que você vê; cada uma tem um calendário com o mesmo acesso." %}</p></div></div>
+{% include "med_scheduling/_nav.html" %}
+<ul class="mb-6">{% for item in schedules %}<li><a href="{% url 'med_scheduling:schedule' organization_id item.sysid %}">{{ item.name }}</a>{% if not item.is_active %} <span class="badge badge-neutral">{% translate "Inativa" %}</span>{% endif %}</li>{% empty %}<li>{% translate "Nenhuma agenda." %}</li>{% endfor %}</ul>
+{% if manager %}
+<section class="card max-w-3xl" aria-labelledby="new-heading"><h2 id="new-heading">{% translate "Nova agenda" %}</h2>
+<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Criar agenda" %}</button></div></form></section>
+{% endif %}
+{% endblock %}
