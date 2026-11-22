@@ -11,6 +11,7 @@ from skeleton.testing.applications import open_app
 from skeleton.testing.derived import assert_derived_access_contract
 from skeleton.testing.service_api import acting_as, build_service_scenario
 
+from .. import calendar_bridge
 from ..models import (
     AppointmentType,
     AvailabilityRule,
@@ -77,6 +78,145 @@ def test_create_schedule_with_its_calendar_and_access(ready, subtests):
             service().create_schedule(actor=admin, name="Vazia", idempotency_key="empty")
 
 
+def test_calendars_lists_those_of_the_schedules_and_then_the_others(ready, subtests):
+    def listed(user, organization=None):
+        with ready.as_user(user, organization) as actor:
+            return service().calendars(actor=actor)
+
+    with subtests.test("the calendar of the schedule, and nothing is created"):
+        (entry,) = listed(ready.a.reception)
+        assert (entry.calendar_id, entry.schedule_id) == (ready.schedule.calendar_id, ready.schedule.sysid)
+        assert entry.name == "Agenda da Dra. Ana" and entry.schedule_is_active and not entry.is_own
+        assert len(listed(ready.a.reception)) == 1
+    with ready.as_user(ready.a.reception) as actor:
+        personal = CalendarService().my_calendars(actor=actor)[0]
+    with subtests.test("then the others, the person's own marked"):
+        first, other = listed(ready.a.reception)
+        assert first.schedule_id == ready.schedule.sysid
+        assert (other.calendar_id, other.kind, other.is_own, other.schedule_id) == (
+            personal.sysid,
+            "personal",
+            True,
+            None,
+        )
+    with subtests.test("the schedules come by name"), as_admin(ready) as admin:
+        room = service().add_room(actor=admin, name="Sala 1", idempotency_key="room")
+        service().create_schedule(
+            actor=admin,
+            name="A sala",
+            room_id=room.sysid,
+            writer_group_ids=(ready.a.groups["reception"],),
+            idempotency_key="room",
+        )
+    with subtests.test("by name"):
+        names = [entry.name for entry in listed(ready.a.reception) if entry.schedule_id]
+        assert names == ["A sala", "Agenda da Dra. Ana"]
+    with subtests.test("who reads no schedule sees none, and nobody sees another person's personal calendar"):
+        assert listed(ready.a.finance) == ()
+    with subtests.test("organization B sees nothing of A"):
+        assert listed(ready.b.admin, ready.b.organization) == ()
+
+
+def origin(clinic, user, calendar_id):
+    """The app the core has the calendar as managed by, and the page it points at."""
+    with clinic.as_user(user) as actor:
+        (info,) = [item for item in CalendarService().calendars(actor=actor) if item.sysid == calendar_id]
+    return info.source_app, info.source_path
+
+
+def unmarked_calendar(actor, *, schedule_id, idempotency_key, **values):
+    """The calendar of a schedule as it was created before the core had the marker: with no origin."""
+    return (
+        CalendarService().create_shared_calendar(actor=actor, idempotency_key=f"old:{idempotency_key}", **values).sysid
+    )
+
+
+def test_the_calendar_of_a_schedule_is_managed_by_the_app(ready, subtests, monkeypatch):
+    schedule = ready.schedule
+    reception = ready.a.groups["reception"]
+    with subtests.test("a new schedule is born managed, pointing at its page"):
+        assert origin(ready, ready.a.reception, schedule.calendar_id) == (
+            "med_scheduling",
+            f"apps/med_scheduling/schedules/{schedule.sysid}/",
+        )
+        with ready.as_user(ready.a.reception) as actor:
+            (entry,) = service().calendars(actor=actor)
+        assert entry.is_managed and entry.writable
+    with subtests.test("with nothing to mark, the step marks nothing"), as_admin(ready) as admin:
+        assert service().claim_schedule_calendars(actor=admin) == 0
+    # A schedule of before the marker, of another professional: the calendar belongs to that person.
+    with as_admin(ready) as admin, monkeypatch.context() as patched:
+        patched.setattr(calendar_bridge, "create_calendar", unmarked_calendar)
+        other = service().register_professional(
+            actor=admin, display_name="Dr. Caio", membership_user_id=ready.a.finance.pk, idempotency_key="caio"
+        )
+        old = service().create_schedule(
+            actor=admin,
+            name="Agenda do Dr. Caio",
+            professional_id=other.sysid,
+            writer_group_ids=(reception,),
+            idempotency_key="caio",
+        )
+    assert origin(ready, ready.a.reception, old.calendar_id) == ("", "")
+    with subtests.test("the list says which calendar is not managed yet"), ready.as_user(ready.a.reception) as actor:
+        flags = {entry.schedule_id: entry.is_managed for entry in service().calendars(actor=actor)}
+        assert flags == {schedule.sysid: True, old.sysid: False}
+    with subtests.test("only who manages access marks"):
+        with ready.as_user(ready.a.reception) as actor, pytest.raises(Forbidden):
+            service().claim_schedule_calendars(actor=actor)
+        assert origin(ready, ready.a.reception, old.calendar_id) == ("", "")
+    with subtests.test("organization B marks nothing of A"):
+        with ready.as_user(ready.b.admin, ready.b.organization) as actor:
+            assert service().claim_schedule_calendars(actor=actor) == 0
+        assert origin(ready, ready.a.reception, old.calendar_id) == ("", "")
+    with subtests.test("the old schedule is marked once; repeating marks nothing"), as_admin(ready) as admin:
+        assert service().claim_schedule_calendars(actor=admin) == 1
+        assert service().claim_schedule_calendars(actor=admin) == 0
+    assert origin(ready, ready.a.reception, old.calendar_id) == (
+        "med_scheduling",
+        f"apps/med_scheduling/schedules/{old.sysid}/",
+    )
+    with subtests.test("the access of a managed calendar still follows the schedule"):
+        with as_admin(ready) as admin:
+            service().set_schedule_access(
+                actor=admin,
+                schedule_id=old.sysid,
+                writer_group_ids=(),
+                reader_group_ids=(ready.a.groups["professionals"],),
+                expected_revision=old.revision,
+            )
+        assert old.calendar_id not in calendar_ids(ready, ready.a.reception)
+        assert old.calendar_id in calendar_ids(ready, ready.a.doctor)
+        # The owner keeps the calendar: Dr. Caio is the person of the finance team.
+        assert old.calendar_id in calendar_ids(ready, ready.a.finance)
+
+
+def test_calendar_pages_point_at_the_core_for_who_reads_the_calendar(ready, subtests):
+    calendar = ready.schedule.calendar_id
+    with subtests.test("the page of the calendar and the one of its subscription link"):
+        with ready.as_user(ready.a.reception) as actor:
+            pages = service().calendar_pages(actor=actor, calendar_id=calendar)
+        assert pages.calendar_path == f"apps/skeleton_calendar/calendars/{calendar}/"
+        assert pages.subscription_path == f"apps/skeleton_calendar/calendars/{calendar}/link/"
+    with subtests.test("who does not read the schedule"):
+        with ready.as_user(ready.a.finance) as actor, pytest.raises(NotFound):
+            service().calendar_pages(actor=actor, calendar_id=calendar)
+    with subtests.test("organization B"):
+        with ready.as_user(ready.b.admin, ready.b.organization) as actor, pytest.raises(NotFound):
+            service().calendar_pages(actor=actor, calendar_id=calendar)
+    with subtests.test("who loses the schedule loses the page, on the next request"):
+        with as_admin(ready) as admin:
+            service().set_schedule_access(
+                actor=admin,
+                schedule_id=ready.schedule.sysid,
+                writer_group_ids=(),
+                reader_group_ids=(),
+                expected_revision=ready.schedule.revision,
+            )
+        with ready.as_user(ready.a.reception) as actor, pytest.raises(NotFound):
+            service().calendar_pages(actor=actor, calendar_id=calendar)
+
+
 def test_set_schedule_access_mirrors_the_calendar(ready):
     schedule = ready.schedule
     with as_admin(ready) as admin:
@@ -123,6 +263,67 @@ def test_weekly_grid_replaces_with_cas(ready, subtests):
             actor=actor, schedule_id=schedule.sysid, rules=(morning,), expected_revision=fresh
         )
         assert len(replaced) == 1 and len(service().availability(actor=actor, schedule_id=schedule.sysid)) == 1
+
+
+def test_the_grid_takes_the_mode_and_the_capacity_of_each_period(ready, subtests):
+    start = date(2026, 1, 1)
+
+    def save(*rules, user=None):
+        with ready.as_user(user or ready.a.reception) as actor:
+            revision = service().schedule(actor=actor, schedule_id=ready.schedule.sysid).revision
+            return service().set_availability(
+                actor=actor, schedule_id=ready.schedule.sysid, rules=rules, expected_revision=revision
+            )
+
+    def walk_in(capacity=None, start_minute=480, end_minute=720):
+        return AvailabilityRuleInput(0, start_minute, end_minute, start, mode="walk_in", capacity=capacity)
+
+    afternoon = AvailabilityRuleInput(0, 840, 1080, start)
+    with subtests.test("a period says its mode; one built as before is of booked time"):
+        morning, later = save(walk_in(15), afternoon)
+        assert (morning.mode, morning.capacity) == ("walk_in", 15)
+        assert (later.mode, later.capacity) == ("booked", None)
+        assert save(walk_in(), afternoon)[0].capacity is None
+    with subtests.test("mode and capacity change in the row the period already has"):
+        rows = AvailabilityRule.all_objects.filter(schedule_id=ready.schedule.sysid)
+        with as_admin(ready):
+            before = rows.count()
+        changed = save(walk_in(20), afternoon)
+        booked = save(AvailabilityRuleInput(0, 480, 720, start), afternoon)
+        assert changed[0].sysid == booked[0].sysid == morning.sysid
+        assert (changed[0].capacity, booked[0].mode, booked[0].capacity) == (20, "booked", None)
+        with as_admin(ready):
+            assert rows.count() == before
+    with subtests.test("periods of different modes do not overlap either"):
+        with pytest.raises(InvalidInput) as error:
+            save(walk_in(), AvailabilityRuleInput(0, 660, 900, start))
+        assert "rules" in error.value.errors
+    with subtests.test("a capacity is of a walk-in period, from 1 to 500"):
+        for rule in (
+            AvailabilityRuleInput(0, 480, 720, start, capacity=10),
+            walk_in(0),
+            walk_in(501),
+            walk_in(True),
+            walk_in("10"),
+        ):
+            with pytest.raises(InvalidInput) as error:
+                save(rule)
+            assert "capacity" in error.value.errors
+        assert save(walk_in(1))[0].capacity == 1 and save(walk_in(500))[0].capacity == 500
+    with subtests.test("an unknown mode"):
+        for mode in ("queue", "", None, 1):
+            with pytest.raises(InvalidInput) as error:
+                save(AvailabilityRuleInput(0, 480, 720, start, mode=mode))
+            assert "mode" in error.value.errors
+    with subtests.test("the database holds the same rules"):
+        from django.db import IntegrityError, transaction
+        from django.db.models import F, QuerySet
+
+        with as_admin(ready):
+            row = QuerySet(AvailabilityRule).filter(schedule_id=ready.schedule.sysid)
+            for values in ({"mode": "booked", "capacity": 3}, {"capacity": 0}, {"mode": "queue"}):
+                with pytest.raises(IntegrityError, match="med_scheduling_rule_"), transaction.atomic():
+                    row.update(revision=F("revision") + 1, **values)
 
 
 def test_blocks_show_in_the_calendar(ready):

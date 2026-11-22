@@ -20,9 +20,11 @@ O que o produto faz e o que não faz em relação às normas que se aplicam a um
 | Classe | Onde se declara | Efeito | Exemplos |
 |---|---|---|---|
 | Dado pessoal | `TableSpec.personal_fields` | Legível pela API; `[REDACTED]` na auditoria | nome, CPF, RG, CNS, telefone, email, endereço, nome da mãe |
-| Dado sensível (saúde) | `TableSpec.sensitive_fields` | `[REDACTED]` na auditoria; fora de eventos e de DTOs, salvo método que documente | conteúdo das seções da evolução, texto de documento clínico, alergia, medicamento, CID, observações da consulta |
+| Dado sensível (saúde) | `TableSpec.sensitive_fields` | `[REDACTED]` na auditoria; fora de eventos e de DTOs, salvo método que documente | conteúdo das seções da evolução, texto de documento clínico, alergia, medicamento, CID, observações da consulta, marca de prioridade na fila |
 
 - Payload de evento, snapshot de notificação e título de evento da agenda nunca levam dado pessoal nem de saúde: levam `sysid`, código comercial e situação.
+- **Calendário externo.** O que sai da suíte para o aplicativo de calendário de uma pessoa (o arquivo `.ics` baixado e o link de assinatura de um calendário, os dois do núcleo) é só o que a agenda projeta: o tipo e o código da consulta, a contagem de pacientes de um período de ordem de chegada e "Bloqueio". Esses títulos saem para o dono da agenda e para quem marcou; os outros leitores recebem "Ocupado". Nome, documento, telefone, observação e prioridade do paciente não saem para ninguém. O link é pessoal, vale um ano, é revogado em Tokens de API e para de responder quando a pessoa deixa de ler a agenda; a suíte não gera, não guarda e não registra o segredo dele, que viaja no caminho do endereço do feed do núcleo (o proxy da instalação o tira dos logs, como pede o guia de implantação do núcleo). O código da consulta num aparelho pessoal só identifica o paciente para quem já lê a agenda.
+- A marca de prioridade legal da fila (Lei 10.048) permite inferir idade, gestação ou deficiência: é dado sensível, guardada sem o motivo, e sai só na fila e no detalhe da consulta, para quem lê a agenda.
 - Nada é apagado fisicamente. Paciente com prontuário não é excluído nem anonimizado antes do fim da guarda; a regra é implementada por guardas de retenção registradas pelas apps.
 - A leitura de prontuário é registrada numa trilha própria do `med_records`: a auditoria do núcleo só cobre escrita.
 

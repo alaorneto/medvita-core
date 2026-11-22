@@ -1,7 +1,7 @@
 """Pages of the scheduling app: booking and attendance through the screens, authorization, safe HTML."""
 
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,7 +12,7 @@ from django.urls import reverse
 from applications.med_patients.service_api import PatientService
 
 from ..service_api import AvailabilityRuleInput, ScheduleTypeInput, SchedulingService
-from .booking import at, book, prepare
+from .booking import SP, at, book, prepare
 
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)", re.IGNORECASE)
 UNSAFE = re.compile(r"\sstyle=|\son[a-z]+=", re.IGNORECASE)
@@ -52,6 +52,8 @@ def detail(ready, appointment_id, user=None):
 def test_pages_use_only_the_services():
     source = (APP_DIR / "views.py").read_text(encoding="utf-8")
     assert ".objects" not in source and "authorized_queryset" not in source and "from .services" not in source
+    # Every page is on the practice's clock: none takes the core's decorator directly.
+    assert "@tenant_page" not in source and source.count("@practice_page") >= 23
 
 
 def test_every_page_renders_safe_html(ready, subtests):
@@ -63,12 +65,14 @@ def test_every_page_renders_safe_html(ready, subtests):
         "book": url(ready, "book") + f"?patient={ready.patient.sysid}",
         "appointment": url(ready, "appointment", appointment.sysid),
         "reception": url(ready, "reception"),
+        "queue": url(ready, "queue", ready.schedule.sysid, ready.monday.isoformat()),
         "waitlist": url(ready, "waitlist"),
         "settings": url(ready, "settings"),
         "type-edit": url(ready, "type-edit", ready.kind.sysid),
         "schedules": url(ready, "schedules"),
         "schedule": url(ready, "schedule", ready.schedule.sysid),
         "period-edit": url(ready, "period-edit", ready.schedule.sysid, grid(ready)[0].sysid),
+        "day-exception": url(ready, "day-exception", ready.schedule.sysid) + f"?date={ready.monday:%Y-%m-%d}",
         "setup": url(ready, "setup"),
         "patient_section": url(ready, "patient_section", ready.patient.sysid),
     }
@@ -233,7 +237,7 @@ def test_the_appointment_takes_the_color_of_its_type(ready, subtests, monkeypatc
             actor=admin, code="retorno", name="Retorno", duration_minutes=30, color="green", idempotency_key="green"
         )
     blue = book(ready, 9)
-    noon_today = datetime.combine(timezone.localdate(), time(12), tzinfo=at(ready, 9).tzinfo)
+    noon_today = datetime.combine(timezone.localdate(timezone=SP), time(12), tzinfo=SP)  # the practice's day
     booked = {}
     with ready.as_user(ready.a.reception) as actor:
         for key, starts_at, fit_in in (("monday", at(ready, 10), False), ("today", noon_today, True)):
@@ -467,6 +471,8 @@ def test_the_kinds_of_a_schedule_are_chosen_on_its_page(ready, subtests):
     client = client_for(ready.a.reception)
     page = url(ready, "schedule", ready.schedule.sysid)
     on, minutes = f"types-on_{insured.sysid.hex}", f"types-minutes_{insured.sysid.hex}"
+    # The two modes come ticked on the page; their own cases are in test_walk_in_views.
+    modes = {f"types-booked_{insured.sysid.hex}": "on", f"types-walk_in_{insured.sysid.hex}": "on"}
 
     def save(who=client, revision=None, **fields):
         fields = {"form": "types", "revision": revision or schedule_revision(ready), **fields}
@@ -477,7 +483,7 @@ def test_the_kinds_of_a_schedule_are_chosen_on_its_page(ready, subtests):
         assert "Esta agenda atende todos os tipos de atendimento ativos" in html
         assert re.search(r'name="types-scope" value="all"[^>]*checked', html)
     with subtests.test("the ticked kinds with the duration of the schedule"):
-        response = save(**{"types-scope": "chosen", on: "on", minutes: "40"})
+        response = save(**{"types-scope": "chosen", on: "on", minutes: "40", **modes})
         assert response.status_code == 200 and "Tipos de atendimento da agenda salvos" in response.content.decode()
         assert schedule_kinds(ready) == [(insured.sysid, 40, 40)]
         html = assert_safe(client.get(page))
@@ -488,7 +494,7 @@ def test_the_kinds_of_a_schedule_are_chosen_on_its_page(ready, subtests):
         response = save(**{"types-scope": "chosen"})
         assert response.status_code == 400 and "Marque ao menos um tipo de atendimento" in response.content.decode()
     with subtests.test("a duration out of range"):
-        assert save(**{"types-scope": "chosen", on: "on", minutes: "4"}).status_code == 400
+        assert save(**{"types-scope": "chosen", on: "on", minutes: "4", **modes}).status_code == 400
     with subtests.test("a page that opened before another change saves nothing"):
         response = save(revision=1, **{"types-scope": "all"})
         assert "A agenda mudou desde que a página abriu" in response.content.decode()
@@ -576,10 +582,11 @@ def test_booking_offers_the_kinds_of_the_schedule_with_the_suggested_duration(re
         assert response.status_code == 302
         latest = max(booked(ready), key=lambda row: row.starts_at)
         assert (latest.starts_at, latest.ends_at) == (at(ready, 10), at(ready, 10, 40))
-    with subtests.test("a schedule that books no kind says so"):
+    with subtests.test("a kind the schedule takes only by order of arrival has no free time"):
         take(ready, ScheduleTypeInput(insured.sysid, allow_booked=False))
-        html = assert_safe(client.get(url(ready, "book"), base))
-        assert offered_kinds(html) == [] and "não atende nenhum tipo de atendimento com hora marcada" in html
+        html = assert_safe(client.get(url(ready, "book"), {**query, "duration": "", "suggested_duration": ""}))
+        assert offered_kinds(html) == ["Unimed · 20 min"] and offered_slots(html) == set()
+        assert "A agenda não atende Unimed com hora marcada." in html
 
 
 def test_booking_from_the_waitlist_keeps_the_kind_of_the_entry(ready):
@@ -845,7 +852,12 @@ def test_the_script_is_an_optional_static_file_bound_by_data_attributes(ready):
     schedule = assert_safe(client.get(url(ready, "schedule", ready.schedule.sysid)))
     assert script.search(schedule) and "data-period-lines" in schedule and 'data-add-label="' in schedule
     assert len(re.findall(r"<div class=\"period-line\" data-period-line data-empty>", schedule)) == 3
+    day = assert_safe(client.get(url(ready, "day-exception", ready.schedule.sysid), {"date": ready.monday}))
+    # Each period of the day is a scope of its own for the script: its mode folds its own "Vagas".
+    assert script.search(day) and day.count("data-period-mode") == day.count("data-walk-in-only") == 4
+    assert len(re.findall(r"<fieldset[^>]*data-period data-period-line", day)) == 4
     source = (APP_DIR / "static" / "med_scheduling" / "med_scheduling.js").read_text(encoding="utf-8")
+    assert 'select.closest("[data-period]")' in source
     assert source.startswith('"use strict";')
     assert not re.search(
         r"innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|fetch\(|XMLHttpRequest", source
@@ -886,3 +898,258 @@ def test_day_page_query_count_does_not_grow_with_the_periods(ready):
         )
     )
     assert count() == one
+
+
+def test_the_pages_follow_the_clock_of_the_practice_not_of_the_reader(ready, subtests, monkeypatch):
+    """The reader's time zone is the instance's, UTC; the practice's is São Paulo, where 09:00 is 12:00 UTC."""
+    appointment = book(ready, 9)
+    client = client_for(ready.a.reception)
+    monday = f"{ready.monday:%d/%m/%Y}"
+    with subtests.test("the appointment"):
+        html = assert_safe(client.get(url(ready, "appointment", appointment.sysid)))
+        described = re.search(r'<p class="page-description">(.*?)</p>', html, re.S).group(1)
+        assert monday in described and "09:00–09:30" in described
+    with subtests.test("the day, with its free hours"):
+        html = assert_safe(client.get(url(ready, "day"), {"date": ready.monday.isoformat()}))
+        hours = set(re.findall(r">(\d\d:\d\d)</time>", html))
+        assert {"08:00", "09:00", "11:30"} <= hours and max(hours) == "11:30"
+    with subtests.test("the week"):
+        html = assert_safe(client.get(url(ready, "week", ready.schedule.sysid), {"start": ready.monday.isoformat()}))
+        assert ">09:00</time>" in html and ">12:00</time>" not in html
+    with subtests.test("the free hours of the booking page"):
+        query = {
+            "patient": ready.patient.sysid,
+            "schedule": ready.schedule.sysid,
+            "appointment_type": ready.kind.sysid,
+            "day": ready.monday.isoformat(),
+        }
+        html = assert_safe(client.get(url(ready, "book"), query))
+        offered = re.findall(r'name="slot" value="([^"]+)"[^>]*> (\d\d:\d\d)</label>', html)
+        assert offered and all(
+            f"{datetime.fromisoformat(value).astimezone(SP):%H:%M}" == label for value, label in offered
+        )
+    with subtests.test("today is the day of the practice"):
+        # Tuesday 01:30 UTC is still Monday 22:30 at the practice.
+        late = datetime.combine(ready.monday + timedelta(days=1), time(1, 30), tzinfo=UTC)
+        monkeypatch.setattr("django.utils.timezone.now", lambda: late)
+        client = client_for(ready.a.reception)
+        html = assert_safe(client.get(url(ready, "day")))
+        assert monday in html and ">09:00</time>" in html
+        html = assert_safe(client.get(url(ready, "reception")))
+        assert ">09:00</time>" in html and "Maria Paciente Secreta" in html
+
+
+def test_the_pages_open_before_the_practice_is_set_up(clinic):
+    client = client_for(clinic.a.admin)
+
+    def address(name):
+        return reverse(f"med_scheduling:{name}", args=(clinic.org_a.pk,))
+
+    assert_safe(client.get(address("home")))
+    assert_safe(client.get(address("setup")))
+    response = client.get(address("day"))
+    assert response.status_code == 302 and response["Location"] == address("home")
+
+
+# ---------------------------------------------------------- the professional's schedule, calendars
+
+
+def _professional(name, **extra):
+    return {
+        "form": "professional",
+        "professional-display_name": name,
+        "professional-council": "crm",
+        "professional-council_number": "",
+        "professional-council_state": "",
+        "professional-specialty": "",
+        "professional-member": "",
+        "idempotency_key": f"page-{name}",
+        **extra,
+    }
+
+
+def _professionals(ready):
+    with ready.as_user(ready.a.admin) as actor:
+        return {item.display_name: item for item in SchedulingService().professionals(actor=actor, active_only=False)}
+
+
+def _schedules(ready, user=None):
+    with ready.as_user(user or ready.a.admin) as actor:
+        return {item.name: item for item in SchedulingService().schedules(actor=actor, active_only=False)}
+
+
+def test_a_professional_is_registered_with_the_schedule_in_one_step(ready, subtests, monkeypatch):
+    from skeleton.service_api import InvalidInput
+
+    admin = client_for(ready.a.admin)
+    settings = url(ready, "settings")
+    with subtests.test("offered, already ticked, to who manages access"):
+        html = assert_safe(admin.get(settings))
+        box = re.search(r"<input[^>]*name=\"professional-create_schedule\"[^>]*>", html).group(0)
+        assert "checked" in box and "Criar a agenda deste profissional" in html
+        assert "professional-create_schedule" not in assert_safe(client_for(ready.a.reception).get(settings))
+    with subtests.test("both are created, and the page goes to the schedule"):
+        response = admin.post(
+            settings,
+            _professional(
+                "Dr. Bruno", **{"professional-member": str(ready.a.finance.pk), "professional-create_schedule": "on"}
+            ),
+        )
+        created = _schedules(ready)["Dr. Bruno"]
+        assert response.status_code == 302 and response["Location"] == url(ready, "schedule", created.sysid)
+        assert created.professional_id == _professionals(ready)["Dr. Bruno"].sysid
+        # The professional's person owns the schedule: it is theirs to change, with no group granted.
+        assert _schedules(ready, ready.a.finance)["Dr. Bruno"].writable
+        assert "Dr. Bruno" not in _schedules(ready, ready.a.reception)
+    with subtests.test("unticked, only the professional"):
+        response = admin.post(settings, _professional("Dra. Carla"))
+        assert response.status_code == 302 and response["Location"] == settings
+        assert "Dra. Carla" in _professionals(ready) and "Dra. Carla" not in _schedules(ready)
+    with subtests.test("who does not manage access gets no schedule by asking"):
+        response = client_for(ready.a.reception).post(
+            settings, _professional("Dr. Davi", **{"professional-create_schedule": "on"})
+        )
+        assert response.status_code == 302 and response["Location"] == settings
+        assert "Dr. Davi" in _professionals(ready) and "Dr. Davi" not in _schedules(ready)
+    with subtests.test("a schedule that fails takes the professional back"):
+
+        def refuse(self, **kwargs):
+            raise InvalidInput({"name": ["Agenda recusada no teste."]})
+
+        monkeypatch.setattr(SchedulingService, "create_schedule", refuse)
+        response = admin.post(settings, _professional("Dra. Elisa", **{"professional-create_schedule": "on"}))
+        assert response.status_code == 400 and "Agenda recusada no teste." in response.content.decode()
+        assert "Dra. Elisa" not in _professionals(ready)
+
+
+def test_each_calendar_has_its_own_subscription_link(ready, subtests):
+    organization = ready.org_a.pk
+    calendar = ready.schedule.calendar_id
+    subscribe = url(ready, "calendar-subscribe", calendar)
+    page = reverse("skeleton_calendar:calendar-link", args=(organization, calendar))
+    reception, doctor = client_for(ready.a.reception), client_for(ready.a.doctor)
+    appointment = book(ready, 9, notes="queixa sigilosa")
+    with subtests.test("on the page of the schedule"):
+        html = assert_safe(reception.get(url(ready, "schedule", ready.schedule.sysid)))
+        assert subscribe in html and "Assinar no celular" in html
+    with subtests.test("it leads to the page of the core that gives the link of that calendar"):
+        response = reception.get(subscribe)
+        assert (response.status_code, response["Location"]) == (302, page)
+        assert reception.get(page).status_code == 200
+        assert reception.post(subscribe).status_code == 405
+    with subtests.test("who does not read the schedule sees no link and gets a 404"):
+        finance = client_for(ready.a.finance)
+        assert finance.get(subscribe).status_code == 404
+        assert finance.get(url(ready, "schedule", ready.schedule.sysid)).status_code == 404
+        assert subscribe not in assert_safe(finance.get(url(ready, "schedules")))
+    with subtests.test("organization B gets a 404 for a calendar of A"):
+        other = client_for(ready.b.admin)
+        assert other.get(url(ready, "calendar-subscribe", calendar, organization=ready.org_b)).status_code == 404
+    # The link is made by the core, on its page: the app never sees it. Each person has their own.
+    links = {}
+    for name, client in (("doctor", doctor), ("reception", reception)):
+        issued = client.post(page)
+        assert issued.status_code == 201
+        links[name] = issued.context["url"]
+    with subtests.test("the owner of the schedule reads the kind and the code, never the patient"):
+        feed = Client().get(links["doctor"])
+        assert feed.status_code == 200 and feed["Content-Type"].startswith("text/calendar")
+        body = feed.content.decode()
+        assert f"Consulta · {appointment.code}" in body
+        assert "Maria" not in body and "queixa sigilosa" not in body and str(ready.patient.sysid) not in body
+    with subtests.test("a group taken out by the schedule stops receiving through the link, on the next request"):
+        assert Client().get(links["reception"]).status_code == 200
+        with ready.as_user(ready.a.admin) as admin:
+            current = SchedulingService().schedule(actor=admin, schedule_id=ready.schedule.sysid)
+            SchedulingService().set_schedule_access(
+                actor=admin,
+                schedule_id=current.sysid,
+                writer_group_ids=(),
+                reader_group_ids=(),
+                expected_revision=current.revision,
+            )
+        assert Client().get(links["reception"]).status_code == 404
+        assert reception.get(subscribe).status_code == 404
+        # The owner keeps the schedule and the link.
+        assert Client().get(links["doctor"]).status_code == 200
+
+
+def test_the_core_pages_leave_the_calendar_of_a_schedule_to_the_schedule(ready, subtests, monkeypatch):
+    from skeleton.contrib.calendar.service_api import CalendarService
+
+    from .. import calendar_bridge
+
+    organization = ready.org_a.pk
+    admin = client_for(ready.a.admin)
+
+    def unmarked(actor, *, schedule_id, idempotency_key, **values):
+        created = CalendarService().create_shared_calendar(
+            actor=actor, idempotency_key=f"old:{idempotency_key}", **values
+        )
+        return created.sysid
+
+    def core(name, calendar_id):
+        return reverse(f"skeleton_calendar:{name}", args=(organization, calendar_id))
+
+    with subtests.test("the pages of the core refuse to rename, share or delete it"):
+        for name in ("calendar-rename", "calendar-sharing", "calendar-delete"):
+            assert admin.post(core(name, ready.schedule.calendar_id), {"name": "Outro"}).status_code == 409, name
+        with ready.as_user(ready.a.reception) as actor:
+            (entry,) = SchedulingService().calendars(actor=actor)
+        assert entry.name == "Agenda da Dra. Ana"
+    # A schedule created before the core had the marker: its calendar has no origin yet.
+    with ready.as_user(ready.a.admin) as actor, monkeypatch.context() as patched:
+        patched.setattr(calendar_bridge, "create_calendar", unmarked)
+        room = SchedulingService().add_room(actor=actor, name="Sala 1", idempotency_key="room")
+        SchedulingService().create_schedule(
+            actor=actor,
+            name="Sala antiga",
+            room_id=room.sysid,
+            writer_group_ids=(ready.a.groups["reception"],),
+            idempotency_key="old-room",
+        )
+    with subtests.test("who manages access is told, and nobody else"):
+        html = assert_safe(admin.get(url(ready, "schedules")))
+        assert "1 agenda foi criada antes" in html and "Vincular à agenda médica" in html
+        reception = client_for(ready.a.reception)
+        assert "Vincular à agenda médica" not in assert_safe(reception.get(url(ready, "schedules")))
+        assert reception.post(url(ready, "schedules"), {"form": "claim"}).status_code == 404
+    with subtests.test("marking once is enough"):
+        response = admin.post(url(ready, "schedules"), {"form": "claim"}, follow=True)
+        html = assert_safe(response)
+        assert "1 calendário foi vinculado à agenda médica" in html and "Vincular à agenda médica" not in html
+        response = admin.post(url(ready, "schedules"), {"form": "claim"}, follow=True)
+        assert "já estavam vinculados" in assert_safe(response)
+
+
+def test_the_schedules_page_lists_the_calendars_the_person_reads(ready, subtests):
+    organization = ready.org_a.pk
+    reception = client_for(ready.a.reception)
+    ics = reverse("skeleton_calendar:calendar-ics", args=(organization, ready.schedule.calendar_id))
+    with subtests.test("the schedules, with the ways out of the core calendar"):
+        html = assert_safe(reception.get(url(ready, "schedules")))
+        section = html[html.index('id="calendars-heading"') :]
+        assert "Agendas de atendimento" in section and url(ready, "schedule", ready.schedule.sysid) in section
+        assert ics in section and reverse("skeleton_calendar:home", args=(organization,)) in section
+        assert url(ready, "calendar-subscribe", ready.schedule.calendar_id) in section
+        assert reverse("skeleton_calendar:calendars", args=(organization,)) in section
+        # The link is one per calendar: the personal feed, which joins every calendar, is not offered here.
+        assert reverse("skeleton_calendar_me:feed-token") not in section and "só daquele calendário" in section
+        assert "Vincular à agenda médica" not in html
+        assert "valem só para as agendas de atendimento" in section
+        assert "Outros calendários" not in section and "Maria" not in html
+    with subtests.test("the other calendars apart, after the first visit to the core calendar"):
+        assert reception.get(reverse("skeleton_calendar:home", args=(organization,))).status_code == 200
+        section = assert_safe(reception.get(url(ready, "schedules")))
+        section = section[section.index('id="calendars-heading"') :]
+        assert "Outros calendários" in section and "Seu calendário" in section
+    with subtests.test("the download is of that calendar, for who reads it"):
+        response = reception.get(ics)
+        assert response.status_code == 200 and response["Content-Type"].startswith("text/calendar")
+        assert client_for(ready.a.finance).get(ics).status_code == 404
+    with subtests.test("who reads no schedule sees no calendar of one"):
+        html = assert_safe(client_for(ready.a.finance).get(url(ready, "schedules")))
+        assert "Agenda da Dra. Ana" not in html and "Agendas de atendimento" not in html
+    with subtests.test("organization B sees nothing of A"):
+        html = assert_safe(client_for(ready.b.admin).get(url(ready, "schedules", organization=ready.org_b)))
+        assert "Agenda da Dra. Ana" not in html and str(ready.schedule.calendar_id) not in html

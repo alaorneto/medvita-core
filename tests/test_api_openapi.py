@@ -7,6 +7,7 @@ kind is compared with its schema, key by key, so a DTO and its documentation can
 """
 
 import json
+from datetime import date, timedelta
 
 import pytest
 from django.test import Client
@@ -14,6 +15,7 @@ from django.test import Client
 from applications.med_finance.tests.helpers import add_price, setup_finance
 from applications.med_patients.service_api import PatientInput, PatientService
 from applications.med_records.tests.helpers import open_chart, setup_archive
+from applications.med_scheduling.service_api import AvailabilityRuleInput, SchedulingService
 from applications.med_scheduling.tests.booking import at, prepare
 
 APPS = ("med_patients", "med_scheduling", "med_records", "med_finance")
@@ -22,6 +24,7 @@ WRITES = {
     ("med_patients", "patients/{patient_id}/", "patch"),
     ("med_scheduling", "appointments/", "post"),
     ("med_scheduling", "appointments/{appointment_id}/{transition}/", "post"),
+    ("med_scheduling", "appointments/{appointment_id}/priority/", "post"),
     ("med_finance", "charges/", "post"),
     ("med_finance", "charges/{charge_id}/payments/", "post"),
 }
@@ -59,6 +62,7 @@ def test_a_token_sees_only_what_it_may_call(ready, native_clients):
     by_session = operations(schema_of(browser))
     assert WRITES <= by_session
     assert ("med_records", "encounters/{encounter_id}/", "get") in by_session
+    assert {("med_scheduling", f"schedules/{{schedule_id}}/{name}/", "get") for name in ("plan", "queue")} <= by_session
     broad = schema_of(native_clients.client(ready.a.reception))
     assert operations(broad) == by_session  # Every view of the suite declares its methods and scopes.
     patient_path = broad["paths"]["/api/v1/o/{organization_id}/apps/med_patients/patients/"]
@@ -119,6 +123,30 @@ def test_the_declared_schemas_match_the_responses(ready, native_clients):
         content_type="application/json",
         HTTP_IDEMPOTENCY_KEY="schema",
     ).json()
+    # A walk-in session on Tuesday with one patient who arrived, so the queue has every shape to compare.
+    tuesday = ready.monday + timedelta(days=1)
+    with ready.as_user(ready.a.reception) as actor:
+        scheduling = SchedulingService()
+        current = scheduling.schedule(actor=actor, schedule_id=ready.schedule.sysid).revision
+        scheduling.set_availability(
+            actor=actor,
+            schedule_id=ready.schedule.sysid,
+            rules=(
+                AvailabilityRuleInput(0, 480, 720, date(2026, 1, 1)),
+                AvailabilityRuleInput(1, 480, 720, date(2026, 1, 1), mode="walk_in", capacity=5),
+            ),
+            expected_revision=current,
+        )
+        waiting = scheduling.book(
+            actor=actor,
+            schedule_id=ready.schedule.sysid,
+            patient_id=ready.patient.sysid,
+            appointment_type_id=ready.kind.sysid,
+            starts_at=at(ready, 9, day=tuesday),
+            mode="walk_in",
+            idempotency_key="schema-queue",
+        )
+        scheduling.check_in(actor=actor, appointment_id=waiting.sysid, expected_revision=waiting.revision)
     charge = token.post(
         f"/api/v1/o/{org}/apps/med_finance/charges/",
         data=json.dumps({"patient": str(ready.patient.sysid), "items": [{"code": "C1"}], "confirm": False}),
@@ -131,6 +159,13 @@ def test_the_declared_schemas_match_the_responses(ready, native_clients):
         (token, "med_patients", f"patients/{ready.patient.sysid}/guardians/", ""),
         (token, "med_scheduling", "schedules/", ""),
         (token, "med_scheduling", f"schedules/{ready.schedule.sysid}/slots/", f"?start={ready.monday:%Y-%m-%d}"),
+        (
+            token,
+            "med_scheduling",
+            f"schedules/{ready.schedule.sysid}/plan/",
+            f"?start={ready.monday:%Y-%m-%d}&end={tuesday:%Y-%m-%d}",
+        ),
+        (token, "med_scheduling", f"schedules/{ready.schedule.sysid}/queue/", f"?date={tuesday:%Y-%m-%d}"),
         (token, "med_scheduling", "appointments/", ""),
         (token, "med_scheduling", f"appointments/{booked['sysid']}/", ""),
         (token, "med_finance", "price-items/", ""),

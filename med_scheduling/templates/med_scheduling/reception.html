@@ -1,7 +1,7 @@
 {% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Recepção" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<meta http-equiv="refresh" content="60"><link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}">{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{{ today|date:"l, d/m/Y" }}</p><h1>{% translate "Recepção" %}</h1><p class="page-description">{% translate "Quem chegou, quem está em atendimento e os próximos do dia. A página se atualiza a cada minuto." %}</p></div></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{{ today|date:"l, d/m/Y" }}</p><h1>{% translate "Recepção" %}</h1><p class="page-description">{% translate "Quem chegou, quem está em atendimento e os próximos do dia; abaixo, a fila de cada período de ordem de chegada. A página se atualiza a cada minuto." %}</p></div></div>
 {% include "med_scheduling/_nav.html" %}
 <div class="day-columns">
 <section class="card" aria-labelledby="waiting-heading"><h2 id="waiting-heading">{% translate "Aguardando" %}</h2>
@@ -9,6 +9,7 @@
 <section class="card" aria-labelledby="progress-heading"><h2 id="progress-heading">{% translate "Em atendimento" %}</h2>
 {% for item in in_progress %}{% include "med_scheduling/_appointment_item.html" %}{% empty %}<p class="helptext">{% translate "Ninguém em atendimento." %}</p>{% endfor %}</section>
 <section class="card" aria-labelledby="upcoming-heading"><h2 id="upcoming-heading">{% translate "Próximos" %}</h2>
-{% for item in upcoming %}<div>{% include "med_scheduling/_appointment_item.html" %}<form method="post" action="{% url 'med_scheduling:transition' organization_id item.row.sysid 'check_in' %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ item.row.revision }}"><input type="hidden" name="next" value="reception"><button type="submit" class="btn btn-secondary">{% translate "Registrar chegada" %}</button></form></div>{% empty %}<p class="helptext">{% translate "Nenhuma consulta adiante hoje." %}</p>{% endfor %}</section>
+{% for item in upcoming %}<div>{% include "med_scheduling/_appointment_item.html" %}<form method="post" action="{% url 'med_scheduling:check-in' organization_id item.row.sysid %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ item.row.revision }}"><input type="hidden" name="next" value="reception"><button type="submit" class="btn btn-secondary">{% translate "Registrar chegada" %}</button></form></div>{% empty %}<p class="helptext">{% translate "Nenhuma consulta com hora marcada adiante hoje." %}</p>{% endfor %}</section>
 </div>
+{% for card in queues %}{% if forloop.first %}<div class="mt-6">{% endif %}{% include "med_scheduling/_queue.html" with back="reception" %}{% if forloop.last %}</div>{% endif %}{% endfor %}
 {% endblock %}

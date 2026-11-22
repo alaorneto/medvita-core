@@ -1,0 +1,9 @@
+{% load i18n %}{% comment %}A walk-in session as the day and the week show it: the occupancy and who is in it, in the call order.{% endcomment %}<section class="session-card" aria-labelledby="session-{{ card.id }}">
+<h3 id="session-{{ card.id }}" class="period-hours"><a href="{% url 'med_scheduling:queue' organization_id card.schedule.sysid card.day %}">{% translate "Ordem de chegada" %} · {{ card.hours }}</a></h3>
+<p class="helptext">{{ card.occupancy }}{% if card.session.is_full %} <span class="badge badge-warning">{% translate "Lotado" %}</span>{% endif %}</p>
+{% if card.empty %}<p class="helptext">{% translate "Nenhum paciente marcado." %}</p>{% endif %}
+{% if card.waiting %}<p class="queue-group">{% translate "Fila" %}</p><ol class="queue-list">{% for item in card.waiting %}<li>{% include "med_scheduling/_queue_item.html" %}</li>{% endfor %}</ol>{% endif %}
+{% if card.in_progress %}<p class="queue-group">{% translate "Em atendimento" %}</p>{% for item in card.in_progress %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
+{% if card.expected %}<p class="queue-group">{% translate "Esperados" %}</p>{% for item in card.expected %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
+{% if card.finished %}<p class="queue-group">{% translate "Atendidos e faltas" %}</p>{% for item in card.finished %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
+</section>

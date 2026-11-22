@@ -4,7 +4,7 @@ from datetime import date
 from types import SimpleNamespace
 from uuid import uuid4
 
-from ...forms import Period, PeriodForm, PeriodsForm, clock
+from ...forms import DayForm, DayPeriod, Period, PeriodForm, PeriodsForm, clock
 
 FROM = "2026-01-01"
 
@@ -113,7 +113,9 @@ def test_the_empty_lines_are_marked_for_the_page():
     assert [(line["number"], line["empty"]) for line in blank.lines()] == [(1, True), (2, True), (3, True)]
     typed = periods_form({"weekdays": ["0"], "start_1": "08:00", "end_1": "09:00", "end_3": "11:00"})
     assert [line["empty"] for line in typed.lines()] == [False, True, False]
-    assert list(typed.fields)[:8] == ["weekdays", "start_1", "end_1", "start_2", "end_2", "start_3", "end_3", "kinds"]
+    # The hours first, then how the period sees its patients, then the kinds it takes.
+    hours = ["start_1", "end_1", "start_2", "end_2", "start_3", "end_3"]
+    assert list(typed.fields)[:10] == ["weekdays", *hours, "mode", "capacity", "kinds"]
 
 
 def test_one_period_is_changed_against_the_others(subtests):
@@ -138,3 +140,77 @@ def test_one_period_is_changed_against_the_others(subtests):
 
 def test_the_clock_of_the_page():
     assert [clock(minutes) for minutes in (0, 485, 720, 1439, 1440)] == ["00:00", "08:05", "12:00", "23:59", "24:00"]
+
+
+def test_the_periods_of_one_day_are_read_line_by_line(subtests):
+    insured, private = kind(), kind("Particular")
+    kinds = (insured, private)
+    with subtests.test("each line with hours is a period, in the order of the day"):
+        form = DayForm(
+            {
+                "start_1": "14:00",
+                "end_1": "00:00",
+                "start_3": "08:00",
+                "end_3": "12:00",
+                "mode_3": "walk_in",
+                "capacity_3": "15",
+                "kinds_3": [str(insured.sysid)],
+            },
+            kinds=kinds,
+        )
+        assert form.is_valid(), form.errors
+        assert form.periods == [
+            DayPeriod(480, 720, "walk_in", 15, (insured.sysid,)),
+            DayPeriod(840, 1440, "booked", None, ()),
+        ]
+    with subtests.test("the lines of the page"):
+        blank = DayForm(initial={"start_1": "08:00", "end_1": "12:00"}, lines=5)
+        assert [(line["number"], line["empty"]) for line in blank.lines()] == [
+            (1, False),
+            (2, True),
+            (3, True),
+            (4, True),
+            (5, True),
+        ]
+        assert list(blank.fields)[:5] == ["start_1", "end_1", "mode_1", "capacity_1", "kinds_1"]
+        assert "data-period-mode" in str(blank["mode_2"])
+    cases = {
+        "no period at all": ({}, "start_1", "Informe ao menos um período"),
+        "half a period": ({"start_1": "08:00"}, "end_1", "Informe o início e o fim"),
+        "an end before the start": ({"start_1": "12:00", "end_1": "08:00"}, "end_1", "depois do início"),
+        "two periods over each other": (
+            {"start_1": "08:00", "end_1": "12:00", "start_2": "11:00", "end_2": "13:00"},
+            "start_2",
+            "11:00–13:00 se sobrepõe ao período 08:00–12:00",
+        ),
+        "places in booked time": (
+            {"start_1": "08:00", "end_1": "12:00", "capacity_1": "5"},
+            "capacity_1",
+            "Vagas valem só na ordem de chegada",
+        ),
+        "a line with places and no hours": (
+            {"start_1": "08:00", "end_1": "12:00", "mode_2": "walk_in", "capacity_2": "5"},
+            "start_2",
+            "Informe o início e o fim",
+        ),
+        "no place at all": (
+            {"start_1": "08:00", "end_1": "12:00", "mode_1": "walk_in", "capacity_1": "0"},
+            "capacity_1",
+            "",
+        ),
+        "an unknown mode": ({"start_1": "08:00", "end_1": "12:00", "mode_1": "queue"}, "mode_1", ""),
+        "an unknown kind": ({"start_1": "08:00", "end_1": "12:00", "kinds_1": [str(uuid4())]}, "kinds_1", ""),
+    }
+    for name, (data, field, text) in cases.items():
+        with subtests.test(name):
+            form = DayForm(data, kinds=kinds)
+            assert not form.is_valid() and set(form.errors) == {field}, form.errors
+            assert text in form.errors[field][0] and form.periods == []
+    with subtests.test("touching periods are two periods"):
+        form = DayForm({"start_1": "08:00", "end_1": "12:00", "start_2": "12:00", "end_2": "13:00"})
+        assert form.is_valid() and len(form.periods) == 2
+    with subtests.test("a kind the schedule does not take in the mode of the line"):
+        data = {"start_1": "08:00", "end_1": "12:00", "mode_1": "walk_in", "kinds_1": [str(private.sysid)]}
+        form = DayForm(data, kinds=kinds, walk_in_kinds={insured.sysid})
+        assert not form.is_valid() and "não atende por ordem de chegada: Particular" in form.errors["kinds_1"][0]
+        assert DayForm({**data, "mode_1": "booked"}, kinds=kinds, walk_in_kinds={insured.sysid}).is_valid()

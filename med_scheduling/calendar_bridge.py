@@ -2,13 +2,19 @@
 
 Each schedule owns a shared calendar with the same access; appointments and blocks are projected
 there as managed events. A projected title names the kind of appointment and its code, never the
-patient: the calendar shows "Ocupado" to everyone but the owner and the organizer anyway.
+patient: the calendar shows "Ocupado" to everyone but the owner and the organizer anyway. A walk-in
+session is one event that says how many patients it has, instead of one event per appointment.
+
+The calendar of a schedule is marked in the core as managed by this app: the pages of the core
+calendar do not rename, share nor delete it, so its access changes only with the schedule. The
+subscription link of a calendar is made, kept and checked by the core; here there is only the
+path of the page that gives it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
 
@@ -28,7 +34,9 @@ def create_calendar(
     writer_group_ids: tuple[UUID, ...],
     reader_group_ids: tuple[UUID, ...],
     idempotency_key: str,
+    schedule_id: UUID,
 ) -> UUID:
+    """The shared calendar of a new schedule, born managed by this app and pointing at the schedule."""
     info = CalendarService().create_shared_calendar(
         actor=actor,
         name=name,
@@ -37,8 +45,41 @@ def create_calendar(
         writer_group_ids=writer_group_ids,
         reader_group_ids=reader_group_ids,
         idempotency_key=f"med_scheduling:schedule:{idempotency_key}"[:200],
+        source_app=APP_LABEL,
+        source_path=source_path(schedule_id),
     )
     return info.sysid
+
+
+def is_managed(info: Any) -> bool:
+    """Whether the core has the calendar as managed by this app."""
+    return getattr(info, "source_app", "") == APP_LABEL
+
+
+def claim_calendar(actor: Any, *, calendar_id: UUID, schedule_id: UUID, expected_revision: int) -> None:
+    """Mark as managed by this app the calendar of a schedule created before the marker existed."""
+    CalendarService().claim_calendar(
+        actor=actor,
+        calendar_id=calendar_id,
+        source_app=APP_LABEL,
+        source_path=source_path(schedule_id),
+        expected_revision=expected_revision,
+    )
+
+
+def calendar_links(actor: Any, calendar_id: UUID) -> Any:
+    """The paths of the page of a calendar and of its subscription page, relative to the organization."""
+    return CalendarService().calendar_links(actor=actor, calendar_id=calendar_id)
+
+
+def readable_calendars(actor: Any) -> tuple[Any, ...]:
+    """The calendars of the core the actor reads, creating none; nothing without the table permission."""
+    from skeleton.service_api import Forbidden
+
+    try:
+        return CalendarService().calendars(actor=actor)
+    except Forbidden:
+        return ()
 
 
 def _grants(
@@ -147,6 +188,54 @@ def put_event(
         data={"title": title, "starts_at": starts_at, "ends_at": ends_at, "tzid": tzid, "is_private": True},
         attendee_user_ids=attendee_user_ids,
         source_path=path,
+    )
+
+
+def session_key(schedule_id: UUID, day: date, minute: int) -> str:
+    """The key of the event of a walk-in session: the schedule, the local day and the minute its period starts."""
+    return f"session:{schedule_id}:{day:%Y%m%d}:{minute}"
+
+
+def session_path(schedule_id: UUID, day: date) -> str:
+    return f"apps/{APP_LABEL}/schedules/{schedule_id}/queue/{day.isoformat()}/"
+
+
+def put_session_event(
+    actor: Any,
+    *,
+    schedule_id: UUID,
+    calendar_id: UUID,
+    day: date,
+    minute: int,
+    count: int,
+    starts_at: datetime,
+    ends_at: datetime | None,
+    tzid: str,
+    attendee_user_ids: tuple[UUID, ...],
+) -> None:
+    """One event for a whole walk-in session, saying how many patients it has; with none, no event.
+
+    The title never names a patient nor an appointment: "Ordem de chegada · N pacientes".
+    """
+    from django.utils.translation import ngettext
+
+    key = session_key(schedule_id, day, minute)
+    if count < 1 or ends_at is None:
+        remove_event(actor, source_key=key)
+        return
+    title = ngettext("Ordem de chegada · %(count)d paciente", "Ordem de chegada · %(count)d pacientes", count) % {
+        "count": count
+    }
+    put_event(
+        actor,
+        source_key=key,
+        calendar_id=calendar_id,
+        title=title,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        tzid=tzid,
+        attendee_user_ids=attendee_user_ids,
+        path=session_path(schedule_id, day),
     )
 
 

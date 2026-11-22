@@ -59,6 +59,8 @@ Ordem de carga em `SKELETON_DEV_APPS` (a de `INSTALLED_APPS`): `med_patients`, `
 
 A seta aponta para a app de que se depende. No sentido da seta, uma app chama o `service_api` da outra. No sentido contrário, a app de baixo publica eventos de domínio e oferece registries; a de cima consome os eventos e se registra no `ready()`.
 
+**Agendas de atendimento e calendários do núcleo.** Cada agenda (`Schedule`) tem um calendário compartilhado do `skeleton_calendar`, com o mesmo acesso, onde as consultas e os bloqueios aparecem como eventos gerenciados (o tipo e o código, nunca o paciente). As regras de consulta (grade, tipos, hora marcada, ordem de chegada) são da agenda; o calendário é a projeção dela. Os outros calendários do núcleo (o pessoal de cada membro, os compartilhados) guardam eventos comuns e não passam pela agenda médica, que só os lista para quem os lê. O calendário de uma agenda é marcado no núcleo como gerenciado pela agenda médica: o acesso dele só muda pela agenda. Abrir, baixar o `.ics` e assinar um calendário (um link por pessoa e calendário) são páginas do núcleo: a agenda médica não gera link nem guarda token.
+
 ## Integração entre as apps
 
 | Mecanismo | Sentido | Exemplos |
