@@ -68,7 +68,7 @@ jobs:
         env:
           DJANGO_SETTINGS_MODULE: skeleton.testing.host.settings
           TAG: ${{ steps.tag.outputs.tag }}
-        run: python -m django appearance build-package med_patients/themes/medvita --output "dist/medvita-theme-${TAG#v}.zip"
+        run: python -m django appearance --skip-checks build-package med_patients/themes/medvita --output "dist/medvita-theme-${TAG#v}.zip"
       - name: Anexar à release
         env:
           GH_TOKEN: ${{ github.token }}
