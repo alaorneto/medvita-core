@@ -1,6 +1,6 @@
 # API de serviços: Agenda médica
 
-Referência de `SchedulingService` (`applications.med_scheduling.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.3.0/docs/service-api.md).
+Referência de `SchedulingService` (`applications.med_scheduling.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.4.0/docs/service-api.md).
 
 ## Visão geral
 

@@ -1,6 +1,6 @@
 # API de serviços: Financeiro
 
-Referência de `FinanceService` (`applications.med_finance.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.3.0/docs/service-api.md).
+Referência de `FinanceService` (`applications.med_finance.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.4.0/docs/service-api.md).
 
 ## Visão geral
 

@@ -66,3 +66,12 @@ Local: Windows 11, Python 3.14, núcleo instalado da tag `v0.3.0` (commit `ce12e
 - `package doctor <pacote>` nos quatro, sobre um commit da árvore de trabalho → `problems: []`.
 - `tools/sync_leaves.py --check`, `tools/service_reference.py --check`, `ruff check .` e `ruff format --check .` → limpos.
 - `/platform/appearance/` resolve (`platform:appearance`) e `appearance show` responde com a marca padrão num banco migrado.
+
+## Núcleo v0.4.0 (2026-11-22)
+
+Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da tag `v0.4.0` (commit `bda8a10`), PostgreSQL local descartável, asserções na role runtime. A árvore é a ponta da pilha dos epics #73, #74 e #75 (até a #85), só com as referências ao núcleo trocadas.
+
+- `python -m django check --fail-level WARNING` → sem problemas (nenhum uso de superfície não pública); `makemigrations --check --dry-run` → nada pendente.
+- `python -m pytest -q -n auto` → 439 passed, 692 subtests passed em 566 s.
+- `tools/sync_leaves.py --check`, `tools/service_reference.py --check`, `ruff check .` e `ruff format --check .` → limpos.
+- `package doctor <pacote> --git-ref HEAD` nos quatro, sobre o commit desta troca (antes de acrescentar esta linha) → `"ok": true`, `problems: []`.
