@@ -1,0 +1,4 @@
+{% comment %}A field of checkboxes as a group: the legend names it, each box has its own label.{% endcomment %}<fieldset class="mb-4"{% if field.help_text %} aria-describedby="{{ field.auto_id }}_helptext"{% endif %}><legend>{{ field.label }}</legend>
+<div class="box-list">{% for box in field %}<div class="form-field form-field-check">{{ box.tag }}<label for="{{ box.id_for_label }}">{{ box.choice_label }}</label></div>{% endfor %}</div>
+{% if field.help_text %}<div class="helptext" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</div>{% endif %}
+{{ field.errors }}</fieldset>

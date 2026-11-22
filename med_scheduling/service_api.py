@@ -32,10 +32,13 @@ from .models import (
     Appointment,
     AppointmentType,
     AvailabilityRule,
+    AvailabilityRuleType,
+    PaymentKind,
     Practice,
     Professional,
     Room,
     Schedule,
+    ScheduleAppointmentType,
     ScheduleBlock,
     WaitlistEntry,
 )
@@ -64,6 +67,8 @@ __all__ = [
     "ProfessionalInfo",
     "RoomInfo",
     "ScheduleInfo",
+    "ScheduleTypeInfo",
+    "ScheduleTypeInput",
     "SchedulingService",
     "Slot",
     "WaitlistInfo",
@@ -168,6 +173,7 @@ class AppointmentTypeInfo:
     requires_room: bool
     is_active: bool
     revision: int
+    payment_kind: str = "private"
 
 
 def type_info(row: AppointmentType) -> AppointmentTypeInfo:
@@ -182,7 +188,34 @@ def type_info(row: AppointmentType) -> AppointmentTypeInfo:
         row.requires_room,
         row.is_active,
         row.revision,
+        str(row.payment_kind),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleTypeInput:
+    """A kind of appointment a schedule takes: its own duration there (``None``: the one of the kind) and the modes."""
+
+    appointment_type_id: UUID
+    duration_minutes: int | None = None
+    allow_booked: bool = True
+    allow_walk_in: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleTypeInfo:
+    """A kind of appointment as one schedule takes it.
+
+    ``duration_minutes`` is the duration in force there: ``own_duration`` when the schedule has one,
+    otherwise the one of the kind. ``configured`` is False while the schedule takes every active kind.
+    """
+
+    appointment_type_id: UUID
+    duration_minutes: int
+    own_duration: int | None
+    allow_booked: bool
+    allow_walk_in: bool
+    configured: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +251,11 @@ def schedule_info(row: Schedule, *, writable: bool = False) -> ScheduleInfo:
 
 @dataclass(frozen=True, slots=True)
 class AvailabilityRuleInput:
-    """A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice's time zone."""
+    """A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice's time zone.
+
+    ``appointment_type_ids`` are the kinds the period takes; none means every kind the schedule
+    takes. ``appointment_type_id`` is the older way of naming a single kind and joins the set.
+    """
 
     weekday: int
     start_minute: int
@@ -226,6 +263,7 @@ class AvailabilityRuleInput:
     valid_from: date
     valid_until: date | None = None
     appointment_type_id: UUID | None = None
+    appointment_type_ids: tuple[UUID, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,9 +276,12 @@ class AvailabilityRuleInfo:
     valid_from: date
     valid_until: date | None
     appointment_type_id: UUID | None
+    appointment_type_ids: tuple[UUID, ...] = ()
 
 
-def rule_info(row: AvailabilityRule) -> AvailabilityRuleInfo:
+def rule_info(row: AvailabilityRule, kinds: Any = ()) -> AvailabilityRuleInfo:
+    """A window with the kinds its period lists; ``appointment_type_id`` answers while there is a single one."""
+    ids = _kinds_of_rule(row, kinds)
     return AvailabilityRuleInfo(
         row.pk,
         row.schedule_id,
@@ -249,8 +290,17 @@ def rule_info(row: AvailabilityRule) -> AvailabilityRuleInfo:
         row.end_minute,
         row.valid_from,
         row.valid_until,
-        row.appointment_type_id,
+        ids[0] if len(ids) == 1 else None,
+        ids,
     )
+
+
+def _kinds_of_rule(row: AvailabilityRule, kinds: Any = ()) -> tuple[UUID, ...]:
+    """The kinds of a window: the link rows plus the single kind an older row still carries."""
+    found = set(kinds)
+    if row.appointment_type_id is not None:
+        found.add(row.appointment_type_id)
+    return tuple(sorted(found, key=str))
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,9 +324,12 @@ def block_info(row: ScheduleBlock) -> BlockInfo:
 
 @dataclass(frozen=True, slots=True)
 class Slot:
+    """A free time; ``appointment_type_ids`` are the kinds its period takes (none: every kind of the schedule)."""
+
     starts_at: datetime
     ends_at: datetime
     schedule_id: UUID
+    appointment_type_ids: tuple[UUID, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,20 +537,66 @@ def _aware(value: object, field: str) -> datetime:
     return value
 
 
-def _check_rules(rules: object, practice: Practice, actor: Any) -> list[AvailabilityRuleInput]:
+def _input_kinds(rule: AvailabilityRuleInput) -> frozenset[UUID]:
+    ids = rule.appointment_type_ids
+    if not isinstance(ids, tuple) or len(ids) > MAX_SCHEDULE_TYPES:
+        raise InvalidInput(
+            {"appointment_type_ids": [gettext("Informe os tipos do período numa tupla de identificadores.")]}
+        )
+    found = {as_uuid(value, field="appointment_type_ids") for value in ids}
+    if rule.appointment_type_id is not None:
+        found.add(as_uuid(rule.appointment_type_id, field="appointment_type_id"))
+    return frozenset(found)
+
+
+def _shape(rule: Any) -> tuple[int, int, int, date, date | None]:
+    """What makes a window the same window, in an input and in a row."""
+    return (rule.weekday, rule.start_minute, rule.end_minute, rule.valid_from, rule.valid_until)
+
+
+def _rule_kinds(actor: Any, rules: Any) -> dict[UUID, list[UUID]]:
+    """The kinds each window lists, by window, in one query for all of them."""
     from skeleton.access.policies import authorized_queryset
 
+    ids = [rule.pk for rule in rules]
+    found: dict[UUID, list[UUID]] = {}
+    if not ids:
+        return found
+    links = authorized_queryset(AvailabilityRuleType, user=actor, action="read").filter(rule_id__in=ids)
+    for rule_id, type_id in links.values_list("rule_id", "appointment_type_id"):
+        found.setdefault(rule_id, []).append(type_id)
+    return found
+
+
+def _windows(actor: Any, rules: Any) -> list[Any]:
+    """The windows of the rules of one or more schedules, each with the kinds its period lists."""
+    from .slots import windows_of
+
+    rules = list(rules)
+    return windows_of(rules, _rule_kinds(actor, rules))
+
+
+def _availability(actor: Any, schedule: Schedule) -> tuple[AvailabilityRuleInfo, ...]:
+    from skeleton.access.policies import authorized_queryset
+
+    rows = list(
+        authorized_queryset(AvailabilityRule, user=actor, action="read")
+        .filter(schedule=schedule)
+        .order_by("weekday", "start_minute", "sysid")
+    )
+    kinds = _rule_kinds(actor, rows)
+    return tuple(rule_info(row, kinds.get(row.pk, ())) for row in rows)
+
+
+def _check_rules(rules: object) -> list[tuple[AvailabilityRuleInput, frozenset[UUID]]]:
+    """The windows asked for, by weekday and start, each with its kinds: well formed and not overlapping."""
     if (
         not isinstance(rules, tuple)
         or len(rules) > 100
         or not all(isinstance(rule, AvailabilityRuleInput) for rule in rules)
     ):
         raise InvalidInput({"rules": [gettext("Informe até 100 faixas (AvailabilityRuleInput).")]})
-    types = set(
-        authorized_queryset(AppointmentType, user=actor, action="read")
-        .filter(practice=practice)
-        .values_list("pk", flat=True)
-    )
+    kinds = {}
     for rule in rules:
         if type(rule.weekday) is not int or not 0 <= rule.weekday <= 6:
             raise InvalidInput({"weekday": [gettext("Dia da semana de 0 (segunda) a 6 (domingo).")]})
@@ -513,21 +612,101 @@ def _check_rules(rules: object, practice: Practice, actor: Any) -> list[Availabi
             rule.valid_until is not None and rule.valid_until < rule.valid_from
         ):
             raise InvalidInput({"valid_until": [gettext("A validade termina antes de começar.")]})
-        if rule.appointment_type_id is not None and rule.appointment_type_id not in types:
-            raise InvalidInput({"appointment_type_id": [gettext("Tipo de atendimento desconhecido.")]})
+        kinds[id(rule)] = _input_kinds(rule)
+    from .slots import collide
+
     ordered = sorted(rules, key=lambda rule: (rule.weekday, rule.start_minute))
     for index, first in enumerate(ordered):
-        for second in ordered[index + 1 :]:
-            if second.weekday != first.weekday or second.start_minute >= first.end_minute:
-                continue
-            first_end = first.valid_until or date.max
-            second_end = second.valid_until or date.max
-            if second.valid_from <= first_end and first.valid_from <= second_end:
-                raise InvalidInput({"rules": [gettext("Duas faixas da agenda se sobrepõem no mesmo dia.")]})
-    return ordered
+        if any(collide(first, second) for second in ordered[index + 1 :]):
+            raise InvalidInput({"rules": [gettext("Duas faixas da agenda se sobrepõem no mesmo dia.")]})
+    return [(rule, kinds[id(rule)]) for rule in ordered]
 
 
 MAX_SLOT_DAYS = 62
+MAX_SCHEDULE_TYPES = 200
+
+
+def _schedule_type_rows(actor: Any, schedule: Schedule) -> dict[UUID, ScheduleAppointmentType]:
+    """The kinds a schedule was configured with, by kind; empty while it takes every active kind."""
+    from skeleton.access.policies import authorized_queryset
+
+    rows = authorized_queryset(ScheduleAppointmentType, user=actor, action="read").filter(schedule=schedule)
+    return {row.appointment_type_id: row for row in rows}
+
+
+def _type_duration(actor: Any, schedule: Schedule, kind: AppointmentType, *, mode: str = "booked") -> int | None:
+    """The duration a schedule gives a kind in ``mode``; ``None`` when the schedule does not take the kind.
+
+    A kind is taken when it is active and the schedule either has no kinds configured or has this
+    one with the mode allowed.
+    """
+    if not kind.is_active:
+        return None
+    rows = _schedule_type_rows(actor, schedule)
+    if not rows:
+        return kind.duration_minutes
+    row = rows.get(kind.pk)
+    if row is None or not (row.allow_booked if mode == "booked" else row.allow_walk_in):
+        return None
+    return row.duration_minutes or kind.duration_minutes
+
+
+def _schedule_types(actor: Any, schedule: Schedule) -> tuple[ScheduleTypeInfo, ...]:
+    from skeleton.access.policies import authorized_queryset
+
+    kinds = (
+        authorized_queryset(AppointmentType, user=actor, action="read")
+        .filter(practice_id=schedule.practice_id, is_active=True)
+        .order_by("name", "sysid")[:MAX_SCHEDULE_TYPES]
+    )
+    rows = _schedule_type_rows(actor, schedule)
+    if not rows:
+        return tuple(ScheduleTypeInfo(kind.pk, kind.duration_minutes, None, True, True, False) for kind in kinds)
+    return tuple(
+        ScheduleTypeInfo(
+            kind.pk,
+            rows[kind.pk].duration_minutes or kind.duration_minutes,
+            rows[kind.pk].duration_minutes,
+            rows[kind.pk].allow_booked,
+            rows[kind.pk].allow_walk_in,
+            True,
+        )
+        for kind in kinds
+        if kind.pk in rows
+    )
+
+
+def _check_schedule_types(types: object, schedule: Schedule, actor: Any) -> dict[UUID, ScheduleTypeInput]:
+    from skeleton.access.policies import authorized_queryset
+
+    if (
+        not isinstance(types, tuple)
+        or len(types) > MAX_SCHEDULE_TYPES
+        or not all(isinstance(item, ScheduleTypeInput) for item in types)
+    ):
+        raise InvalidInput({"types": [gettext("Informe até 200 tipos (ScheduleTypeInput).")]})
+    known = set(
+        authorized_queryset(AppointmentType, user=actor, action="read")
+        .filter(practice_id=schedule.practice_id, is_active=True)
+        .values_list("pk", flat=True)
+    )
+    wanted: dict[UUID, ScheduleTypeInput] = {}
+    for item in types:
+        type_id = as_uuid(item.appointment_type_id, field="appointment_type_id")
+        if type_id not in known:
+            raise InvalidInput({"appointment_type_id": [gettext("Tipo de atendimento desconhecido ou inativo.")]})
+        if type_id in wanted:
+            raise InvalidInput({"types": [gettext("O mesmo tipo de atendimento aparece duas vezes.")]})
+        if item.duration_minutes is not None and (
+            type(item.duration_minutes) is not int or not 5 <= item.duration_minutes <= 480
+        ):
+            raise InvalidInput({"duration_minutes": [gettext("Use de 5 a 480 minutos.")]})
+        if type(item.allow_booked) is not bool or type(item.allow_walk_in) is not bool:
+            raise InvalidInput({"allow_booked": [gettext("Informe os modos com verdadeiro ou falso.")]})
+        if not (item.allow_booked or item.allow_walk_in):
+            raise InvalidInput({"allow_booked": [gettext("Marque ao menos um modo de atendimento para o tipo.")]})
+        wanted[type_id] = item
+    return wanted
 
 
 def _taken(actor: Any, schedule: Schedule, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
@@ -554,8 +733,16 @@ def _taken(actor: Any, schedule: Schedule, start: datetime, end: datetime) -> li
 def _appointments_taken(
     actor: Any, schedule: Schedule, start: datetime, end: datetime
 ) -> list[tuple[datetime, datetime]]:
-    """Live appointments of the schedule in the window (none before the appointments table exists)."""
-    return []
+    """Live appointments of the schedule that overlap the window."""
+    from skeleton.access.policies import authorized_queryset
+
+    from .transitions import LIVE
+
+    return list(
+        authorized_queryset(Appointment, user=actor, action="read")
+        .filter(schedule=schedule, status__in=LIVE, starts_at__lt=end, ends_at__gt=start)
+        .values_list("starts_at", "ends_at")
+    )
 
 
 def _day_window(day_start: date, day_end: date, timezone: str) -> tuple[datetime, datetime]:
@@ -651,7 +838,7 @@ def _book(
 
     key = common.key(idempotency_key)
     starts_at = _aware(starts_at, "starts_at")
-    if payment_kind not in Appointment.PaymentKind.values:
+    if payment_kind is not None and payment_kind not in PaymentKind.values:
         raise InvalidInput({"payment_kind": [gettext("Forma de pagamento desconhecida.")]})
     if len(str(notes)) > 2000:
         raise InvalidInput({"notes": [gettext("Texto longo demais.")]})
@@ -665,10 +852,13 @@ def _book(
     require_parent_action(Appointment, schedule, user=actor, action="create")
     patient = _readable_patient(actor, patient_id)
     kind = common.row(actor, AppointmentType, appointment_type_id, field="appointment_type_id", write=False)
+    own_duration = _type_duration(actor, schedule, kind)
+    if own_duration is None:
+        raise Conflict("type_not_allowed", gettext("Esta agenda não atende este tipo de atendimento."))
     room = common.row(actor, Room, room_id, field="room_id", write=False) if room_id is not None else schedule.room
     if kind.requires_room and room is None:
         raise InvalidInput({"room_id": [gettext("Este tipo de atendimento exige uma sala.")]})
-    ends_at = starts_at + timedelta(minutes=duration_minutes or kind.duration_minutes)
+    ends_at = starts_at + timedelta(minutes=duration_minutes or own_duration)
     _check_interval(actor, schedule, kind, starts_at, ends_at, fit_in=bool(fit_in), room=room)
     number = SequenceService().next_number(actor=actor, key=APPOINTMENT_SEQUENCE)
     row = Appointment(
@@ -684,7 +874,7 @@ def _book(
         ends_at=ends_at,
         is_fit_in=bool(fit_in),
         billing_code=kind.billing_code,
-        payment_kind=payment_kind,
+        payment_kind=str(kind.payment_kind if payment_kind is None else payment_kind),
         notes=str(notes).strip(),
         rescheduled_from=rescheduled_from,
     )
@@ -708,7 +898,7 @@ def _check_interval(
     """The rules of a booking: inside the grid and free (unless a fit-in), never over a block."""
     from skeleton.access.policies import authorized_queryset
 
-    from .slots import fits_grid, windows_of
+    from .slots import fits_grid
     from .transitions import LIVE
 
     blocks = authorized_queryset(ScheduleBlock, user=actor, action="read").filter(
@@ -719,7 +909,7 @@ def _check_interval(
     if not fit_in:
         rules = authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule=schedule)
         if not fits_grid(
-            windows_of(rules), starts_at, ends_at, timezone=schedule.practice.timezone, appointment_type_id=kind.pk
+            _windows(actor, rules), starts_at, ends_at, timezone=schedule.practice.timezone, appointment_type_id=kind.pk
         ):
             raise Conflict("slot_unavailable", gettext("O horário está fora da grade da agenda."))
         live = Appointment.objects.filter(
@@ -1149,9 +1339,12 @@ class SchedulingService(ServiceAPI):
         billing_code: str = "",
         requires_room: bool = False,
         idempotency_key: str | None = None,
+        payment_kind: str = "private",
     ) -> AppointmentTypeInfo:
         """Add a kind of appointment; the code is unique in the practice.
 
+        The kind says how it is paid for ("private", "insurance" or "courtesy"): an appointment
+        booked with it starts with that payment kind.
         Autorização: alteração no consultório.
         Erros: NotFound; Forbidden; InvalidInput; Conflict("integrity_conflict") para código já usado.
         Efeitos: grava o tipo; a mesma chave do mesmo ator devolve o já criado.
@@ -1163,6 +1356,7 @@ class SchedulingService(ServiceAPI):
                 "code": code,
                 "name": name,
                 "duration_minutes": duration_minutes,
+                "payment_kind": payment_kind,
                 "color": color,
                 "billing_code": billing_code,
                 "requires_room": requires_room,
@@ -1187,7 +1381,8 @@ class SchedulingService(ServiceAPI):
 
         Autorização: alteração no consultório.
         Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
-        Efeitos: grava só os campos que mudaram; consultas já marcadas guardam a cópia do código de cobrança.
+        Efeitos: grava só os campos que mudaram; consultas já marcadas guardam a cópia do código de
+        cobrança e da forma de pagamento.
         """
         from .services import TYPE_FIELDS, clean_type
 
@@ -1409,46 +1604,149 @@ class SchedulingService(ServiceAPI):
         Erros: NotFound para agenda ilegível.
         Efeitos: nenhum.
         """
-        from skeleton.access.policies import authorized_queryset
+        return _availability(actor, _schedule(actor, schedule_id))
 
-        schedule = _schedule(actor, schedule_id)
-        rows = authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule=schedule)
-        return tuple(rule_info(row) for row in rows.order_by("weekday", "start_minute", "sysid"))
+    @service_method(read_only=True, since="0.1.0")
+    def schedule_types(self, *, actor: Any, schedule_id: UUID) -> tuple[ScheduleTypeInfo, ...]:
+        """The kinds of appointment a schedule takes, by name, each with the duration it has there.
+
+        A schedule nobody configured takes every active kind of the practice (``configured`` False).
+        Autorização: leitura da agenda.
+        Erros: NotFound para agenda inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        return _schedule_types(actor, _schedule(actor, schedule_id))
 
     @service_method(read_only=False, since="0.1.0")
-    def set_availability(
-        self, *, actor: Any, schedule_id: UUID, rules: tuple[AvailabilityRuleInput, ...], expected_revision: int
-    ) -> tuple[AvailabilityRuleInfo, ...]:
-        """Replace the whole weekly grid of a schedule, with the schedule's revision as CAS.
+    def set_schedule_types(
+        self, *, actor: Any, schedule_id: UUID, types: tuple[ScheduleTypeInput, ...], expected_revision: int
+    ) -> tuple[ScheduleTypeInfo, ...]:
+        """Replace the kinds of appointment a schedule takes, with the schedule's revision as CAS.
 
+        An empty list puts the schedule back to taking every active kind of the practice.
         Autorização: alteração na agenda.
-        Erros: NotFound; Forbidden; InvalidInput para faixa inválida, sobreposta ou com tipo de outro
-        consultório; Conflict("stale_revision").
-        Efeitos: exclusão lógica das faixas antigas, as novas gravadas e uma revisão nova da agenda.
+        Erros: NotFound; Forbidden; InvalidInput para tipo desconhecido, inativo ou repetido, duração
+        fora de 5 a 480 minutos ou tipo sem nenhum modo; Conflict("stale_revision").
+        Efeitos: grava as linhas novas, altera as que mudaram, exclui logicamente as que saíram e dá
+        uma revisão nova à agenda. As consultas já marcadas não mudam.
         """
         from skeleton.access.policies import authorized_queryset
 
         schedule = _schedule(actor, schedule_id, write=True, lock=True)
         common.check_revision(schedule, expected_revision)
-        ordered = _check_rules(rules, schedule.practice, actor)
-        for old in authorized_queryset(AvailabilityRule, user=actor, action="delete").filter(schedule=schedule):
-            old.delete()
-        created = []
-        for rule in ordered:
-            row = AvailabilityRule(
-                organization_id=schedule.organization_id,
-                schedule=schedule,
-                weekday=rule.weekday,
-                start_minute=rule.start_minute,
-                end_minute=rule.end_minute,
-                valid_from=rule.valid_from,
-                valid_until=rule.valid_until,
-                appointment_type_id=rule.appointment_type_id,
+        wanted = _check_schedule_types(types, schedule, actor)
+        for old in authorized_queryset(ScheduleAppointmentType, user=actor, action="delete").filter(schedule=schedule):
+            if old.appointment_type_id not in wanted:
+                old.delete()
+        kept = {
+            row.appointment_type_id: row
+            for row in authorized_queryset(ScheduleAppointmentType, user=actor, action="update").filter(
+                schedule=schedule
             )
-            row.save()
-            created.append(rule_info(row))
+        }
+        for type_id, item in wanted.items():
+            values = {
+                "duration_minutes": item.duration_minutes,
+                "allow_booked": item.allow_booked,
+                "allow_walk_in": item.allow_walk_in,
+            }
+            row = kept.get(type_id)
+            if row is None:
+                ScheduleAppointmentType(
+                    organization_id=schedule.organization_id, schedule=schedule, appointment_type_id=type_id, **values
+                ).save()
+            else:
+                common.apply_changes(row, values)
         _bump(schedule)
-        return tuple(created)
+        return _schedule_types(actor, schedule)
+
+    @service_method(read_only=False, since="0.1.0")
+    def set_availability(
+        self, *, actor: Any, schedule_id: UUID, rules: tuple[AvailabilityRuleInput, ...], expected_revision: int
+    ) -> tuple[AvailabilityRuleInfo, ...]:
+        """Make the weekly grid of a schedule be ``rules``, with the schedule's revision as CAS.
+
+        The grid is compared with what exists: a window that stays (same weekday, minutes and
+        validity) keeps its row, and only the kinds that changed in it are written. A window lists
+        the kinds its period takes (none: every kind the schedule takes).
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; InvalidInput para faixa inválida ou sobreposta, mais de 100
+        faixas, ou tipo novo num período que seja desconhecido, inativo, de outra organização ou que
+        a agenda não atende; Conflict("stale_revision").
+        Efeitos: grava as faixas novas, exclui logicamente as que saíram (os tipos delas antes) e
+        acerta os tipos das que ficaram; a agenda ganha uma revisão nova.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        schedule = _schedule(actor, schedule_id, write=True, lock=True)
+        common.check_revision(schedule, expected_revision)
+        wanted = _check_rules(rules)
+        existing: dict[Any, AvailabilityRule] = {}
+        leaving: list[AvailabilityRule] = []
+        for row in authorized_queryset(AvailabilityRule, user=actor, action="delete").filter(schedule=schedule):
+            # Two live rows of the same window should not exist; if they do, one stays.
+            if _shape(row) in existing:
+                leaving.append(row)
+            else:
+                existing[_shape(row)] = row
+        links: dict[UUID, dict[UUID, AvailabilityRuleType]] = {}
+        for link in authorized_queryset(AvailabilityRuleType, user=actor, action="delete").filter(
+            rule_id__in=[row.pk for row in (*existing.values(), *leaving)]
+        ):
+            links.setdefault(link.rule_id, {})[link.appointment_type_id] = link
+        taken = {item.appointment_type_id for item in _schedule_types(actor, schedule)}
+
+        def refuse_unknown(kinds: frozenset[UUID]) -> None:
+            if kinds - taken:
+                raise InvalidInput(
+                    {
+                        "appointment_type_ids": [
+                            gettext(
+                                "O período lista um tipo de atendimento desconhecido, inativo ou que a agenda não atende."
+                            )
+                        ]
+                    }
+                )
+
+        for rule, kinds in wanted:
+            row = existing.pop(_shape(rule), None)
+            current: dict[UUID, AvailabilityRuleType] = {}
+            if row is None:
+                refuse_unknown(kinds)
+                row = AvailabilityRule(
+                    organization_id=schedule.organization_id,
+                    schedule=schedule,
+                    weekday=rule.weekday,
+                    start_minute=rule.start_minute,
+                    end_minute=rule.end_minute,
+                    valid_from=rule.valid_from,
+                    valid_until=rule.valid_until,
+                )
+                row.save()
+            else:
+                current = links.get(row.pk, {})
+                had = frozenset(_kinds_of_rule(row, current))
+                if had == kinds:
+                    continue
+                # Only what comes in is checked: a kind the window already had may have left the schedule since.
+                refuse_unknown(kinds - had)
+                if row.appointment_type_id is not None:
+                    # The single kind of an older row moves to the link rows with the others.
+                    common.apply_changes(row, {"appointment_type_id": None})
+            for type_id, link in current.items():
+                if type_id not in kinds:
+                    link.delete()
+            for type_id in sorted(kinds - set(current), key=str):
+                AvailabilityRuleType(
+                    organization_id=schedule.organization_id, rule=row, appointment_type_id=type_id
+                ).save()
+        for row in (*existing.values(), *leaving):
+            # The links first: the way from a link to the schedule goes through a live window.
+            for link in links.get(row.pk, {}).values():
+                link.delete()
+            row.delete()
+        _bump(schedule)
+        return _availability(actor, schedule)
 
     @service_method(read_only=True, since="0.1.0")
     def blocks(self, *, actor: Any, schedule_id: UUID, start: datetime, end: datetime) -> tuple[BlockInfo, ...]:
@@ -1554,22 +1852,26 @@ class SchedulingService(ServiceAPI):
         start_date: date,
         end_date: date,
         appointment_type_id: UUID | None = None,
+        duration_minutes: int | None = None,
     ) -> tuple[Slot, ...]:
         """Free slots of a schedule between two dates (inclusive, at most 62 days).
 
         A slot is free when it is inside the weekly grid (of the type, when the window restricts
         it), not in the past, not beyond the booking horizon, and crosses no block, no live
         appointment of the schedule and no busy interval of the professional in the calendar.
+        The slot lasts ``duration_minutes`` when given; otherwise what the schedule gives the kind,
+        then the duration of the kind, then the interval of the schedule. A kind the schedule does
+        not take has no free slot.
         Autorização: leitura da agenda.
         Erros: NotFound para agenda ou tipo ilegível; InvalidInput para intervalo invertido ou acima
-        de 62 dias.
+        de 62 dias, ou duração fora de 5 a 480 minutos.
         Efeitos: nenhum.
         """
         from django.utils import timezone as dj_timezone
 
         from skeleton.access.policies import authorized_queryset
 
-        from .slots import compute_slots, windows_of
+        from .slots import typed_slots
 
         if not isinstance(start_date, date) or not isinstance(end_date, date) or end_date < start_date:
             raise InvalidInput({"end_date": [gettext("O fim precisa ser depois do início.")]})
@@ -1577,14 +1879,21 @@ class SchedulingService(ServiceAPI):
             raise InvalidInput({"end_date": [gettext("Consulte no máximo 62 dias por vez.")]})
         schedule = _schedule(actor, schedule_id)
         practice = schedule.practice
+        if duration_minutes is not None and (type(duration_minutes) is not int or not 5 <= duration_minutes <= 480):
+            raise InvalidInput({"duration_minutes": [gettext("Use de 5 a 480 minutos.")]})
         duration = schedule.slot_minutes
         if appointment_type_id is not None:
             kind = common.row(actor, AppointmentType, appointment_type_id, field="appointment_type_id", write=False)
-            duration = kind.duration_minutes
+            own_duration = _type_duration(actor, schedule, kind)
+            if own_duration is None:
+                return ()
+            duration = own_duration
+        if duration_minutes is not None:
+            duration = duration_minutes
         rules = authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule=schedule)
         start, end = _day_window(start_date, end_date, practice.timezone)
-        found = compute_slots(
-            windows=windows_of(rules),
+        found = typed_slots(
+            windows=_windows(actor, rules),
             taken=_taken(actor, schedule, start, end),
             start_date=start_date,
             end_date=end_date,
@@ -1595,7 +1904,7 @@ class SchedulingService(ServiceAPI):
             horizon_days=schedule.booking_horizon_days,
             appointment_type_id=appointment_type_id,
         )
-        return tuple(Slot(start, end, schedule.pk) for start, end in found)
+        return tuple(Slot(start, end, schedule.pk, tuple(sorted(kinds, key=str))) for start, end, kinds in found)
 
     # ------------------------------------------------------------------ appointments
 
@@ -1611,7 +1920,7 @@ class SchedulingService(ServiceAPI):
         duration_minutes: int | None = None,
         fit_in: bool = False,
         notes: str = "",
-        payment_kind: str = "private",
+        payment_kind: str | None = None,
         room_id: UUID | None = None,
         idempotency_key: str,
     ) -> AppointmentInfo:
@@ -1619,11 +1928,14 @@ class SchedulingService(ServiceAPI):
 
         The schedule is locked while the interval is checked: two bookings of the same slot never
         both win. The calendar of the schedule gets the event "<tipo> · <código>", never the patient.
+        The kind must be active and taken by the schedule, fit-in or not. Without ``duration_minutes``
+        the appointment lasts what the schedule gives the kind, then the duration of the kind; without
+        ``payment_kind`` it is paid for as the kind says.
         Autorização: alteração na agenda e leitura do paciente.
         Erros: NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda;
         InvalidInput (horário sem fuso, duração fora de 5 a 480, forma de pagamento, observação
-        longa, sala exigida pelo tipo); Conflict("slot_unavailable", "room_unavailable",
-        "patient_inactive", "processing_restricted").
+        longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable",
+        "room_unavailable", "patient_inactive", "processing_restricted").
         Efeitos: código da sequência sem lacunas, consulta gravada, evento no calendário e
         ``med_scheduling.appointment_booked`` publicados; a mesma chave devolve a já marcada.
         """
@@ -1653,46 +1965,57 @@ class SchedulingService(ServiceAPI):
         expected_revision: int,
         schedule_id: UUID | None = None,
         idempotency_key: str | None = None,
+        fit_in: bool | None = None,
     ) -> AppointmentInfo:
         """Move an appointment to another time (same duration), with CAS; to another schedule, a new one.
 
         In the same schedule the appointment keeps its code and goes back to "agendada"; to another
         schedule the current one is cancelled ("remarcada") and a new one is booked pointing to it.
+        It stays the fit-in or the regular appointment it was, unless ``fit_in`` says otherwise.
+        The schedules are locked before the appointment, in the order of their ids.
         Autorização: alteração na agenda atual (e na nova, quando outra).
         Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "invalid_transition",
-        "slot_unavailable", "room_unavailable").
+        "slot_unavailable", "room_unavailable"; "type_not_allowed" quando a outra agenda não atende
+        o tipo).
         Efeitos: atualiza (ou cancela e cria) a consulta e o evento do calendário e publica
         ``appointment_rescheduled`` (ou ``appointment_cancelled`` e ``appointment_booked``).
         """
         from .transitions import CANCELLED, CONFIRMED, LIVE, SCHEDULED
 
         starts_at = _aware(starts_at, "starts_at")
+        if fit_in is not None and type(fit_in) is not bool:
+            raise InvalidInput({"fit_in": [gettext("Informe se é encaixe com verdadeiro ou falso.")]})
+        # Read without a lock only to learn the schedule (it never changes), so that every operation
+        # locks in the same order: the schedules by id, then the appointment.
+        seen = _appointment(actor, appointment_id, write=True)
+        common.check_revision(seen, expected_revision)
+        target_id = seen.schedule_id if schedule_id is None else as_uuid(schedule_id, field="schedule_id")
+        locked = {pk: _schedule(actor, pk, write=True, lock=True) for pk in sorted({seen.schedule_id, target_id})}
         row = _appointment(actor, appointment_id, write=True, lock=True)
         common.check_revision(row, expected_revision)
         if row.status not in LIVE or row.status == "in_progress":
             raise Conflict("invalid_transition", gettext("Esta consulta não pode mais ser remarcada."))
         duration = row.ends_at - row.starts_at
-        if schedule_id is not None and as_uuid(schedule_id, field="schedule_id") != row.schedule_id:
-            from . import calendar_bridge
-
-            target = _schedule(actor, schedule_id, write=True, lock=True)
-            _schedule(actor, row.schedule_id, write=True, lock=True)
-            row.status = CANCELLED
-            row.cancel_reason = Appointment.CancelReason.RESCHEDULED
+        as_fit_in = row.is_fit_in if fit_in is None else fit_in
+        if target_id != row.schedule_id:
             from django.utils import timezone as dj_timezone
 
+            from . import calendar_bridge
+
+            row.status = CANCELLED
+            row.cancel_reason = Appointment.CancelReason.RESCHEDULED
             row.cancelled_at = dj_timezone.now()
             row.save(update_fields={"status", "cancel_reason", "cancelled_at"})
             calendar_bridge.remove_event(actor, source_key=str(row.pk))
             _publish(actor, "cancelled", row)
             moved = _book(
                 actor,
-                schedule_id=target.pk,
+                schedule_id=target_id,
                 patient_id=row.patient_id,
                 appointment_type_id=row.appointment_type_id,
                 starts_at=starts_at,
                 duration_minutes=int(duration.total_seconds() // 60),
-                fit_in=False,
+                fit_in=as_fit_in,
                 notes=row.notes,
                 payment_kind=row.payment_kind,
                 room_id=None,
@@ -1700,7 +2023,7 @@ class SchedulingService(ServiceAPI):
                 rescheduled_from=row,
             )
             return appointment_info(moved)
-        schedule = _schedule(actor, row.schedule_id, write=True, lock=True)
+        schedule = locked[row.schedule_id]
         ends_at = starts_at + duration
         _check_interval(
             actor,
@@ -1708,11 +2031,11 @@ class SchedulingService(ServiceAPI):
             row.appointment_type,
             starts_at,
             ends_at,
-            fit_in=row.is_fit_in,
+            fit_in=as_fit_in,
             room=row.room,
             ignore=row.pk,
         )
-        values = {"starts_at": starts_at, "ends_at": ends_at}
+        values = {"starts_at": starts_at, "ends_at": ends_at, "is_fit_in": as_fit_in}
         if row.status == CONFIRMED:
             values["status"] = SCHEDULED
         common.apply_changes(row, values)
@@ -1810,7 +2133,9 @@ class SchedulingService(ServiceAPI):
     def day(self, *, actor: Any, date: date, schedule_ids: tuple[UUID, ...] | None = None) -> tuple[DayAgenda, ...]:
         """The appointments and free slots of one local day, for every schedule the actor reads.
 
-        The number of queries does not grow with the number of appointments.
+        The free slots are those of every window of the day, whatever the kinds a window is
+        restricted to; each slot says the kinds of its window. The number of queries does not grow
+        with the number of appointments or of windows.
         Autorização: leitura de cada agenda.
         Erros: InvalidInput para data inválida ou mais de 20 agendas.
         Efeitos: nenhum.
@@ -1820,7 +2145,7 @@ class SchedulingService(ServiceAPI):
         from skeleton.access.policies import authorized_queryset
 
         from . import calendar_bridge
-        from .slots import compute_slots, windows_of
+        from .slots import typed_slots, windows_of
         from .transitions import LIVE
 
         day = date
@@ -1847,6 +2172,8 @@ class SchedulingService(ServiceAPI):
         rules: dict[UUID, list[AvailabilityRule]] = {pk: [] for pk in ids}
         for rule in authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule_id__in=ids):
             rules[rule.schedule_id].append(rule)
+        # The kinds of every window of the day's schedules in one query, whatever the number of windows.
+        rule_kinds = _rule_kinds(actor, [rule for found in rules.values() for rule in found])
         blocks: dict[UUID, list[tuple[datetime, datetime]]] = {pk: [] for pk in ids}
         for block in authorized_queryset(ScheduleBlock, user=actor, action="read").filter(
             schedule_id__in=ids, starts_at__lt=end, ends_at__gt=start
@@ -1862,8 +2189,8 @@ class SchedulingService(ServiceAPI):
         for schedule in schedules:
             live = [(row.starts_at, row.ends_at) for row in appointments[schedule.pk] if row.status in LIVE]
             person = schedule.professional.user_id if schedule.professional_id else None
-            free = compute_slots(
-                windows=windows_of(rules[schedule.pk]),
+            free = typed_slots(
+                windows=windows_of(rules[schedule.pk], rule_kinds),
                 taken=blocks[schedule.pk] + live + busy.get(person, []),
                 start_date=day,
                 end_date=day,
@@ -1872,12 +2199,16 @@ class SchedulingService(ServiceAPI):
                 timezone=schedule.practice.timezone,
                 now=now,
                 horizon_days=schedule.booking_horizon_days,
+                any_type=True,
             )
             result.append(
                 DayAgenda(
                     schedule_info(schedule, writable=schedule.pk in writable),
                     tuple(appointment_info(row) for row in appointments[schedule.pk]),
-                    tuple(Slot(slot_start, slot_end, schedule.pk) for slot_start, slot_end in free),
+                    tuple(
+                        Slot(slot_start, slot_end, schedule.pk, tuple(sorted(kinds, key=str)))
+                        for slot_start, slot_end, kinds in free
+                    ),
                 )
             )
         return tuple(result)
@@ -2103,13 +2434,17 @@ class SchedulingService(ServiceAPI):
         starts_at: datetime,
         expected_revision: int,
         idempotency_key: str,
+        duration_minutes: int | None = None,
     ) -> AppointmentInfo:
         """Book the appointment of a waiting patient and mark the entry booked, in one transaction.
 
+        The kind is the one of the entry; without ``duration_minutes`` the appointment lasts what the
+        schedule gives that kind.
         Autorização: alteração no consultório e na agenda.
-        Erros: NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada;
-        Conflict("stale_revision", "invalid_transition", "slot_unavailable"): com o horário ocupado
-        a entrada continua aguardando.
+        Erros: NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada ou com duração
+        fora de 5 a 480 minutos;
+        Conflict("stale_revision", "invalid_transition", "type_not_allowed", "slot_unavailable"): com
+        o horário ocupado, ou o tipo não atendido pela agenda, a entrada continua aguardando.
         Efeitos: os de ``book`` e a entrada em "agendado" com a consulta.
         """
         entry = common.row(actor, WaitlistEntry, entry_id, field="entry_id", write=True, lock=True)
@@ -2124,10 +2459,10 @@ class SchedulingService(ServiceAPI):
             patient_id=entry.patient_id,
             appointment_type_id=entry.appointment_type_id,
             starts_at=starts_at,
-            duration_minutes=None,
+            duration_minutes=duration_minutes,
             fit_in=False,
             notes="",
-            payment_kind="private",
+            payment_kind=None,
             room_id=None,
             idempotency_key=idempotency_key,
         )

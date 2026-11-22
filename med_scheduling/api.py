@@ -237,7 +237,7 @@ class AppointmentsAPI(ScopedAPI):
                 duration_minutes=int(duration) if duration not in (None, "") else None,
                 fit_in=fields.get("fit_in") in (True, "true", "1"),
                 notes=str(fields.get("notes") or ""),
-                payment_kind=str(fields.get("payment_kind") or "private"),
+                payment_kind=str(fields["payment_kind"]) if fields.get("payment_kind") else None,
                 room_id=_uuid(fields.get("room"), "room"),
                 idempotency_key=key[:150],
             )

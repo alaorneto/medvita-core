@@ -11,7 +11,16 @@ from skeleton.testing.applications import open_app
 from skeleton.testing.derived import assert_derived_access_contract
 from skeleton.testing.service_api import acting_as, build_service_scenario
 
-from ..models import AvailabilityRule, Practice, Room, Schedule, ScheduleBlock
+from ..models import (
+    AppointmentType,
+    AvailabilityRule,
+    AvailabilityRuleType,
+    Practice,
+    Room,
+    Schedule,
+    ScheduleAppointmentType,
+    ScheduleBlock,
+)
 from ..service_api import AvailabilityRuleInput, SchedulingService
 from .helpers import Prepared, as_admin, setup_patients, setup_practice
 
@@ -152,8 +161,9 @@ def test_calendar_disabled_makes_scheduling_unavailable(ready):
             service().create_schedule(actor=admin, name="X", professional_id=ready.doctor.sysid, idempotency_key="off")
 
 
-@pytest.mark.parametrize("model", [AvailabilityRule, ScheduleBlock])
-def test_grid_and_blocks_follow_the_schedule(skeleton_db, model):
+@pytest.mark.parametrize("model", [AvailabilityRule, AvailabilityRuleType, ScheduleBlock, ScheduleAppointmentType])
+def test_grid_blocks_and_kinds_follow_the_schedule(skeleton_db, model):
+    """Every table under a schedule is read and written as the schedule is; the kinds of a period, two hops away."""
     for label in ("med_patients", "skeleton_calendar", "med_scheduling"):
         open_app(label)
     scenario = build_service_scenario(model, slug=f"schedule-{model._meta.model_name}")
@@ -186,8 +196,15 @@ def test_grid_and_blocks_follow_the_schedule(skeleton_db, model):
         schedule.save()
         return schedule
 
+    def make_kind(schedule):
+        kind = AppointmentType(
+            organization=schedule.organization, practice=schedule.practice, code=f"t{next(numbers)}", name="Tipo"
+        )
+        kind.save()
+        return kind
+
     def make_row(schedule):
-        if model is AvailabilityRule:
+        if model in (AvailabilityRule, AvailabilityRuleType):
             row = AvailabilityRule(
                 organization=schedule.organization,
                 schedule=schedule,
@@ -195,6 +212,18 @@ def test_grid_and_blocks_follow_the_schedule(skeleton_db, model):
                 start_minute=480,
                 end_minute=600,
                 valid_from=date(2026, 1, 1),
+            )
+            if model is AvailabilityRuleType:
+                row.save()
+                row = AvailabilityRuleType(
+                    organization=schedule.organization, rule=row, appointment_type=make_kind(schedule)
+                )
+        elif model is ScheduleAppointmentType:
+            row = ScheduleAppointmentType(
+                organization=schedule.organization,
+                schedule=schedule,
+                appointment_type=make_kind(schedule),
+                duration_minutes=40,
             )
         else:
             start = datetime(2026, 5, 5, 12, tzinfo=UTC)
@@ -208,3 +237,55 @@ def test_grid_and_blocks_follow_the_schedule(skeleton_db, model):
         return row
 
     assert_derived_access_contract(child_model=model, make_anchor=make_schedule, make_child=make_row, scenario=scenario)
+
+
+def test_the_kinds_of_a_period_are_hidden_when_the_period_is_erased(skeleton_db):
+    """The way from a kind of a period to the schedule goes through a live period (the middle link)."""
+    from skeleton.access.derivation import is_derived
+    from skeleton.access.policies import authorized_queryset
+
+    assert is_derived(AvailabilityRuleType) and is_derived(AvailabilityRule)
+    for label in ("med_patients", "skeleton_calendar", "med_scheduling"):
+        open_app(label)
+    scenario = build_service_scenario(AvailabilityRuleType, slug="period-kinds")
+    with acting_as(scenario.admin_a, scenario.a) as admin:
+        calendar = CalendarService().create_shared_calendar(
+            actor=admin, name="Base", owner_user_id=scenario.admin_a.pk, timezone="UTC", idempotency_key="base"
+        )
+        practice = Practice(organization=scenario.a, owner=scenario.admin_a, visibility="private", name="C")
+        practice.save()
+        room = Room(organization=scenario.a, practice=practice, name="Sala")
+        room.save()
+        schedule = Schedule(
+            organization=scenario.a,
+            owner=scenario.member,
+            visibility="private",
+            practice=practice,
+            name="Agenda",
+            room=room,
+            calendar_id=calendar.sysid,
+        )
+        schedule.save()
+        kind = AppointmentType(organization=scenario.a, practice=practice, code="t", name="Tipo")
+        kind.save()
+        rule = AvailabilityRule(
+            organization=scenario.a,
+            schedule=schedule,
+            weekday=1,
+            start_minute=480,
+            end_minute=600,
+            valid_from=date(2026, 1, 1),
+        )
+        rule.save()
+        link = AvailabilityRuleType(organization=scenario.a, rule=rule, appointment_type=kind)
+        link.save()
+
+    def visible():
+        with acting_as(scenario.member, scenario.a):
+            rows = authorized_queryset(AvailabilityRuleType, user=scenario.member, action="read")
+            return rows.filter(pk=link.pk).exists()
+
+    assert visible()
+    with acting_as(scenario.admin_a, scenario.a):
+        rule.delete()
+    assert not visible()

@@ -131,3 +131,35 @@ def test_authorization_and_isolation(ready, subtests):
     with ready.app_disabled("med_scheduling"):
         for name, args in (("schedules", ()), ("appointments", ()), ("appointment", (appointment.sysid,))):
             assert reception.get(api(ready, name, *args)).status_code in (403, 404, 503)
+
+
+def test_the_payment_comes_from_the_kind_unless_the_request_says(ready, subtests):
+    from ..service_api import SchedulingService
+
+    with ready.as_user(ready.a.admin) as admin:
+        insured = SchedulingService().add_appointment_type(
+            actor=admin, code="unimed", name="Unimed", payment_kind="insurance", idempotency_key="unimed"
+        )
+    client = client_for(ready.a.reception)
+    body = {
+        "schedule": str(ready.schedule.sysid),
+        "patient": str(ready.patient.sysid),
+        "appointment_type": str(insured.sysid),
+    }
+
+    def create(hour, key, **extra):
+        return post(
+            client,
+            api(ready, "appointments"),
+            {**body, "starts_at": at(ready, hour).isoformat(), **extra},
+            HTTP_IDEMPOTENCY_KEY=key,
+        )
+
+    with subtests.test("inherited"):
+        created = create(9, "inherited")
+        assert created.status_code == 201 and created.json()["payment_kind"] == "insurance"
+    with subtests.test("explicit"):
+        created = create(10, "explicit", payment_kind="courtesy")
+        assert created.status_code == 201 and created.json()["payment_kind"] == "courtesy"
+    with subtests.test("unknown"):
+        assert create(11, "unknown", payment_kind="voucher").status_code == 400

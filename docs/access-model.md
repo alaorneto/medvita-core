@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | `med_patients` | `PatientRegistry` | O cadastro de pacientes da clínica | todos os grupos | Recepção, Profissionais |
 | `med_scheduling` | `Practice` | O consultório: estabelecimento, profissionais, salas, tipos de atendimento, lista de espera | todos os grupos | administrador e o grupo de gestão (em geral a Recepção, que cuida da lista de espera) |
-| `med_scheduling` | `Schedule` | A agenda de um profissional, sala ou equipamento | Recepção, Profissionais | Recepção, o próprio profissional (dono) |
+| `med_scheduling` | `Schedule` | A agenda de um profissional, sala ou equipamento: grade (com os tipos de cada período), bloqueios, tipos atendidos e consultas | Recepção, Profissionais | Recepção, o próprio profissional (dono) |
 | `med_records` | `Archive` | Um arquivo clínico: da clínica inteira ou de um profissional | Profissionais do arquivo | Profissionais do arquivo |
 | `med_finance` | `CashDesk` | Um caixa (ponto de recebimento) | Recepção, Financeiro | Recepção, Financeiro |
 | `med_finance` | `PriceList` | Uma tabela de preços | Recepção, Financeiro, Profissionais | Financeiro |
@@ -15,6 +15,8 @@
 
 - "A recepção agenda, mas não lê evolução" sai sozinho: a Recepção não recebe concessão em nenhum `Archive`.
 - Um consultório com dois médicos que não compartilham prontuário usa dois `Archive`, cada um com a própria concessão. Uma clínica com prontuário único usa um.
+- O cadastro dos tipos de atendimento é do consultório (`Practice`); quais tipos uma agenda atende, e com que duração, é da agenda (`Schedule`): o médico dono escolhe os da própria agenda sem poder mudar o cadastro.
+- Uma tabela pode ser derivada de outra derivada, até o limite de saltos do núcleo: os tipos de um período da grade (`AvailabilityRuleType`) chegam à agenda pelo período. O elo do meio precisa estar vivo; por isso quem exclui o período exclui antes os filhos dele, e quem lê os filhos de vários períodos lê em lote.
 - Regras além do contêiner ficam no serviço da app e só restringem: só o autor altera o rascunho de uma evolução; só quem abriu o caixa o fecha (ou o dono do `CashDesk`).
 - Todo queryset de serviço começa em `authorized_queryset(Modelo, user=actor, action=...)`.
 - Operações de privacidade (relatório do titular, restrição de tratamento, anonimização) exigem `manage_access` no `PatientRegistry`: permissão de tabela mais dono ou administrador.

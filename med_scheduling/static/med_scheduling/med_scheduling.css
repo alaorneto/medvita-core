@@ -10,6 +10,16 @@
 .appt-color-pink { border-left-color: #db2777; }
 .day-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
 .slot-list { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+/* The weekly grid: one column per weekday, one card per period. */
+.week-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); align-items: start; }
+.week-day h3 { font-weight: 600; margin-bottom: 0.5rem; }
+.period-card { border: 1px solid var(--color-default, #d1d5db); border-radius: 0.5rem; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; }
+.period-ended { border-style: dashed; }
+.period-hours { font-weight: 600; font-variant-numeric: tabular-nums; }
+.period-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+.period-line { display: grid; gap: 0.75rem; grid-template-columns: repeat(2, minmax(0, 12rem)); margin-bottom: 0.5rem; }
+.period-line[hidden] { display: none; }
+.box-list { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
 @media print {
   .link-tabs, .toolbar, .med-scheduling-no-print { display: none !important; }
 }

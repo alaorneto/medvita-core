@@ -9,12 +9,12 @@ from django.utils.translation import gettext
 from skeleton.service_api import InvalidInput
 
 from . import validators
-from .models import COLORS, AppointmentType, Professional, Room
+from .models import COLORS, AppointmentType, PaymentKind, Professional, Room
 
 PRACTICE_FIELDS = ("name", "legal_name", "tax_id", "phone", "email", "address", "city", "state", "timezone")
 PROFESSIONAL_FIELDS = ("display_name", "council", "council_number", "council_state", "specialty", "rqe", "tax_id")
 ROOM_FIELDS = ("name", "kind", "is_active")
-TYPE_FIELDS = ("name", "duration_minutes", "color", "billing_code", "requires_room", "is_active")
+TYPE_FIELDS = ("name", "duration_minutes", "payment_kind", "color", "billing_code", "requires_room", "is_active")
 LIMITS = {
     "name": 120,
     "legal_name": 200,
@@ -132,6 +132,11 @@ def clean_type(values: dict[str, Any], *, partial: bool) -> dict[str, Any]:
         if type(duration) is not int or not 5 <= duration <= 480:
             errors["duration_minutes"] = [gettext("Use de 5 a 480 minutos.")]
         clean["duration_minutes"] = duration
+    if "payment_kind" in values or not partial:
+        # Absent on creation is the private default; a value that came, even empty, is what was asked.
+        clean["payment_kind"] = _text(values["payment_kind"]) if "payment_kind" in values else "private"
+        if clean["payment_kind"] not in PaymentKind.values:
+            errors["payment_kind"] = [gettext("Forma de pagamento desconhecida.")]
     for name in ("requires_room", "is_active"):
         if name in values:
             clean[name] = bool(values[name])
