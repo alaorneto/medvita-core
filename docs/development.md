@@ -5,7 +5,7 @@ Como preparar o ambiente, rodar os testes e criar migrations das quatro apps. As
 ## Ambiente
 
 ```text
-sk_med_core/          <- raiz do repositório git; não é pacote Python
+medvita-core/         <- raiz do repositório git; não é pacote Python
   .venv/              <- virtualenv só deste repositório, com o núcleo instalado
   med_patients/  med_scheduling/  med_records/  med_finance/   <- um pacote por app
 ```

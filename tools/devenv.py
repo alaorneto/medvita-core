@@ -1,4 +1,4 @@
-"""Imprime as variáveis de ambiente de desenvolvimento do sk_med_core.
+"""Imprime as variáveis de ambiente de desenvolvimento do medvita-core.
 
     eval "$(python tools/devenv.py)"                        # bash, zsh
     python tools/devenv.py --powershell | Invoke-Expression  # PowerShell
