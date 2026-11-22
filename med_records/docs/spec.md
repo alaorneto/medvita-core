@@ -83,7 +83,7 @@ O repositório não distribui a tabela CID-10. O operador baixa a oficial (DATAS
 
 ### Trilha de leitura e anexos
 
-- A auditoria do núcleo só cobre escrita; a leitura de conteúdo clínico (`encounter`, `document`, `chart_summary`, `allergies`, `medications`, `attachment_url`) grava uma linha em `AccessLog` depois de autorizada, escrita pelo serviço (quem lê só precisa de leitura). A mesma pessoa lendo o mesmo alvo em menos de 5 minutos gera uma linha só.
+- A auditoria do núcleo só cobre escrita; a leitura de conteúdo clínico (`encounter`, `document`, `chart_summary`, `allergies`, `medications`, `attachment_url`) grava uma linha em `AccessLog` depois de autorizada, escrita pelo serviço (quem lê só precisa de leitura), com a origem da requisição (`origin`: `web`, `native_client` com o `client_id`, `api_token` ou `other`). A mesma pessoa lendo o mesmo alvo pela mesma origem em menos de 5 minutos gera uma linha só.
 - `access_log` exige a gestão de acesso do arquivo (dono ou administrador): o profissional comum não lê a trilha. A linha não tem caminho de alteração nem de exclusão; o guard do banco recusa mudança.
 - `attach_to_chart` e `attach_to_encounter` anexam (atendimento assinado: `Conflict("signed")`, anexe ao prontuário); `attachments` lista; `attachment_url` confere que o anexo é do alvo, devolve o endereço reautorizado pelo núcleo a cada download e grava a trilha. Revogada a concessão no arquivo, o endereço para de funcionar.
 
@@ -134,12 +134,16 @@ Em `/o/<org>/apps/med_records/` (nomes `med_records:<nome>`); toda leitura e esc
 
 Em `/api/v1/o/<org>/apps/med_records/`, só leitura (a escrita clínica é só pelas páginas), sempre com `Cache-Control: no-store`:
 
-| Método e caminho | O que faz |
-|---|---|
-| `GET charts/?patient=` | Prontuários do paciente nos arquivos legíveis (`ChartInfo`) |
-| `GET charts/<id>/encounters/?cursor=&page_size=` | Cabeçalhos dos atendimentos (`EncounterHeader`, sem conteúdo) |
-| `GET encounters/<id>/` | Atendimento com as seções (`EncounterInfo`); grava a trilha |
-| `GET documents/<id>/` | Documento com o texto (`DocumentInfo`); grava a trilha |
+| Método e caminho | O que faz | Token |
+|---|---|---|
+| `GET charts/?patient=` | Prontuários do paciente nos arquivos legíveis (`ChartInfo`) | `records:read` |
+| `GET charts/<id>/encounters/?cursor=&page_size=` | Cabeçalhos dos atendimentos (`EncounterHeader`, sem conteúdo) | `records:read` |
+| `GET encounters/<id>/` | Atendimento com as seções (`EncounterInfo`); grava a trilha | `records:read` |
+| `GET documents/<id>/` | Documento com o texto (`DocumentInfo`); grava a trilha | `records:read` |
+
+Toda rota aceita a sessão do navegador e o token de um cliente fora dele (o access token OIDC de um cliente nativo, como o Medvita Desktop, ou um token `skt_`) nos métodos da coluna "Token", com as mesmas respostas, filtros, `ETag`, `If-Match` e `Idempotency-Key` da sessão. O escopo só restringe: o serviço autoriza o papel da pessoa como para a sessão, e um token com o escopo continua sem ver o que o papel não alcança. O token amplo (`openid profile email`) leva todos os escopos; um cliente que o operador limitou (`native_client register --scope`) precisa do escopo da coluna e do escopo de tabela do contêiner que o serviço autoriza (`med_records.archive:read`). Sem o escopo, a resposta é 403 `permission_denied` ("O token não tem o escopo exigido."); método fora da coluna é 403 `token_not_allowed`. Cada operação aparece no `/api/v1/openapi.json` só para quem pode chamá-la.
+
+Com token, só `GET`: `POST`, `PATCH`, `PUT` e `DELETE` são sempre 403 `token_not_allowed`, e não há escopo de escrita. Cada leitura de conteúdo clínico grava na trilha a origem: sessão web, cliente nativo (com o `client_id`), token de API ou outra.
 
 ## Acceptance
 

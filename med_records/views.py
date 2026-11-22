@@ -773,6 +773,17 @@ def templates_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     )
 
 
+def _origin(entry: Any) -> str:
+    """Where a read came from, for the trail page: the credential, and the client of a native app."""
+    labels = {
+        "web": gettext("Sessão web"),
+        "native_client": gettext("Cliente nativo"),
+        "api_token": gettext("Token de API"),
+    }
+    label = labels.get(entry.origin, gettext("Outra"))
+    return f"{label} ({entry.client_id})" if entry.client_id else label
+
+
 @never_cache
 @tenant_page()
 def access_log_view(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> HttpResponse:
@@ -795,7 +806,10 @@ def access_log_view(request: HttpRequest, organization_id: UUID, chart_id: UUID)
         _context(
             organization_id,
             chart=chart,
-            entries=[{"entry": entry, "name": names.get(entry.actor_id, "")} for entry in page.items],
+            entries=[
+                {"entry": entry, "name": names.get(entry.actor_id, ""), "origin": _origin(entry)}
+                for entry in page.items
+            ],
             page=page,
         ),
     )

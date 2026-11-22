@@ -316,3 +316,13 @@ def count_active_patients(organization_id) -> int:
     from .models import Patient
 
     return Patient.objects.filter(organization_id=organization_id, status="active").count()
+
+
+def register_token_scopes() -> None:
+    """Named scopes of the REST API (#61); a broad OIDC token carries them too, the role still decides."""
+    from skeleton.integrations.tokens.scopes import register_token_scope
+
+    from .api_support import SCOPE_READ, SCOPE_WRITE
+
+    register_token_scope(SCOPE_READ, gettext_lazy("Ler pacientes, responsáveis e convênios pela API"))
+    register_token_scope(SCOPE_WRITE, gettext_lazy("Cadastrar e alterar pacientes pela API"))

@@ -22,13 +22,24 @@ from django.utils.translation import gettext
 from django.views.decorators.http import require_POST
 from rest_framework.response import Response
 
-from skeleton.api.views import TenantAPI, request_fields
+from skeleton.api.openapi import Operation, results
+from skeleton.api.views import request_fields
 from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
 from skeleton.web.views import tenant_page
 
 from . import forms as patient_forms
+from .api_support import SCOPE_READ, SCOPE_WRITE, ScopedAPI, cursor_page, dto_schema
 from .models import Patient
-from .service_api import CoverageInput, GuardianInput, PatientInput, PatientService
+from .service_api import (
+    CoverageInfo,
+    CoverageInput,
+    GuardianInfo,
+    GuardianInput,
+    PatientInfo,
+    PatientInput,
+    PatientService,
+    PatientSummary,
+)
 
 PAGE_SIZE = 25
 INPUT_FIELDS = tuple(PatientInput.__dataclass_fields__)
@@ -579,7 +590,34 @@ def _api_fields(request: Any) -> dict[str, Any]:
     return fields
 
 
-class PatientsAPI(TenantAPI):
+SEARCH_QUERY = (
+    ("q", {"type": "string"}, "Nome, código ou documento"),
+    ("status", {"type": "string"}, "Situação do cadastro"),
+    ("cursor", {"type": "string"}, "Cursor devolvido pela página anterior"),
+    ("page_size", {"type": "integer"}, "Tamanho da página"),
+)
+
+
+class PatientsAPI(ScopedAPI):
+    token_methods = ("GET", "POST")
+    token_scopes = {"GET": SCOPE_READ, "POST": SCOPE_WRITE}
+    openapi = {
+        "GET": Operation(
+            "Busca de pacientes",
+            lambda: cursor_page(dto_schema(PatientSummary)),
+            query=SEARCH_QUERY,
+            scope=SCOPE_READ,
+        ),
+        "POST": Operation(
+            "Cadastro de paciente (aceita Idempotency-Key)",
+            lambda: dto_schema(PatientInfo),
+            status=201,
+            request=lambda: dto_schema(PatientInput, required=("full_name",)),
+            etag=True,
+            scope=SCOPE_WRITE,
+        ),
+    }
+
     def get(self, request, organization_id):
         size = request.query_params.get("page_size", "")
         page = _service().search(
@@ -604,7 +642,21 @@ class PatientsAPI(TenantAPI):
         return _with_etag(Response(_dto_json(info), status=201), info.revision)
 
 
-class PatientAPI(TenantAPI):
+class PatientAPI(ScopedAPI):
+    token_methods = ("GET", "PATCH")
+    token_scopes = {"GET": SCOPE_READ, "PATCH": SCOPE_WRITE}
+    openapi = {
+        "GET": Operation("Ficha do paciente", lambda: dto_schema(PatientInfo), etag=True, scope=SCOPE_READ),
+        "PATCH": Operation(
+            "Alteração do paciente",
+            lambda: dto_schema(PatientInfo),
+            request=lambda: dto_schema(PatientInput, required=()),
+            etag=True,
+            if_match=True,
+            scope=SCOPE_WRITE,
+        ),
+    }
+
     def get(self, request, organization_id, patient_id):
         info = _service().get(actor=request.user, patient_id=patient_id)
         return _with_etag(Response(_dto_json(info)), info.revision)
@@ -619,13 +671,23 @@ class PatientAPI(TenantAPI):
         return _with_etag(Response(_dto_json(info)), info.revision)
 
 
-class GuardiansAPI(TenantAPI):
+class GuardiansAPI(ScopedAPI):
+    token_methods = ("GET",)
+    token_scopes = {"GET": SCOPE_READ}
+    openapi = {
+        "GET": Operation("Responsáveis do paciente", lambda: results(dto_schema(GuardianInfo)), scope=SCOPE_READ)
+    }
+
     def get(self, request, organization_id, patient_id):
         rows = _service().guardians(actor=request.user, patient_id=patient_id)
         return Response({"results": [_dto_json(row) for row in rows]})
 
 
-class CoveragesAPI(TenantAPI):
+class CoveragesAPI(ScopedAPI):
+    token_methods = ("GET",)
+    token_scopes = {"GET": SCOPE_READ}
+    openapi = {"GET": Operation("Convênios do paciente", lambda: results(dto_schema(CoverageInfo)), scope=SCOPE_READ)}
+
     def get(self, request, organization_id, patient_id):
         rows = _service().coverages(actor=request.user, patient_id=patient_id)
         return Response({"results": [_dto_json(row) for row in rows]})

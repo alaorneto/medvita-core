@@ -749,10 +749,15 @@ class PatientService(ServiceAPI):
         Erros: NotFound para paciente inexistente, de outra organização ou ilegível (a mesma resposta).
         Efeitos: nenhum.
         """
+        from django.core.exceptions import PermissionDenied
+
         from .services import needs_guardian
 
         patient = _readable(actor, patient_id)
-        writable = writable_patients(actor).filter(pk=patient.pk).exists()
+        try:
+            writable = writable_patients(actor).filter(pk=patient.pk).exists()
+        except PermissionDenied:
+            writable = False  # A token without the update scope reads, and the page offers no edit.
         return patient_info(patient, writable=writable, needs_guardian=needs_guardian(patient, actor))
 
     @service_method(read_only=True, since="0.1.0")

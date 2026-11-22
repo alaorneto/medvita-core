@@ -343,3 +343,13 @@ def register_receipts() -> None:
                 owner_app=APP_LABEL,
             )
         )
+
+
+def register_token_scopes() -> None:
+    """Named scopes of the REST API (#61); a broad OIDC token carries them too, the role still decides."""
+    from skeleton.integrations.tokens.scopes import register_token_scope
+
+    from .api_support import SCOPE_READ, SCOPE_WRITE
+
+    register_token_scope(SCOPE_READ, _("Ler preços, contas, pagamentos e recibos pela API"))
+    register_token_scope(SCOPE_WRITE, _("Abrir contas e registrar recebimentos pela API"))

@@ -22,6 +22,7 @@ class MedSchedulingConfig(AppConfig):
         registration.register_notifications()
         registration.register_waitlist()
         registration.register_quota_metrics()
+        registration.register_token_scopes()
         from . import integration
 
         integration.register()
