@@ -6,7 +6,7 @@ A frente de caixa do consultório: tabela de preços, conta do paciente, recebim
 
 ### Ativação e dependências
 
-Depende de `io.katua.sk.med.patients` (o paciente de cada conta), de `io.katua.sk.med.scheduling` (a consulta e o emitente do recibo) e de `org.skeleton.ledger` (títulos, baixas e lançamentos). Instalada globalmente e ativada por organização, depois das dependências.
+Depende de `io.medvita.patients` (o paciente de cada conta), de `io.medvita.scheduling` (a consulta e o emitente do recibo) e de `org.skeleton.ledger` (títulos, baixas e lançamentos). Instalada globalmente e ativada por organização, depois das dependências.
 
 ### Acesso
 

@@ -6,7 +6,7 @@ A agenda do consultório: configuração (profissionais, salas, tipos de atendim
 
 ### Ativação e dependências
 
-Depende de `io.katua.sk.med.patients` (o paciente de cada consulta) e de `org.skeleton.calendar` (a projeção das consultas e a disponibilidade dos profissionais). Instalada globalmente e ativada por organização, depois das dependências.
+Depende de `io.medvita.patients` (o paciente de cada consulta) e de `org.skeleton.calendar` (a projeção das consultas e a disponibilidade dos profissionais). Instalada globalmente e ativada por organização, depois das dependências.
 
 ### Acesso
 

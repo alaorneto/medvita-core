@@ -22,12 +22,12 @@ from uuid import UUID
 # Load order of the suite apps and the first-party apps they need: a dependency comes first.
 APPS = ("med_patients", "skeleton_calendar", "skeleton_ledger", "med_scheduling", "med_records", "med_finance")
 APP_IDS = {
-    "med_patients": "io.katua.sk.med.patients",
+    "med_patients": "io.medvita.patients",
     "skeleton_calendar": "org.skeleton.calendar",
     "skeleton_ledger": "org.skeleton.ledger",
-    "med_scheduling": "io.katua.sk.med.scheduling",
-    "med_records": "io.katua.sk.med.records",
-    "med_finance": "io.katua.sk.med.finance",
+    "med_scheduling": "io.medvita.scheduling",
+    "med_records": "io.medvita.records",
+    "med_finance": "io.medvita.finance",
 }
 PASSWORD = "clinic-fixture-password"  # noqa: S105 - disposable identity of the test database
 ROLES = ("admin", "reception", "doctor", "finance")

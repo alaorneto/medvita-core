@@ -41,7 +41,7 @@ from .models import (
 )
 
 APP_LABEL = common.APP_LABEL
-APP_ID = "io.katua.sk.med.scheduling"
+APP_ID = "io.medvita.scheduling"
 PRACTICE_TABLE = "med_scheduling.practice"
 SCHEDULE_TABLE = "med_scheduling.schedule"
 # Container tables the built-in member role gets read and update on (the records decide the rest).

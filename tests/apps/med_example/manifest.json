@@ -1,6 +1,6 @@
 {
   "app_config": "applications.med_example.apps.MedExampleConfig",
-  "app_id": "io.katua.sk.med.example",
+  "app_id": "io.medvita.example",
   "app_label": "med_example",
   "compatibility": {
     "django": ">=6.1,<6.2",
@@ -9,10 +9,10 @@
   },
   "conflicts": {},
   "dependencies": {
-    "io.katua.sk.med.finance": ">=0.0.0,<0.1.0",
-    "io.katua.sk.med.patients": ">=0.0.0,<0.1.0",
-    "io.katua.sk.med.records": ">=0.0.0,<0.1.0",
-    "io.katua.sk.med.scheduling": ">=0.0.0,<0.1.0"
+    "io.medvita.finance": ">=0.0.0,<0.1.0",
+    "io.medvita.patients": ">=0.0.0,<0.1.0",
+    "io.medvita.records": ">=0.0.0,<0.1.0",
+    "io.medvita.scheduling": ">=0.0.0,<0.1.0"
   },
   "description": "App de referência dos testes: mostra como um add-on se pluga nas quatro apps sem alterá-las. Nunca é publicada.",
   "files": [],

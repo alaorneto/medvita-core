@@ -6,7 +6,7 @@
 
 ## Dependência
 
-`app_id`: `io.katua.sk.med.example`. Só para os testes.
+`app_id`: `io.medvita.example`. Só para os testes.
 
 ## Serviços
 

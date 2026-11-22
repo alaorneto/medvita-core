@@ -1,6 +1,6 @@
 {
   "app_config": "applications.med_scheduling.apps.MedSchedulingConfig",
-  "app_id": "io.katua.sk.med.scheduling",
+  "app_id": "io.medvita.scheduling",
   "app_label": "med_scheduling",
   "compatibility": {
     "django": ">=6.1,<6.2",
@@ -9,7 +9,7 @@
   },
   "conflicts": {},
   "dependencies": {
-    "io.katua.sk.med.patients": ">=0.0.0,<0.1.0",
+    "io.medvita.patients": ">=0.0.0,<0.1.0",
     "org.skeleton.calendar": ">=0.3.0,<0.4.0"
   },
   "description": "Agenda médica: consultório, profissionais, salas, grade de horários, consultas e lista de espera.",

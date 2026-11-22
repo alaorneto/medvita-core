@@ -50,7 +50,7 @@ from .policies import (
 )
 
 APP_LABEL = "med_patients"
-APP_ID = "io.katua.sk.med.patients"
+APP_ID = "io.medvita.patients"
 MAX_GROUPS = 20
 MAX_SUMMARIES = 200
 Scalar = str | int | bool | date | None

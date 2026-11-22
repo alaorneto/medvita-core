@@ -157,28 +157,28 @@ search = '"version": "{current}"'
 
 [[versioning.files]]
 path = "med_scheduling/manifest.json"
-regex = '"io\.katua\.sk\.med\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
-replace = '"io.katua.sk.med.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+regex = '"io\.medvita\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
 
 [[versioning.files]]
 path = "med_records/manifest.json"
-regex = '"io\.katua\.sk\.med\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
-replace = '"io.katua.sk.med.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+regex = '"io\.medvita\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
 
 [[versioning.files]]
 path = "med_records/manifest.json"
-regex = '"io\.katua\.sk\.med\.scheduling": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
-replace = '"io.katua.sk.med.scheduling": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+regex = '"io\.medvita\.scheduling": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.scheduling": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
 
 [[versioning.files]]
 path = "med_finance/manifest.json"
-regex = '"io\.katua\.sk\.med\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
-replace = '"io.katua.sk.med.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+regex = '"io\.medvita\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
 
 [[versioning.files]]
 path = "med_finance/manifest.json"
-regex = '"io\.katua\.sk\.med\.scheduling": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
-replace = '"io.katua.sk.med.scheduling": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+regex = '"io\.medvita\.scheduling": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.scheduling": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
 
 
 # Contratos que outras apps consomem. Remover um arquivo pede major (minor em 0.x).

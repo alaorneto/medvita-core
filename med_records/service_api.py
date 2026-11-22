@@ -44,7 +44,7 @@ from .models import (
 )
 
 APP_LABEL = common.APP_LABEL
-APP_ID = "io.katua.sk.med.records"
+APP_ID = "io.medvita.records"
 ARCHIVE_TABLE = "med_records.archive"
 # Container tables the built-in member role gets read and update on (the records decide the rest).
 MEMBER_TABLES = (ARCHIVE_TABLE,)

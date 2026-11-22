@@ -1,6 +1,6 @@
 {
   "app_config": "applications.med_finance.apps.MedFinanceConfig",
-  "app_id": "io.katua.sk.med.finance",
+  "app_id": "io.medvita.finance",
   "app_label": "med_finance",
   "compatibility": {
     "django": ">=6.1,<6.2",
@@ -9,8 +9,8 @@
   },
   "conflicts": {},
   "dependencies": {
-    "io.katua.sk.med.patients": ">=0.0.0,<0.1.0",
-    "io.katua.sk.med.scheduling": ">=0.0.0,<0.1.0",
+    "io.medvita.patients": ">=0.0.0,<0.1.0",
+    "io.medvita.scheduling": ">=0.0.0,<0.1.0",
     "org.skeleton.ledger": ">=0.3.0,<0.4.0"
   },
   "description": "Financeiro do consultório: tabela de preços, caixa, contas do paciente, pagamentos e recibos.",

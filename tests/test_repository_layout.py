@@ -22,7 +22,7 @@ def test_one_version_train_publisher_and_core_range():
     assert {item["publisher"] for item in manifests} == {"katua-tech"}
     assert len({item["compatibility"]["skeleton"] for item in manifests}) == 1
     assert [item["app_id"] for item in manifests] == [
-        f"io.katua.sk.med.{name}" for name in ("patients", "scheduling", "records", "finance")
+        f"io.medvita.{name}" for name in ("patients", "scheduling", "records", "finance")
     ]
 
 
@@ -32,15 +32,15 @@ def test_dependencies_follow_the_architecture():
     own = f">={major}.{minor}.0,<{major}.{minor + 1}.0"
     expected = {
         "med_patients": set(),
-        "med_scheduling": {"io.katua.sk.med.patients", "org.skeleton.calendar"},
-        "med_records": {"io.katua.sk.med.patients", "io.katua.sk.med.scheduling"},
-        "med_finance": {"io.katua.sk.med.patients", "io.katua.sk.med.scheduling", "org.skeleton.ledger"},
+        "med_scheduling": {"io.medvita.patients", "org.skeleton.calendar"},
+        "med_records": {"io.medvita.patients", "io.medvita.scheduling"},
+        "med_finance": {"io.medvita.patients", "io.medvita.scheduling", "org.skeleton.ledger"},
     }
     for app in APPS:
         dependencies = manifest(app)["dependencies"]
         assert set(dependencies) == expected[app], app
         for app_id, version_range in dependencies.items():
-            if app_id.startswith("io.katua.sk.med."):
+            if app_id.startswith("io.medvita."):
                 assert version_range == own, (app, app_id)
 
 

@@ -1,6 +1,6 @@
 {
   "app_config": "applications.med_records.apps.MedRecordsConfig",
-  "app_id": "io.katua.sk.med.records",
+  "app_id": "io.medvita.records",
   "app_label": "med_records",
   "compatibility": {
     "django": ">=6.1,<6.2",
@@ -9,8 +9,8 @@
   },
   "conflicts": {},
   "dependencies": {
-    "io.katua.sk.med.patients": ">=0.0.0,<0.1.0",
-    "io.katua.sk.med.scheduling": ">=0.0.0,<0.1.0"
+    "io.medvita.patients": ">=0.0.0,<0.1.0",
+    "io.medvita.scheduling": ">=0.0.0,<0.1.0"
   },
   "description": "Prontuário: arquivos clínicos, atendimentos selados, alergias, medicamentos e documentos simples.",
   "files": [],
