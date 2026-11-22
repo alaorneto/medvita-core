@@ -56,3 +56,13 @@ Mesmo ambiente.
 - `tests/apps/med_example/tests/test_extension_points.py`: cada ponto de extensão das quatro apps usado por uma quinta app sem alterá-las.
 - `med_patients/tests/test_clinic_setup.py` e `tests/test_demo_data.py`: a lista de configuração da clínica e o script de demonstração (roda uma vez; recusa fora de desenvolvimento e teste).
 - Não rodou: o roteiro manual do guia de implantação num banco limpo, até a primeira consulta marcada; ele depende de um servidor com os pacotes instalados.
+
+## Núcleo v0.3.0 (2026-11-21)
+
+Local: Windows 11, Python 3.14, núcleo instalado da tag `v0.3.0` (commit `ce12e0c`), PostgreSQL descartável do `dev_postgres.py` de um clone do núcleo, asserções na role runtime.
+
+- `python -m django check --fail-level WARNING` → sem problemas; `makemigrations --check --dry-run` → nada pendente.
+- `python -m pytest -q -n 4` → 296 passed, 223 subtests passed.
+- `package doctor <pacote>` nos quatro, sobre um commit da árvore de trabalho → `problems: []`.
+- `tools/sync_leaves.py --check`, `tools/service_reference.py --check`, `ruff check .` e `ruff format --check .` → limpos.
+- `/platform/appearance/` resolve (`platform:appearance`) e `appearance show` responde com a marca padrão num banco migrado.

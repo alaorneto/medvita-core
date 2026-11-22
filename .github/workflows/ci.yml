@@ -1,6 +1,6 @@
 # CI do sk_med_core: lint, checks do Django, testes no PostgreSQL com a role runtime e diagnóstico
-# dos quatro pacotes. O núcleo vem do repositório público do Skeleton num commit fixo
-# (SKELETON_REF) enquanto ele não tem release publicada; o repositório não contém cópia dele.
+# dos quatro pacotes. O núcleo vem do repositório público do Skeleton, na tag de uma release
+# publicada (SKELETON_REF); o repositório não contém cópia dele.
 # As senhas abaixo são de um container descartável do próprio job, não segredos.
 name: CI
 
@@ -18,9 +18,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Commit do núcleo instalado. Com release publicada, troque a instalação pelo wheel da release
-  # (passo comentado abaixo) e suba compatibility.skeleton dos manifestos na mesma mudança.
-  SKELETON_REF: f38c9a02166d63e402d2c7708e616ae842441665
+  # Tag da release do núcleo instalada: é a versão mínima de compatibility.skeleton dos manifestos
+  # e a referência do AGENTS.md da raiz; as três sobem na mesma mudança.
+  SKELETON_REF: v0.3.0
   SKELETON_REPOSITORY: alaorneto/skeleton
   RUFF_VERSION: "0.17.4"
 
@@ -81,7 +81,7 @@ jobs:
         run: |
           python -m pip install "django-skeleton @ git+https://github.com/${SKELETON_REPOSITORY}@${SKELETON_REF}"
           python -m pip install pytest==9.2.0 pytest-django==4.14.0 pytest-xdist==3.8.0
-      # Com release publicada:
+      # Quando a release do núcleo anexar o wheel:
       # - run: python -m pip install "https://github.com/${SKELETON_REPOSITORY}/releases/download/v${SKELETON_VERSION}/django_skeleton-${SKELETON_VERSION}-py3-none-any.whl"
       - name: Provisionar os bancos de teste (um por worker)
         run: |

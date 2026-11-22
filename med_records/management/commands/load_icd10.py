@@ -14,6 +14,8 @@ from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from skeleton.tenancy.context import command_context
+
 CODE = re.compile(r"^[A-Z][0-9]{2}(\.[0-9])?$")
 MAX_ROWS = 50_000
 
@@ -65,7 +67,8 @@ class Command(BaseCommand):
             self.stdout.write(f"{len(rows)} codes are valid; nothing was written (use --confirm).")
             return
         created = updated = 0
-        with transaction.atomic():
+        # The core accepts writes to a global app table only in a system context without organization.
+        with command_context(reason="med_records:load_icd10"), transaction.atomic():
             existing = {row.code: row for row in Icd10Code.objects.filter(code__in=[code for code, _ in rows])}
             for code, description in rows:
                 search = fold(f"{code} {description}")[:320]

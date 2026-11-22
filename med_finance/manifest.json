@@ -5,13 +5,13 @@
   "compatibility": {
     "django": ">=6.1,<6.2",
     "python": ">=3.12,<3.15",
-    "skeleton": ">=0.0.0,<0.1.0"
+    "skeleton": ">=0.3.0,<0.4.0"
   },
   "conflicts": {},
   "dependencies": {
     "io.katua.sk.med.patients": ">=0.0.0,<0.1.0",
     "io.katua.sk.med.scheduling": ">=0.0.0,<0.1.0",
-    "org.skeleton.ledger": ">=0.0.0,<0.1.0"
+    "org.skeleton.ledger": ">=0.3.0,<0.4.0"
   },
   "description": "Financeiro do consultório: tabela de preços, caixa, contas do paciente, pagamentos e recibos.",
   "files": [],

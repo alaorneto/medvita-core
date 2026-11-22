@@ -18,7 +18,7 @@ permissions:
 
 env:
   SKELETON_REPOSITORY: alaorneto/skeleton
-  SKELETON_REF: f38c9a02166d63e402d2c7708e616ae842441665
+  SKELETON_REF: v0.3.0
 
 jobs:
   publish:
