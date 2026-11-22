@@ -23,7 +23,24 @@ for (const select of document.querySelectorAll("[data-kind-durations]")) {
   });
 }
 
-// Weekly grid: the hour lines after the first stay folded while empty, until asked for.
+// Periods: "Vagas" is of a walk-in period, so it folds away (and is not sent) in booked time.
+// A form with several periods marks each one with data-period.
+for (const select of document.querySelectorAll("[data-period-mode]")) {
+  const scope = select.closest("[data-period]") || select.form;
+  const only = scope ? [...scope.querySelectorAll("[data-walk-in-only]")] : [];
+  if (!only.length) continue;
+  const fold = () => {
+    const walkIn = select.value === "walk_in";
+    for (const part of only) {
+      part.hidden = !walkIn;
+      for (const input of part.querySelectorAll("input")) input.disabled = !walkIn;
+    }
+  };
+  select.addEventListener("change", fold);
+  fold();
+}
+
+// Periods: the lines after the first stay folded while empty, until asked for.
 for (const group of document.querySelectorAll("[data-period-lines]")) {
   const lines = [...group.querySelectorAll("[data-period-line]")];
   const folded = lines.slice(1).filter(line => line.hasAttribute("data-empty"));

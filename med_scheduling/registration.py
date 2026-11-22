@@ -158,7 +158,7 @@ def register_schedule_tables() -> None:
     register(
         TableSpec(
             model=AvailabilityRule,
-            description=_("Grade semanal de cada agenda."),
+            description=_("Grade semanal de cada agenda e os períodos dos dias alterados."),
             label=_("Grade de horários"),
             scope="organization",
             read_fields=(
@@ -169,6 +169,9 @@ def register_schedule_tables() -> None:
                 "valid_from",
                 "valid_until",
                 "appointment_type",
+                "mode",
+                "capacity",
+                "on_date",
             ),
             write_fields=(),
             sensitive_fields=(),
@@ -215,6 +218,7 @@ APPOINTMENT_PAYLOAD = (
     "starts_at",
     "ends_at",
     "status",
+    "mode",
 )
 
 
@@ -253,9 +257,14 @@ def register_appointments() -> None:
                 "cancel_reason",
                 "cancel_note",
                 "rescheduled_from",
+                "mode",
+                "duration_minutes",
+                "arrival_number",
+                "is_priority",
             ),
             write_fields=(),
-            sensitive_fields=("notes", "cancel_note"),
+            # The priority mark lets one infer age, pregnancy or disability: it never leaves in an event.
+            sensitive_fields=("notes", "cancel_note", "is_priority"),
             expose_api=False,
             access_parent="schedule",
         )

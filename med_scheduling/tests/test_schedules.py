@@ -125,6 +125,67 @@ def test_weekly_grid_replaces_with_cas(ready, subtests):
         assert len(replaced) == 1 and len(service().availability(actor=actor, schedule_id=schedule.sysid)) == 1
 
 
+def test_the_grid_takes_the_mode_and_the_capacity_of_each_period(ready, subtests):
+    start = date(2026, 1, 1)
+
+    def save(*rules, user=None):
+        with ready.as_user(user or ready.a.reception) as actor:
+            revision = service().schedule(actor=actor, schedule_id=ready.schedule.sysid).revision
+            return service().set_availability(
+                actor=actor, schedule_id=ready.schedule.sysid, rules=rules, expected_revision=revision
+            )
+
+    def walk_in(capacity=None, start_minute=480, end_minute=720):
+        return AvailabilityRuleInput(0, start_minute, end_minute, start, mode="walk_in", capacity=capacity)
+
+    afternoon = AvailabilityRuleInput(0, 840, 1080, start)
+    with subtests.test("a period says its mode; one built as before is of booked time"):
+        morning, later = save(walk_in(15), afternoon)
+        assert (morning.mode, morning.capacity) == ("walk_in", 15)
+        assert (later.mode, later.capacity) == ("booked", None)
+        assert save(walk_in(), afternoon)[0].capacity is None
+    with subtests.test("mode and capacity change in the row the period already has"):
+        rows = AvailabilityRule.all_objects.filter(schedule_id=ready.schedule.sysid)
+        with as_admin(ready):
+            before = rows.count()
+        changed = save(walk_in(20), afternoon)
+        booked = save(AvailabilityRuleInput(0, 480, 720, start), afternoon)
+        assert changed[0].sysid == booked[0].sysid == morning.sysid
+        assert (changed[0].capacity, booked[0].mode, booked[0].capacity) == (20, "booked", None)
+        with as_admin(ready):
+            assert rows.count() == before
+    with subtests.test("periods of different modes do not overlap either"):
+        with pytest.raises(InvalidInput) as error:
+            save(walk_in(), AvailabilityRuleInput(0, 660, 900, start))
+        assert "rules" in error.value.errors
+    with subtests.test("a capacity is of a walk-in period, from 1 to 500"):
+        for rule in (
+            AvailabilityRuleInput(0, 480, 720, start, capacity=10),
+            walk_in(0),
+            walk_in(501),
+            walk_in(True),
+            walk_in("10"),
+        ):
+            with pytest.raises(InvalidInput) as error:
+                save(rule)
+            assert "capacity" in error.value.errors
+        assert save(walk_in(1))[0].capacity == 1 and save(walk_in(500))[0].capacity == 500
+    with subtests.test("an unknown mode"):
+        for mode in ("queue", "", None, 1):
+            with pytest.raises(InvalidInput) as error:
+                save(AvailabilityRuleInput(0, 480, 720, start, mode=mode))
+            assert "mode" in error.value.errors
+    with subtests.test("the database holds the same rules"):
+        from django.db import IntegrityError, transaction
+        from django.db.models import F, QuerySet
+
+        with as_admin(ready):
+            row = QuerySet(AvailabilityRule).filter(schedule_id=ready.schedule.sysid)
+            for values in ({"mode": "booked", "capacity": 3}, {"capacity": 0}, {"mode": "queue"}):
+                with pytest.raises(IntegrityError, match="med_scheduling_rule_"), transaction.atomic():
+                    row.update(revision=F("revision") + 1, **values)
+
+
 def test_blocks_show_in_the_calendar(ready):
     schedule = ready.schedule
     start = datetime(2026, 12, 24, 13, 0, tzinfo=UTC)

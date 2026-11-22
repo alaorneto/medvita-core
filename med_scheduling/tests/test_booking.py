@@ -14,7 +14,17 @@ from skeleton.testing.service_api import assert_cas_conflict
 from ..service_api import AvailabilityRuleInput, SchedulingService
 from .booking import SP, at, book, prepare
 
-PAYLOAD = {"code", "schedule", "patient", "appointment_type", "billing_code", "starts_at", "ends_at", "status"}
+PAYLOAD = {
+    "code",
+    "schedule",
+    "patient",
+    "appointment_type",
+    "billing_code",
+    "starts_at",
+    "ends_at",
+    "status",
+    "mode",
+}
 
 
 def service():
@@ -40,6 +50,7 @@ def test_book_projects_and_publishes_without_the_patient(ready):
     assert [event.event_type for event in events] == ["med_scheduling.appointment_booked"]
     payload = dict(events[0].data)
     assert set(payload) == PAYLOAD and payload["patient"] == str(ready.patient.sysid)
+    assert payload["mode"] == "booked" and appointment.mode == "booked" and appointment.duration_minutes == 30
     projected = event_of(ready, appointment)
     assert projected.title == "Consulta · A0000001"
     assert "Maria" not in projected.title and "Secreta" not in projected.title

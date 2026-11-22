@@ -1,7 +1,8 @@
 """REST API of the scheduling app, under ``/api/v1/o/<org>/apps/med_scheduling/``.
 
 Every call goes through SchedulingService. Lists never carry the reception's notes; only the
-detail of one appointment does. Changes require ``If-Match`` with the current revision; booking
+detail of one appointment does. The legal priority mark leaves only in the queue of a schedule
+and in that detail. Changes require ``If-Match`` with the current revision; booking
 accepts ``Idempotency-Key``. Errors come back as the core's standard responses.
 """
 
@@ -22,7 +23,15 @@ from skeleton.api.views import request_fields
 from skeleton.service_api import InvalidInput
 
 from .api_support import SCOPE_READ, SCOPE_WRITE, ScopedAPI, cursor_page, dto_schema
-from .service_api import AppointmentDetail, AppointmentInfo, ScheduleInfo, SchedulingService, Slot
+from .service_api import (
+    AppointmentDetail,
+    AppointmentInfo,
+    PeriodPlan,
+    QueueSession,
+    ScheduleInfo,
+    SchedulingService,
+    Slot,
+)
 
 PAGE_SIZE = 50
 
@@ -94,6 +103,14 @@ def _date(value: Any, field: str) -> date:
         raise InvalidInput({field: [gettext("Use uma data válida (AAAA-MM-DD).")]}) from None
 
 
+def _boolean(value: Any, field: str) -> bool:
+    if value in (True, "true", "1"):
+        return True
+    if value in (False, "false", "0"):
+        return False
+    raise InvalidInput({field: [gettext("Use verdadeiro ou falso (true ou false).")]})
+
+
 def _fields(request: Any, allowed: tuple[str, ...]) -> dict[str, Any]:
     fields = request_fields(request)
     unknown = sorted(set(fields) - set(allowed))
@@ -147,6 +164,51 @@ class SlotsAPI(ScopedAPI):
         return Response({"results": _json(slots)})
 
 
+class PlanAPI(ScopedAPI):
+    token_methods = ("GET",)
+    token_scopes = {"GET": SCOPE_READ}
+    openapi = {
+        "GET": Operation(
+            "Períodos da agenda em cada dia, com o modo e a ocupação",
+            lambda: results(dto_schema(PeriodPlan)),
+            query=(
+                ("start", string(format="date"), "Primeiro dia (AAAA-MM-DD)"),
+                ("end", string(format="date"), "Último dia; padrão: o primeiro"),
+            ),
+            scope=SCOPE_READ,
+        )
+    }
+
+    def get(self, request, organization_id, schedule_id):
+        params = request.query_params
+        start = _date(params.get("start", ""), "start")
+        end = _date(params.get("end") or params.get("start", ""), "end")
+        periods = _service().day_plan(actor=request.user, schedule_id=schedule_id, start_date=start, end_date=end)
+        return Response({"results": _json(periods)})
+
+
+class QueueAPI(ScopedAPI):
+    token_methods = ("GET",)
+    token_scopes = {"GET": SCOPE_READ}
+    openapi = {
+        "GET": Operation(
+            "Fila de cada período de ordem de chegada da agenda num dia",
+            lambda: results(dto_schema(QueueSession)),
+            query=(("date", string(format="date"), "Dia (AAAA-MM-DD)"),),
+            scope=SCOPE_READ,
+            description=(
+                "Quem aguarda vem na ordem de chamada. É, com o detalhe da consulta, a única resposta que leva "
+                "a marca de prioridade legal (is_priority)."
+            ),
+        )
+    }
+
+    def get(self, request, organization_id, schedule_id):
+        day = _date(request.query_params.get("date", ""), "date")
+        sessions = _service().queue(actor=request.user, schedule_id=schedule_id, date=day)
+        return Response({"results": _json(sessions)})
+
+
 BOOK_FIELDS = (
     "schedule",
     "patient",
@@ -157,6 +219,7 @@ BOOK_FIELDS = (
     "notes",
     "payment_kind",
     "room",
+    "mode",
 )
 
 
@@ -171,6 +234,7 @@ BOOK_INPUT = obj(
         "notes": string(),
         "payment_kind": string(),
         "room": UUID_SCHEMA,
+        "mode": string(),
     },
     required=("schedule", "patient", "appointment_type", "starts_at"),
 )
@@ -239,6 +303,7 @@ class AppointmentsAPI(ScopedAPI):
                 notes=str(fields.get("notes") or ""),
                 payment_kind=str(fields["payment_kind"]) if fields.get("payment_kind") else None,
                 room_id=_uuid(fields.get("room"), "room"),
+                mode=str(fields["mode"]) if fields.get("mode") else "booked",
                 idempotency_key=key[:150],
             )
         return _with_etag(Response(_json(info), status=201), info.revision)
@@ -257,9 +322,16 @@ class AppointmentAPI(ScopedAPI):
 
 
 TRANSITION_INPUT = obj(
-    {"reason": string(), "note": string(), "starts_at": string(format="date-time"), "schedule": UUID_SCHEMA},
+    {
+        "reason": string(),
+        "note": string(),
+        "starts_at": string(format="date-time"),
+        "schedule": UUID_SCHEMA,
+        "priority": BOOLEAN,
+    },
     required=(),
 )
+PRIORITY_INPUT = obj({"priority": BOOLEAN}, required=("priority",))
 
 
 class AppointmentTransitionAPI(ScopedAPI):
@@ -275,8 +347,8 @@ class AppointmentTransitionAPI(ScopedAPI):
             if_match=True,
             scope=SCOPE_WRITE,
             description=(
-                "A transição vem no caminho: confirm, check-in, start, complete, no-show, cancel (reason, note) "
-                "ou reschedule (starts_at, schedule; aceita Idempotency-Key)."
+                "A transição vem no caminho: confirm, check-in (priority), start, complete, no-show, "
+                "cancel (reason, note) ou reschedule (starts_at, schedule; aceita Idempotency-Key)."
             ),
         )
     }
@@ -285,7 +357,15 @@ class AppointmentTransitionAPI(ScopedAPI):
         revision = _if_match(request)
         service = _service()
         with transaction.atomic():
-            if transition in TRANSITIONS:
+            if transition == "check-in":
+                fields = _fields(request, ("priority",))
+                info = service.check_in(
+                    actor=request.user,
+                    appointment_id=appointment_id,
+                    expected_revision=revision,
+                    priority=_boolean(fields.get("priority", False), "priority"),
+                )
+            elif transition in TRANSITIONS:
                 _fields(request, ())
                 info = getattr(service, TRANSITIONS[transition])(
                     actor=request.user, appointment_id=appointment_id, expected_revision=revision
@@ -313,4 +393,37 @@ class AppointmentTransitionAPI(ScopedAPI):
                 from django.http import Http404
 
                 raise Http404
+        return _with_etag(Response(_json(info)), info.revision)
+
+
+class AppointmentPriorityAPI(ScopedAPI):
+    token_methods = ("POST",)
+    token_scopes = {"POST": SCOPE_WRITE}
+    openapi = {
+        "POST": Operation(
+            "Marca de prioridade legal da consulta (Lei 10.048)",
+            lambda: dto_schema(AppointmentInfo),
+            request=PRIORITY_INPUT,
+            etag=True,
+            if_match=True,
+            scope=SCOPE_WRITE,
+            description=(
+                "Põe ou tira a marca enquanto o atendimento não começou. A resposta não leva a marca: ela sai "
+                "na fila da agenda e no detalhe da consulta."
+            ),
+        )
+    }
+
+    def post(self, request, organization_id, appointment_id):
+        revision = _if_match(request)
+        fields = _fields(request, ("priority",))
+        if "priority" not in fields:
+            raise InvalidInput({"priority": [gettext("Campo obrigatório.")]})
+        with transaction.atomic():
+            info = _service().set_priority(
+                actor=request.user,
+                appointment_id=appointment_id,
+                priority=_boolean(fields["priority"], "priority"),
+                expected_revision=revision,
+            )
         return _with_etag(Response(_json(info)), info.revision)

@@ -1,0 +1,8 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Fila" %} · {{ schedule.name }} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}">{% endblock %}
+{% block content %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_scheduling:reception' organization_id %}">{% translate "Recepção" %}</a> · {{ schedule.name }}</p><h1>{% blocktranslate with day=day|date:"l, d/m/Y" %}Fila de {{ day }}{% endblocktranslate %}</h1><p class="page-description">{% translate "Os períodos de ordem de chegada desta agenda no dia: quem aguarda, na ordem de chamada, e quem ainda é esperado." %}</p></div>
+<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_scheduling:queue' organization_id schedule.sysid previous|date:'Y-m-d' %}">{% translate "Dia anterior" %}</a><a class="btn btn-secondary" href="{% url 'med_scheduling:queue' organization_id schedule.sysid following|date:'Y-m-d' %}">{% translate "Próximo dia" %}</a><a class="btn btn-secondary" href="{% url 'med_scheduling:day' organization_id %}?date={{ day|date:'Y-m-d' }}">{% translate "Agenda do dia" %}</a></nav></div>
+{% include "med_scheduling/_nav.html" %}
+{% for card in queues %}{% include "med_scheduling/_queue.html" with back="queue" %}{% empty %}<div class="empty-state"><p>{% translate "Esta agenda não atende por ordem de chegada neste dia." %}</p><p><a href="{% url 'med_scheduling:week' organization_id schedule.sysid %}?start={{ day|date:'Y-m-d' }}">{% translate "Ver a semana" %}</a></p></div>{% endfor %}
+{% endblock %}
