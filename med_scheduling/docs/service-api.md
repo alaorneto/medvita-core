@@ -128,6 +128,14 @@ Book the appointment of a waiting patient and mark the entry booked, in one tran
 - **Erros:** NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada ou com duração fora de 5 a 480 minutos; Conflict("stale_revision", "invalid_transition", "type_not_allowed", "slot_unavailable", "mode_mismatch", "session_full"): com o horário ocupado, a sessão lotada ou o tipo não atendido pela agenda, a entrada continua aguardando.
 - **Efeitos:** os de ``book`` e a entrada em "agendado" com a consulta.
 
+#### `calendars(*, actor) -> tuple[CalendarEntry, ...]`
+
+The calendars of the core the actor reads: those of the schedules by name, then the others.
+
+- **Autorização:** cada calendário pela leitura dele no núcleo, e a agenda dele pela leitura da agenda.
+- **Erros:** Unavailable com a agenda do núcleo desativada.
+- **Efeitos:** nenhum.
+
 #### `cancel(*, actor, appointment_id, reason, expected_revision, note='') -> AppointmentInfo`
 
 Cancel an appointment (scheduled, confirmed or arrived), with CAS.

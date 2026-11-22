@@ -259,6 +259,23 @@ def schedule_info(row: Schedule, *, writable: bool = False) -> ScheduleInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class CalendarEntry:
+    """A calendar of the core the actor reads, as the schedules page lists it.
+
+    ``schedule_id`` names the schedule the calendar belongs to. It is ``None`` for any other
+    calendar (a personal or a shared one), which holds common events of the core: no appointment
+    rule applies to it. ``is_own`` marks the actor's own personal calendar.
+    """
+
+    calendar_id: UUID
+    name: str
+    kind: str
+    is_own: bool = False
+    schedule_id: UUID | None = None
+    schedule_is_active: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class AvailabilityRuleInput:
     """A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice's time zone.
 
@@ -2212,6 +2229,41 @@ class SchedulingService(ServiceAPI):
         """
         row = _schedule(actor, schedule_id)
         return schedule_info(row, writable=row.pk in _writable_schedule_ids(actor))
+
+    @service_method(read_only=True, since="0.1.0")
+    def calendars(self, *, actor: Any) -> tuple[CalendarEntry, ...]:
+        """The calendars of the core the actor reads: those of the schedules by name, then the others.
+
+        The calendar of a schedule shows its appointments and follows its rules; any other (a
+        personal or a shared one) holds common events of the core calendar. Nothing is created:
+        the personal calendar of a person exists after their first visit to the core calendar.
+        Autorização: cada calendário pela leitura dele no núcleo, e a agenda dele pela leitura da agenda.
+        Erros: Unavailable com a agenda do núcleo desativada.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        from . import calendar_bridge
+
+        schedules = {row.calendar_id: row for row in authorized_queryset(Schedule, user=actor, action="read")[:200]}
+        of_schedules, others = [], []
+        for info in calendar_bridge.readable_calendars(actor)[:200]:
+            schedule = schedules.get(info.sysid)
+            if schedule is not None:
+                of_schedules.append(
+                    CalendarEntry(
+                        info.sysid,
+                        schedule.name,
+                        info.kind,
+                        schedule_id=schedule.pk,
+                        schedule_is_active=schedule.is_active,
+                    )
+                )
+            else:
+                own = info.kind == "personal" and info.owner_id == actor.pk
+                others.append(CalendarEntry(info.sysid, info.name, info.kind, is_own=own))
+        of_schedules.sort(key=lambda entry: (entry.name.casefold(), str(entry.calendar_id)))
+        return (*of_schedules, *others)
 
     @service_method(read_only=False, since="0.1.0")
     def create_schedule(

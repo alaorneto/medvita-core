@@ -949,3 +949,104 @@ def test_the_pages_open_before_the_practice_is_set_up(clinic):
     assert_safe(client.get(address("setup")))
     response = client.get(address("day"))
     assert response.status_code == 302 and response["Location"] == address("home")
+
+
+# ---------------------------------------------------------- the professional's schedule, calendars
+
+
+def _professional(name, **extra):
+    return {
+        "form": "professional",
+        "professional-display_name": name,
+        "professional-council": "crm",
+        "professional-council_number": "",
+        "professional-council_state": "",
+        "professional-specialty": "",
+        "professional-member": "",
+        "idempotency_key": f"page-{name}",
+        **extra,
+    }
+
+
+def _professionals(ready):
+    with ready.as_user(ready.a.admin) as actor:
+        return {item.display_name: item for item in SchedulingService().professionals(actor=actor, active_only=False)}
+
+
+def _schedules(ready, user=None):
+    with ready.as_user(user or ready.a.admin) as actor:
+        return {item.name: item for item in SchedulingService().schedules(actor=actor, active_only=False)}
+
+
+def test_a_professional_is_registered_with_the_schedule_in_one_step(ready, subtests, monkeypatch):
+    from skeleton.service_api import InvalidInput
+
+    admin = client_for(ready.a.admin)
+    settings = url(ready, "settings")
+    with subtests.test("offered, already ticked, to who manages access"):
+        html = assert_safe(admin.get(settings))
+        box = re.search(r"<input[^>]*name=\"professional-create_schedule\"[^>]*>", html).group(0)
+        assert "checked" in box and "Criar a agenda deste profissional" in html
+        assert "professional-create_schedule" not in assert_safe(client_for(ready.a.reception).get(settings))
+    with subtests.test("both are created, and the page goes to the schedule"):
+        response = admin.post(
+            settings,
+            _professional(
+                "Dr. Bruno", **{"professional-member": str(ready.a.finance.pk), "professional-create_schedule": "on"}
+            ),
+        )
+        created = _schedules(ready)["Dr. Bruno"]
+        assert response.status_code == 302 and response["Location"] == url(ready, "schedule", created.sysid)
+        assert created.professional_id == _professionals(ready)["Dr. Bruno"].sysid
+        # The professional's person owns the schedule: it is theirs to change, with no group granted.
+        assert _schedules(ready, ready.a.finance)["Dr. Bruno"].writable
+        assert "Dr. Bruno" not in _schedules(ready, ready.a.reception)
+    with subtests.test("unticked, only the professional"):
+        response = admin.post(settings, _professional("Dra. Carla"))
+        assert response.status_code == 302 and response["Location"] == settings
+        assert "Dra. Carla" in _professionals(ready) and "Dra. Carla" not in _schedules(ready)
+    with subtests.test("who does not manage access gets no schedule by asking"):
+        response = client_for(ready.a.reception).post(
+            settings, _professional("Dr. Davi", **{"professional-create_schedule": "on"})
+        )
+        assert response.status_code == 302 and response["Location"] == settings
+        assert "Dr. Davi" in _professionals(ready) and "Dr. Davi" not in _schedules(ready)
+    with subtests.test("a schedule that fails takes the professional back"):
+
+        def refuse(self, **kwargs):
+            raise InvalidInput({"name": ["Agenda recusada no teste."]})
+
+        monkeypatch.setattr(SchedulingService, "create_schedule", refuse)
+        response = admin.post(settings, _professional("Dra. Elisa", **{"professional-create_schedule": "on"}))
+        assert response.status_code == 400 and "Agenda recusada no teste." in response.content.decode()
+        assert "Dra. Elisa" not in _professionals(ready)
+
+
+def test_the_schedules_page_lists_the_calendars_the_person_reads(ready, subtests):
+    organization = ready.org_a.pk
+    reception = client_for(ready.a.reception)
+    ics = reverse("skeleton_calendar:calendar-ics", args=(organization, ready.schedule.calendar_id))
+    with subtests.test("the schedules, with the ways out of the core calendar"):
+        html = assert_safe(reception.get(url(ready, "schedules")))
+        section = html[html.index('id="calendars-heading"') :]
+        assert "Agendas de atendimento" in section and url(ready, "schedule", ready.schedule.sysid) in section
+        assert ics in section and reverse("skeleton_calendar:home", args=(organization,)) in section
+        assert reverse("skeleton_calendar_me:feed-token") in section
+        assert "inclui todos os calendários que você lê" in section
+        assert "valem só para as agendas de atendimento" in section
+        assert "Outros calendários" not in section and "Maria" not in html
+    with subtests.test("the other calendars apart, after the first visit to the core calendar"):
+        assert reception.get(reverse("skeleton_calendar:home", args=(organization,))).status_code == 200
+        section = assert_safe(reception.get(url(ready, "schedules")))
+        section = section[section.index('id="calendars-heading"') :]
+        assert "Outros calendários" in section and "Seu calendário" in section
+    with subtests.test("the download is of that calendar, for who reads it"):
+        response = reception.get(ics)
+        assert response.status_code == 200 and response["Content-Type"].startswith("text/calendar")
+        assert client_for(ready.a.finance).get(ics).status_code == 404
+    with subtests.test("who reads no schedule sees no calendar of one"):
+        html = assert_safe(client_for(ready.a.finance).get(url(ready, "schedules")))
+        assert "Agenda da Dra. Ana" not in html and "Agendas de atendimento" not in html
+    with subtests.test("organization B sees nothing of A"):
+        html = assert_safe(client_for(ready.b.admin).get(url(ready, "schedules", organization=ready.org_b)))
+        assert "Agenda da Dra. Ana" not in html and str(ready.schedule.calendar_id) not in html

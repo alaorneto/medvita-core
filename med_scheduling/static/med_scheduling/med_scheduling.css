@@ -38,3 +38,7 @@
 @media print {
   .link-tabs, .toolbar, .med-scheduling-no-print { display: none !important; }
 }
+
+/* The calendars of the schedules page: one per line, with room between the name and its links. */
+.calendar-list { margin-bottom: 1rem; }
+.calendar-list li { padding: 0.25rem 0; }

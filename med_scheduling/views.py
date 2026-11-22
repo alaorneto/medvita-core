@@ -1077,10 +1077,12 @@ def settings_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     if practice is None:
         return redirect("med_scheduling:home", organization_id)
     members = OrganizationService().members(actor=request.user, page_size=100).items
+    # The professional's own schedule is offered only to who may create one.
+    for_professional = {"members": members, "with_schedule": _manages_access(request)}
     practice_initial = {field: getattr(practice, field) for field in scheduling_forms.PracticeForm.base_fields}
     forms = {
         "practice": scheduling_forms.PracticeForm(prefix="practice", initial=practice_initial),
-        "professional": scheduling_forms.ProfessionalForm(prefix="professional", members=members),
+        "professional": scheduling_forms.ProfessionalForm(prefix="professional", **for_professional),
         "room": scheduling_forms.RoomForm(prefix="room"),
         "type": scheduling_forms.TypeForm(prefix="type"),
     }
@@ -1089,12 +1091,13 @@ def settings_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         kind = request.POST.get("form", "")
         if kind not in forms or not practice.writable:
             raise Http404
-        extra = {"members": members} if kind == "professional" else {}
+        extra = for_professional if kind == "professional" else {}
         form = type(forms[kind])(request.POST, prefix=kind, **extra)
         forms[kind] = form
         status = 400
         if form.is_valid():
             values = dict(form.cleaned_data)
+            schedule = None
             try:
                 with transaction.atomic():
                     if kind == "practice":
@@ -1103,12 +1106,21 @@ def settings_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                         )
                     elif kind == "professional":
                         member = values.pop("member")
-                        _service().register_professional(
+                        with_schedule = values.pop("create_schedule", False)
+                        professional = _service().register_professional(
                             actor=request.user,
                             membership_user_id=UUID(member) if member else None,
                             idempotency_key=_key(request),
                             **values,
                         )
+                        if with_schedule:
+                            # In the same transaction: a schedule that fails takes the professional back.
+                            schedule = _service().create_schedule(
+                                actor=request.user,
+                                name=professional.display_name[:120],
+                                professional_id=professional.sysid,
+                                idempotency_key=_key(request),
+                            )
                     elif kind == "room":
                         _service().add_room(actor=request.user, idempotency_key=_key(request), **values)
                     else:
@@ -1120,6 +1132,11 @@ def settings_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             except Conflict as error:
                 form.add_error(None, conflict_text(error))
             else:
+                if schedule is not None:
+                    messages.success(
+                        request, gettext("Profissional cadastrado com a agenda dele. Monte a grade semanal a seguir.")
+                    )
+                    return redirect("med_scheduling:schedule", organization_id, schedule.sysid)
                 messages.success(request, gettext("Configuração salva."))
                 return redirect("med_scheduling:settings", organization_id)
     return render(
@@ -1190,15 +1207,56 @@ def type_edit_view(request: HttpRequest, organization_id: UUID, type_id: UUID) -
     )
 
 
+def _manages_access(request: HttpRequest) -> bool:
+    from skeleton.service_api.access import AccessService
+
+    return "access.manage" in AccessService().capabilities(actor=request.user)
+
+
+def _core_url(name: str, **kwargs: Any) -> str:
+    """A page of the core calendar by its route name; empty when the host does not serve it."""
+    try:
+        return reverse(name, kwargs=kwargs)
+    except NoReverseMatch:
+        return ""
+
+
+def _calendar_section(request: HttpRequest, organization_id: UUID) -> dict[str, Any]:
+    """The calendars the person reads, with the ways out the core calendar already has.
+
+    The app makes no link of its own and keeps no token: opening, downloading and subscribing are
+    pages of the core, which authorizes each one.
+    """
+    rows = [
+        {
+            "entry": entry,
+            "schedule_url": (
+                reverse("med_scheduling:schedule", args=(organization_id, entry.schedule_id))
+                if entry.schedule_id
+                else ""
+            ),
+            "ics_url": _core_url(
+                "skeleton_calendar:calendar-ics", organization_id=organization_id, sysid=entry.calendar_id
+            ),
+        }
+        for entry in _service().calendars(actor=request.user)
+    ]
+    return {
+        "schedules": [row for row in rows if row["entry"].schedule_id],
+        "others": [row for row in rows if not row["entry"].schedule_id],
+        "open_url": _core_url("skeleton_calendar:home", organization_id=organization_id),
+        "feed_url": _core_url("skeleton_calendar_me:feed-token"),
+    }
+
+
 @practice_page
 def schedules_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
-    from skeleton.service_api.access import AccessService
     from skeleton.service_api.organizations import OrganizationService
 
     practice = _practice_or_none(request)
     if practice is None:
         return redirect("med_scheduling:home", organization_id)
-    manager = "access.manage" in AccessService().capabilities(actor=request.user)
+    manager = _manages_access(request)
     groups = OrganizationService().groups(actor=request.user, page_size=100).items if manager else ()
     form = scheduling_forms.ScheduleForm(
         request.POST or None,
@@ -1242,6 +1300,7 @@ def schedules_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             organization_id,
             "schedules",
             schedules=_service().schedules(actor=request.user, active_only=False),
+            calendars=_calendar_section(request, organization_id),
             form=form,
             manager=manager,
             idempotency_key=_key(request),

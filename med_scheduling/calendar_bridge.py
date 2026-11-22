@@ -42,6 +42,16 @@ def create_calendar(
     return info.sysid
 
 
+def readable_calendars(actor: Any) -> tuple[Any, ...]:
+    """The calendars of the core the actor reads, creating none; nothing without the table permission."""
+    from skeleton.service_api import Forbidden
+
+    try:
+        return CalendarService().calendars(actor=actor)
+    except Forbidden:
+        return ()
+
+
 def _grants(
     access: Any,
     actor: Any,

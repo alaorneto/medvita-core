@@ -44,6 +44,7 @@ Configuração do consultório (profissionais, salas, tipos de atendimento), gra
 18. Toda página é `@practice_page` (nunca `@tenant_page()` direto): ela ativa o fuso do consultório, e hora exibida, dia corrente e hora digitada usam esse relógio, não o da preferência de quem lê.
 19. O dia alterado são linhas de `AvailabilityRule` com `on_date`; o dia que as tem segue só elas (`slots.windows_on`). A grade semanal é lida e gravada com `on_date` vazio e nunca toca nelas.
 20. Trocar os períodos de um dia só move consultas confirmado (`convert_existing`) e com a lista vista (`expected_affected`), conferida com a agenda travada; só se move para a ordem de chegada, e a grade semanal nunca converte: recusa a troca de modo sob consultas vivas (`plan_conflicts`).
+21. A app não gera link de calendário nem guarda token: abrir, baixar o `.ics` e assinar são páginas do núcleo, só apontadas pela página de agendas. `calendar_bridge.py` continua o único módulo que fala com o `skeleton_calendar`, e as regras de consulta valem só para o calendário de uma agenda.
 
 ## Testes e especificação
 

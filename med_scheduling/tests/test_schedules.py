@@ -77,6 +77,45 @@ def test_create_schedule_with_its_calendar_and_access(ready, subtests):
             service().create_schedule(actor=admin, name="Vazia", idempotency_key="empty")
 
 
+def test_calendars_lists_those_of_the_schedules_and_then_the_others(ready, subtests):
+    def listed(user, organization=None):
+        with ready.as_user(user, organization) as actor:
+            return service().calendars(actor=actor)
+
+    with subtests.test("the calendar of the schedule, and nothing is created"):
+        (entry,) = listed(ready.a.reception)
+        assert (entry.calendar_id, entry.schedule_id) == (ready.schedule.calendar_id, ready.schedule.sysid)
+        assert entry.name == "Agenda da Dra. Ana" and entry.schedule_is_active and not entry.is_own
+        assert len(listed(ready.a.reception)) == 1
+    with ready.as_user(ready.a.reception) as actor:
+        personal = CalendarService().my_calendars(actor=actor)[0]
+    with subtests.test("then the others, the person's own marked"):
+        first, other = listed(ready.a.reception)
+        assert first.schedule_id == ready.schedule.sysid
+        assert (other.calendar_id, other.kind, other.is_own, other.schedule_id) == (
+            personal.sysid,
+            "personal",
+            True,
+            None,
+        )
+    with subtests.test("the schedules come by name"), as_admin(ready) as admin:
+        room = service().add_room(actor=admin, name="Sala 1", idempotency_key="room")
+        service().create_schedule(
+            actor=admin,
+            name="A sala",
+            room_id=room.sysid,
+            writer_group_ids=(ready.a.groups["reception"],),
+            idempotency_key="room",
+        )
+    with subtests.test("by name"):
+        names = [entry.name for entry in listed(ready.a.reception) if entry.schedule_id]
+        assert names == ["A sala", "Agenda da Dra. Ana"]
+    with subtests.test("who reads no schedule sees none, and nobody sees another person's personal calendar"):
+        assert listed(ready.a.finance) == ()
+    with subtests.test("organization B sees nothing of A"):
+        assert listed(ready.b.admin, ready.b.organization) == ()
+
+
 def test_set_schedule_access_mirrors_the_calendar(ready):
     schedule = ready.schedule
     with as_admin(ready) as admin:

@@ -143,11 +143,23 @@ class ProfessionalForm(forms.Form):
     council_number = forms.CharField(label=_("Número no conselho"), max_length=20, required=False)
     council_state = forms.CharField(label=_("UF do conselho"), max_length=2, required=False)
     specialty = forms.CharField(label=_("Especialidade"), max_length=120, required=False)
-    member = forms.ChoiceField(label=_("Pessoa da organização (opcional)"), required=False)
+    member = forms.ChoiceField(label=_("Pessoa da organização"), required=False)
+    create_schedule = forms.BooleanField(
+        label=_("Criar a agenda deste profissional"),
+        required=False,
+        initial=True,
+        help_text=_(
+            "A agenda nasce com o nome do profissional e ele como dono. "
+            "A grade, os tipos e quem mais acessa são definidos na página dela."
+        ),
+    )
 
-    def __init__(self, *args, members=(), **kwargs):
+    def __init__(self, *args, members=(), with_schedule=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["member"].choices = [("", "—"), *((str(item.sysid), item.display_name) for item in members)]
+        if not with_schedule:
+            # Only who manages access creates a schedule: for anyone else the option does not exist.
+            del self.fields["create_schedule"]
 
 
 class RoomForm(forms.Form):
