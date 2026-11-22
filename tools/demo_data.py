@@ -46,8 +46,12 @@ def allowed() -> bool:
     return bool(settings.DEBUG) or "test" in module
 
 
-def run(organization: Any, admin: Any, *, confirm: bool, seed: int = 7) -> dict[str, int]:
-    """Create the demonstration data; returns what was created. Raises ``Refused`` when it must not run."""
+def run(organization: Any, admin: Any, *, confirm: bool, seed: int = 7, today: date | None = None) -> dict[str, int]:
+    """Create the demonstration data; returns what was created. Raises ``Refused`` when it must not run.
+
+    ``today`` is the day the grids start and the queue is filled (the current day in São Paulo
+    when not given); the appointments go on the fourteen days after it.
+    """
     from applications.med_finance.service_api import ChargeItemInput, FinanceService
     from applications.med_patients.service_api import PatientInput, PatientService
     from applications.med_records.service_api import RecordsService
@@ -59,7 +63,16 @@ def run(organization: Any, admin: Any, *, confirm: bool, seed: int = 7) -> dict[
     if not confirm:
         raise Refused("Pass --confirm to write the demonstration data.")
     rng = random.Random(seed)  # noqa: S311 - fictitious demonstration data, not a secret
-    counts = {"professionals": 0, "patients": 0, "appointments": 0, "encounters": 0, "charges": 0}
+    counts = {
+        "professionals": 0,
+        "patients": 0,
+        "appointments": 0,
+        "walk_ins": 0,
+        "arrivals": 0,
+        "encounters": 0,
+        "charges": 0,
+    }
+    today = today or datetime.now(SP).date()
     with acting_as(admin, organization, source="tools:demo-data") as actor:
         patients = PatientService()
         if patients.search(actor=actor, page_size=1).items:
@@ -101,6 +114,19 @@ def run(organization: Any, admin: Any, *, confirm: bool, seed: int = 7) -> dict[
                 ("procedimento", "Procedimento", 45),
             )
         ]
+        # Paid by the health plan: no price and no charge; they are what the walk-in afternoons take.
+        insured = [
+            scheduling.add_appointment_type(
+                actor=actor,
+                code=code,
+                name=name,
+                duration_minutes=minutes,
+                color="green",
+                payment_kind="insurance",
+                idempotency_key=f"demo-kind-{code}",
+            )
+            for code, name, minutes in (("convenio", "Convênio", 20), ("convenioretorno", "Retorno convênio", 15))
+        ]
         schedules = []
         for index, professional in enumerate([doctor, *others]):
             schedule = scheduling.create_schedule(
@@ -110,10 +136,25 @@ def run(organization: Any, admin: Any, *, confirm: bool, seed: int = 7) -> dict[
                 room_id=rooms[index % 2].sysid if index else None,
                 idempotency_key=f"demo-schedule-{index}",
             )
+            rules = [AvailabilityRuleInput(day, 8 * 60, 12 * 60, today) for day in range(5)]
+            if index == 1:
+                # The second professional sees patients in the order they arrive, every afternoon.
+                rules += [
+                    AvailabilityRuleInput(
+                        day,
+                        13 * 60,
+                        18 * 60,
+                        today,
+                        appointment_type_ids=tuple(kind.sysid for kind in insured),
+                        mode="walk_in",
+                        capacity=12,
+                    )
+                    for day in range(5)
+                ]
             scheduling.set_availability(
                 actor=actor,
                 schedule_id=schedule.sysid,
-                rules=tuple(AvailabilityRuleInput(day, 8 * 60, 12 * 60, datetime.now(SP).date()) for day in range(5)),
+                rules=tuple(rules),
                 expected_revision=schedule.revision,
             )
             schedules.append(schedule)
@@ -143,7 +184,7 @@ def run(organization: Any, admin: Any, *, confirm: bool, seed: int = 7) -> dict[
             )
         counts["patients"] = len(people)
         booked = []
-        start = datetime.now(SP).date() + timedelta(days=1)
+        start = today + timedelta(days=1)
         for offset in range(14):
             day = start + timedelta(days=offset)
             if day.weekday() >= 5:
@@ -163,6 +204,37 @@ def run(organization: Any, admin: Any, *, confirm: bool, seed: int = 7) -> dict[
                     )
                 )
         counts["appointments"] = len(booked)
+
+        def walk_in(day: date, number: int) -> Any:
+            return scheduling.book(
+                actor=actor,
+                schedule_id=schedules[1].sysid,
+                patient_id=people[(counts["walk_ins"] + 20) % len(people)].sysid,
+                appointment_type_id=insured[number % 2].sysid,
+                starts_at=datetime(day.year, day.month, day.day, 13, tzinfo=SP),
+                mode="walk_in",
+                idempotency_key=f"demo-walk-in-{day}-{number}",
+            )
+
+        for offset in range(14):
+            day = start + timedelta(days=offset)
+            if day.weekday() >= 5:
+                continue
+            for number in range(2):
+                walk_in(day, number)
+                counts["walk_ins"] += 1
+        if today.weekday() < 5:
+            # Today's queue, for the reception page: two arrivals, the second with the legal priority.
+            for number in range(2):
+                waiting = walk_in(today, number)
+                counts["walk_ins"] += 1
+                scheduling.check_in(
+                    actor=actor,
+                    appointment_id=waiting.sysid,
+                    expected_revision=waiting.revision,
+                    priority=bool(number),
+                )
+                counts["arrivals"] += 1
         records = RecordsService()
         for number, patient in enumerate(people[:10]):
             chart = records.open_chart(actor=actor, patient_id=patient.sysid)

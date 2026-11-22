@@ -198,14 +198,21 @@ Em `/api/v1/o/<org>/apps/med_scheduling/`:
 |---|---|---|
 | `GET schedules/` | Agendas legíveis (`ScheduleInfo`) | `scheduling:read` |
 | `GET schedules/<id>/slots/?start=&end=&type=` | Horários livres (`Slot`, com `appointment_type_ids`: os tipos do período; vazio vale todos os da agenda), datas `AAAA-MM-DD`, até 62 dias | `scheduling:read` |
+| `GET schedules/<id>/plan/?start=&end=` | Períodos da agenda em cada dia (`PeriodPlan`: modo, vagas, tipos, ocupação, se é dia alterado), datas `AAAA-MM-DD`; sem `end`, só o dia de `start` | `scheduling:read` |
+| `GET schedules/<id>/queue/?date=` | Fila de cada período de ordem de chegada da agenda no dia (`QueueSession`: aguardando na ordem de chamada, esperados, em atendimento e encerrados), com a marca de prioridade | `scheduling:read` |
 | `GET appointments/?schedule=&patient=&start=&end=&status=&cursor=&page_size=` | Consultas (`AppointmentInfo`, sem observação) | `scheduling:read` |
-| `POST appointments/` | Marca; exige `Idempotency-Key`; campos `schedule`, `patient`, `appointment_type`, `starts_at` (ISO 8601 com fuso) e opcionais `duration_minutes`, `fit_in`, `notes`, `payment_kind` (sem ele, a forma de pagamento do tipo), `room`; devolve 201 com `ETag` | `scheduling:write` |
-| `GET appointments/<id>/` | Detalhe (`AppointmentDetail`, com a observação), com `ETag` | `scheduling:read` |
-| `POST appointments/<id>/<mudança>/` | `confirm`, `check-in`, `start`, `complete`, `no-show`, `cancel` (`reason`, `note`) e `reschedule` (`starts_at`, `schedule`); exigem `If-Match` com a revisão | `scheduling:write` |
+| `POST appointments/` | Marca; exige `Idempotency-Key`; campos `schedule`, `patient`, `appointment_type`, `starts_at` (ISO 8601 com fuso) e opcionais `duration_minutes`, `fit_in`, `notes`, `payment_kind` (sem ele, a forma de pagamento do tipo), `room`, `mode` (`booked`, o padrão, ou `walk_in`: `starts_at` é então qualquer instante do período de ordem de chegada); devolve 201 com `ETag` | `scheduling:write` |
+| `GET appointments/<id>/` | Detalhe (`AppointmentDetail`, com a observação e a marca de prioridade), com `ETag` | `scheduling:read` |
+| `POST appointments/<id>/<mudança>/` | `confirm`, `check-in` (`priority` opcional: a chegada já com a marca de prioridade), `start`, `complete`, `no-show`, `cancel` (`reason`, `note`) e `reschedule` (`starts_at`, `schedule`); exigem `If-Match` com a revisão | `scheduling:write` |
+| `POST appointments/<id>/priority/` | Põe ou tira a marca de prioridade legal (`priority`, obrigatório, verdadeiro ou falso) antes de o atendimento começar; exige `If-Match`; devolve `AppointmentInfo` com `ETag` | `scheduling:write` |
 
 Toda rota aceita a sessão do navegador e o token de um cliente fora dele (o access token OIDC de um cliente nativo, como o Medvita Desktop, ou um token `skt_`) nos métodos da coluna "Token", com as mesmas respostas, filtros, `ETag`, `If-Match` e `Idempotency-Key` da sessão. O escopo só restringe: o serviço autoriza o papel da pessoa como para a sessão, e um token com o escopo continua sem ver o que o papel não alcança. O token amplo (`openid profile email`) leva todos os escopos; um cliente que o operador limitou (`native_client register --scope`) precisa do escopo da coluna e do escopo de tabela do contêiner que o serviço autoriza (`med_scheduling.practice:read` e `med_scheduling.schedule:read`, e as ações de escrita da agenda para marcar). Sem o escopo, a resposta é 403 `permission_denied` ("O token não tem o escopo exigido."); método fora da coluna é 403 `token_not_allowed`. Cada operação aparece no `/api/v1/openapi.json` só para quem pode chamá-la.
 
 Campo fora da lista é 400; sem revisão é 400; revisão vencida é 409; agenda sem acesso ou de outra organização é 404. Sem exclusão pela API.
+
+A marca de prioridade (`is_priority`) é dado sensível: sai só em `queue/` e no detalhe de uma consulta, nunca na lista de consultas nem na resposta de uma marcação, de uma mudança de situação ou da própria rota `priority/`. `arrival_number` e `is_priority` são campos de sistema: mandá-los numa marcação é 400. Os códigos de conflito da ordem de chegada (`mode_mismatch`, `session_full`, `type_not_allowed`) respondem 409 com o código.
+
+As respostas de consulta ganharam `mode`, `duration_minutes` e `arrival_number`. Numa consulta de ordem de chegada, `starts_at` e `ends_at` são os limites do período, não a hora do atendimento: o cliente olha `mode` antes de mostrar a hora, e o cliente que valida o esquema da resposta de forma estrita precisa aceitar os campos novos.
 
 ## Acceptance
 
@@ -243,3 +250,5 @@ Campo fora da lista é 400; sem revisão é 400; revisão vencida é 409; agenda
 - O título do evento no calendário nunca leva o nome do paciente; quem lê a agenda e não o paciente vê só o código.
 - A agenda do dia faz o mesmo número de consultas ao banco com 1 ou 7 consultas.
 - A API nunca devolve a observação numa lista e recusa campos de sistema.
+- Pela API se lê o planejamento e a fila, se marca por ordem de chegada, se registra a chegada com prioridade e se corrige a prioridade com `If-Match`; a prioridade sai só na fila e no detalhe; a sessão e o token respondem igual, e o token sem o escopo recebe 403.
+- Os dados de demonstração trazem tipos de convênio, uma agenda com tardes de ordem de chegada e, em dia útil, a fila de hoje com um prioritário.

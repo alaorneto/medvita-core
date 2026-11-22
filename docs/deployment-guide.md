@@ -52,7 +52,7 @@ Os preços e os limites são dados do catálogo de cobrança da plataforma, nunc
 Num ambiente de desenvolvimento, com as quatro apps configuradas numa organização sem pacientes:
 
 ```bash
-python tools/demo_data.py --org <slug> --confirm
+python tools/demo_data.py --org <slug> --as <e-mail de um administrador> --confirm
 ```
 
-O script cria profissionais, salas, tipos, agendas com grade, pacientes fictícios, consultas, atendimentos assinados e contas, só pelos serviços públicos. Ele recusa rodar fora dos perfis de desenvolvimento e teste e numa organização que já tenha paciente.
+O script cria profissionais, salas, tipos particulares e de convênio, agendas com grade (a do segundo profissional atende por ordem de chegada à tarde), pacientes fictícios, consultas com hora e por ordem de chegada, a fila de hoje quando é dia útil, atendimentos assinados e contas, só pelos serviços públicos. Ele recusa rodar fora dos perfis de desenvolvimento e teste e numa organização que já tenha paciente.
