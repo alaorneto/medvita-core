@@ -1,10 +1,10 @@
 /*
- * Tema MedVita da instância (pacote de tema trazido pelo med_patients).
+ * Tema Medvita da instância (pacote de tema trazido pelo med_patients).
  *
  * O núcleo serve este arquivo em /brand/theme.css, depois do site.css e antes da marca da
  * organização, que vence pela ordem. Por isso nada aqui fixa a cor de marca: a escala cobalt e
  * os tokens brand, fg-brand e focus saem de tokens.brand_color (#1273c4, o azul do logo) e a
- * clínica com marca própria os troca. Este arquivo cuida do resto do sistema de design MedVita:
+ * clínica com marca própria os troca. Este arquivo cuida do resto do sistema de design Medvita:
  * superfícies, texto, linhas, estados, sombras e a tipografia de título.
  *
  * Só usa o contrato estável do núcleo: tokens --color-*, --font-*, --shadow-* e as classes de
@@ -87,7 +87,7 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Escuro: mesmos nomes, valores do escuro do MedVita.                 */
+/* Escuro: mesmos nomes, valores do escuro do Medvita.                 */
 /* ------------------------------------------------------------------ */
 @media (prefers-color-scheme: dark) {
   :root {
@@ -154,7 +154,7 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Rótulos sem caixa alta: o MedVita escreve só a primeira letra       */
+/* Rótulos sem caixa alta: o Medvita escreve só a primeira letra       */
 /* maiúscula. "label" do sistema de design: 13/18, peso 500. No layer  */
 /* components do núcleo, depois das regras dele: utilitários vencem.   */
 /* ------------------------------------------------------------------ */

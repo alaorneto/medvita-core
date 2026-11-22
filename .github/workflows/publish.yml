@@ -64,7 +64,7 @@ jobs:
             --expires-at "$(date -u -d '+180 days' +%Y-%m-%dT%H:%M:%SZ)" --generation "$(date -u +%s)" \
             dist/med_*.skapp
           rm -f "${key}"
-      - name: Tema MedVita como zip, para instâncias que preferem enviar o pacote
+      - name: Tema Medvita como zip, para instâncias que preferem enviar o pacote
         env:
           DJANGO_SETTINGS_MODULE: skeleton.testing.host.settings
           TAG: ${{ steps.tag.outputs.tag }}

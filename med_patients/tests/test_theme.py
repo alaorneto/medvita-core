@@ -1,4 +1,4 @@
-"""The MedVita theme of the instance, shipped with the app (#65): valid for the core and brand-neutral CSS."""
+"""The Medvita theme of the instance, shipped with the app (#65): valid for the core and brand-neutral CSS."""
 
 import json
 import re
@@ -22,7 +22,7 @@ def test_manifest_and_theme_agree():
     assert theme["id"] == f"{manifest['app_id']}.theme.medvita"
     assert theme["version"] == manifest["version"]  # The release automation writes both.
     assert theme["compatibility"] == {"skeleton": manifest["compatibility"]["skeleton"]}
-    assert theme["brand"]["product_name"] == "MedVita"
+    assert theme["brand"]["product_name"] == "Medvita"
 
 
 def test_the_css_leaves_the_brand_colour_to_the_core():

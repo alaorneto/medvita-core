@@ -109,7 +109,7 @@ jobs:
           for package in med_patients med_scheduling med_records med_finance; do
             python -m skeleton.system.packages doctor "${package}" --git-ref HEAD
           done
-      - name: Tema MedVita da instância (o mesmo leitor da instalação; sem banco, por isso --skip-checks)
+      - name: Tema Medvita da instância (o mesmo leitor da instalação; sem banco, por isso --skip-checks)
         env:
           DJANGO_SETTINGS_MODULE: skeleton.testing.host.settings
         run: |

@@ -1,4 +1,4 @@
-# Tema MedVita
+# Tema Medvita
 
 Tema da instância trazido pelo `med_patients` (`runtime.instance_themes` do manifesto), no formato do pacote de tema do Skeleton (`docs/appearance.md` e `docs/themes.md` do núcleo). Instalar a suíte não ativa o tema: o administrador da plataforma o ativa em `/platform/appearance/`, na tabela "Temas de apps".
 
