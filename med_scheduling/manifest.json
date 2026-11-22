@@ -9,7 +9,7 @@
   },
   "conflicts": {},
   "dependencies": {
-    "io.medvita.patients": ">=0.0.0,<0.1.0",
+    "io.medvita.patients": ">=0.1.0,<0.2.0",
     "org.skeleton.calendar": ">=0.4.0,<0.5.0"
   },
   "description": "Agenda médica: consultório, profissionais, salas, grade de horários, consultas e lista de espera.",
@@ -61,5 +61,5 @@
     },
     "urls": "applications.med_scheduling.urls"
   },
-  "version": "0.0.0"
+  "version": "0.1.0"
 }

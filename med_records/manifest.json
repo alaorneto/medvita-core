@@ -9,8 +9,8 @@
   },
   "conflicts": {},
   "dependencies": {
-    "io.medvita.patients": ">=0.0.0,<0.1.0",
-    "io.medvita.scheduling": ">=0.0.0,<0.1.0"
+    "io.medvita.patients": ">=0.1.0,<0.2.0",
+    "io.medvita.scheduling": ">=0.1.0,<0.2.0"
   },
   "description": "Prontuário: arquivos clínicos, atendimentos selados, alergias, medicamentos e documentos simples.",
   "files": [],
@@ -61,5 +61,5 @@
     },
     "urls": "applications.med_records.urls"
   },
-  "version": "0.0.0"
+  "version": "0.1.0"
 }

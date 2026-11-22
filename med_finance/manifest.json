@@ -9,8 +9,8 @@
   },
   "conflicts": {},
   "dependencies": {
-    "io.medvita.patients": ">=0.0.0,<0.1.0",
-    "io.medvita.scheduling": ">=0.0.0,<0.1.0",
+    "io.medvita.patients": ">=0.1.0,<0.2.0",
+    "io.medvita.scheduling": ">=0.1.0,<0.2.0",
     "org.skeleton.ledger": ">=0.4.0,<0.5.0"
   },
   "description": "Financeiro do consultório: tabela de preços, caixa, contas do paciente, pagamentos e recibos.",
@@ -62,5 +62,5 @@
     },
     "urls": "applications.med_finance.urls"
   },
-  "version": "0.0.0"
+  "version": "0.1.0"
 }
