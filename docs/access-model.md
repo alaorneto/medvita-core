@@ -33,6 +33,10 @@ A agenda anda com uma tabela de outra app e o acesso das duas tem de coincidir:
 
 Mudar o acesso de um lado só, pela tela genérica de acesso do núcleo, quebra a projeção (consultas que não aparecem no calendário). Use sempre o método da app.
 
+O calendário de uma agenda é **gerenciado** pela agenda médica: o núcleo guarda a app de origem e o caminho da agenda, e as páginas do calendário dele não renomeiam, compartilham nem excluem esse calendário (409), só apontam para a agenda. `create_schedule` cria o calendário já marcado; as agendas criadas antes do marcador são marcadas por `SchedulingService.claim_schedule_calendars`, passo idempotente de quem tem `access.manage`. Os calendários comuns da clínica (os que não são de uma agenda) nascem na página de calendários compartilhados do núcleo, com o acesso decidido lá.
+
+O link de assinatura de um calendário é do núcleo e segue o mesmo acesso: é um por pessoa e calendário, e a autorização é relida a cada pedido. Quem sai da agenda por `set_schedule_access` deixa de receber os eventos pelo link no pedido seguinte, sem revogar nada à mão; se voltar a ler, o link volta a responder.
+
 O caixa (`CashDesk`) **não** tem espelho: o livro contábil autoriza títulos, baixas e lançamentos de regra pelo registro de origem do financeiro (a conta, o pagamento, o movimento), e o caixa guarda as contas do livro de cada forma de pagamento, resolvidas no `setup` (ADR-002 do financeiro).
 
 A matriz "quem lê o quê" do exemplo abaixo é conferida por `tests/test_isolation_matrix.py`: recepção lê paciente, consulta e conta; profissional lê paciente, consulta, prontuário e atendimento; financeiro lê paciente e conta; administrador lê tudo; ninguém da organização B lê nada da A.

@@ -30,7 +30,7 @@ Para o operador da plataforma e para o administrador da clínica. As regras de i
    3. **Prontuário**: um arquivo da clínica para os Profissionais, ou um arquivo por profissional (depois de cadastrar os profissionais vinculados às pessoas).
    4. **Financeiro**: o caixa (Recepção e Financeiro recebem) e a tabela de preços (o Financeiro altera); o livro contábil padrão é criado e preparado.
 4. Em **Agenda médica → Configuração**, cadastre os profissionais (vinculados às pessoas, com conselho e número: só eles assinam atendimentos e documentos), as salas e os tipos de atendimento. O código de cobrança de cada tipo é o código do item na tabela de preços.
-5. Em **Agenda médica → Agendas**, crie a agenda de cada profissional e a grade semanal.
+5. Em **Agenda médica → Agendas**, crie a agenda de cada profissional e a grade semanal. Na mesma página, cada pessoa assina no celular o calendário das agendas que lê ("Assinar no celular": um link por pessoa e calendário, criado na página do calendário), e "Calendários compartilhados" leva à página em que a clínica cria os calendários comuns (reuniões, férias, plantões).
 6. Em **Financeiro → Preços**, cadastre os itens com os códigos de cobrança.
 7. Confira, no livro contábil, o plano de contas e as chaves do financeiro (receita de atendimentos, dinheiro, Pix, cartões, banco, aportes e retiradas).
 
@@ -56,3 +56,7 @@ python tools/demo_data.py --org <slug> --as <e-mail de um administrador> --confi
 ```
 
 O script cria profissionais, salas, tipos particulares e de convênio, agendas com grade (a do segundo profissional atende por ordem de chegada à tarde), pacientes fictícios, consultas com hora e por ordem de chegada, a fila de hoje quando é dia útil, atendimentos assinados e contas, só pelos serviços públicos. Ele recusa rodar fora dos perfis de desenvolvimento e teste e numa organização que já tenha paciente.
+
+## 6. Ao atualizar uma clínica que já tem agendas
+
+A partir do núcleo `v0.4.0`, o calendário de cada agenda de atendimento é gerenciado pela agenda médica: as páginas do calendário não o renomeiam, compartilham nem excluem, e o acesso dele só muda junto com o da agenda. As agendas criadas depois da atualização já nascem assim. Para as que existiam antes, quem gerencia o acesso abre **Agenda médica → Agendas** e usa "Vincular à agenda médica" uma vez; o aviso some quando não há mais nada a vincular, e repetir o passo não muda nada. Até lá as agendas funcionam como antes, só que a página do calendário ainda deixa mudar o acesso do calendário sem mudar o da agenda.

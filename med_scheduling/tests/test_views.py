@@ -1022,6 +1022,106 @@ def test_a_professional_is_registered_with_the_schedule_in_one_step(ready, subte
         assert "Dra. Elisa" not in _professionals(ready)
 
 
+def test_each_calendar_has_its_own_subscription_link(ready, subtests):
+    organization = ready.org_a.pk
+    calendar = ready.schedule.calendar_id
+    subscribe = url(ready, "calendar-subscribe", calendar)
+    page = reverse("skeleton_calendar:calendar-link", args=(organization, calendar))
+    reception, doctor = client_for(ready.a.reception), client_for(ready.a.doctor)
+    appointment = book(ready, 9, notes="queixa sigilosa")
+    with subtests.test("on the page of the schedule"):
+        html = assert_safe(reception.get(url(ready, "schedule", ready.schedule.sysid)))
+        assert subscribe in html and "Assinar no celular" in html
+    with subtests.test("it leads to the page of the core that gives the link of that calendar"):
+        response = reception.get(subscribe)
+        assert (response.status_code, response["Location"]) == (302, page)
+        assert reception.get(page).status_code == 200
+        assert reception.post(subscribe).status_code == 405
+    with subtests.test("who does not read the schedule sees no link and gets a 404"):
+        finance = client_for(ready.a.finance)
+        assert finance.get(subscribe).status_code == 404
+        assert finance.get(url(ready, "schedule", ready.schedule.sysid)).status_code == 404
+        assert subscribe not in assert_safe(finance.get(url(ready, "schedules")))
+    with subtests.test("organization B gets a 404 for a calendar of A"):
+        other = client_for(ready.b.admin)
+        assert other.get(url(ready, "calendar-subscribe", calendar, organization=ready.org_b)).status_code == 404
+    # The link is made by the core, on its page: the app never sees it. Each person has their own.
+    links = {}
+    for name, client in (("doctor", doctor), ("reception", reception)):
+        issued = client.post(page)
+        assert issued.status_code == 201
+        links[name] = issued.context["url"]
+    with subtests.test("the owner of the schedule reads the kind and the code, never the patient"):
+        feed = Client().get(links["doctor"])
+        assert feed.status_code == 200 and feed["Content-Type"].startswith("text/calendar")
+        body = feed.content.decode()
+        assert f"Consulta · {appointment.code}" in body
+        assert "Maria" not in body and "queixa sigilosa" not in body and str(ready.patient.sysid) not in body
+    with subtests.test("a group taken out by the schedule stops receiving through the link, on the next request"):
+        assert Client().get(links["reception"]).status_code == 200
+        with ready.as_user(ready.a.admin) as admin:
+            current = SchedulingService().schedule(actor=admin, schedule_id=ready.schedule.sysid)
+            SchedulingService().set_schedule_access(
+                actor=admin,
+                schedule_id=current.sysid,
+                writer_group_ids=(),
+                reader_group_ids=(),
+                expected_revision=current.revision,
+            )
+        assert Client().get(links["reception"]).status_code == 404
+        assert reception.get(subscribe).status_code == 404
+        # The owner keeps the schedule and the link.
+        assert Client().get(links["doctor"]).status_code == 200
+
+
+def test_the_core_pages_leave_the_calendar_of_a_schedule_to_the_schedule(ready, subtests, monkeypatch):
+    from skeleton.contrib.calendar.service_api import CalendarService
+
+    from .. import calendar_bridge
+
+    organization = ready.org_a.pk
+    admin = client_for(ready.a.admin)
+
+    def unmarked(actor, *, schedule_id, idempotency_key, **values):
+        created = CalendarService().create_shared_calendar(
+            actor=actor, idempotency_key=f"old:{idempotency_key}", **values
+        )
+        return created.sysid
+
+    def core(name, calendar_id):
+        return reverse(f"skeleton_calendar:{name}", args=(organization, calendar_id))
+
+    with subtests.test("the pages of the core refuse to rename, share or delete it"):
+        for name in ("calendar-rename", "calendar-sharing", "calendar-delete"):
+            assert admin.post(core(name, ready.schedule.calendar_id), {"name": "Outro"}).status_code == 409, name
+        with ready.as_user(ready.a.reception) as actor:
+            (entry,) = SchedulingService().calendars(actor=actor)
+        assert entry.name == "Agenda da Dra. Ana"
+    # A schedule created before the core had the marker: its calendar has no origin yet.
+    with ready.as_user(ready.a.admin) as actor, monkeypatch.context() as patched:
+        patched.setattr(calendar_bridge, "create_calendar", unmarked)
+        room = SchedulingService().add_room(actor=actor, name="Sala 1", idempotency_key="room")
+        SchedulingService().create_schedule(
+            actor=actor,
+            name="Sala antiga",
+            room_id=room.sysid,
+            writer_group_ids=(ready.a.groups["reception"],),
+            idempotency_key="old-room",
+        )
+    with subtests.test("who manages access is told, and nobody else"):
+        html = assert_safe(admin.get(url(ready, "schedules")))
+        assert "1 agenda foi criada antes" in html and "Vincular à agenda médica" in html
+        reception = client_for(ready.a.reception)
+        assert "Vincular à agenda médica" not in assert_safe(reception.get(url(ready, "schedules")))
+        assert reception.post(url(ready, "schedules"), {"form": "claim"}).status_code == 404
+    with subtests.test("marking once is enough"):
+        response = admin.post(url(ready, "schedules"), {"form": "claim"}, follow=True)
+        html = assert_safe(response)
+        assert "1 calendário foi vinculado à agenda médica" in html and "Vincular à agenda médica" not in html
+        response = admin.post(url(ready, "schedules"), {"form": "claim"}, follow=True)
+        assert "já estavam vinculados" in assert_safe(response)
+
+
 def test_the_schedules_page_lists_the_calendars_the_person_reads(ready, subtests):
     organization = ready.org_a.pk
     reception = client_for(ready.a.reception)
@@ -1031,8 +1131,11 @@ def test_the_schedules_page_lists_the_calendars_the_person_reads(ready, subtests
         section = html[html.index('id="calendars-heading"') :]
         assert "Agendas de atendimento" in section and url(ready, "schedule", ready.schedule.sysid) in section
         assert ics in section and reverse("skeleton_calendar:home", args=(organization,)) in section
-        assert reverse("skeleton_calendar_me:feed-token") in section
-        assert "inclui todos os calendários que você lê" in section
+        assert url(ready, "calendar-subscribe", ready.schedule.calendar_id) in section
+        assert reverse("skeleton_calendar:calendars", args=(organization,)) in section
+        # The link is one per calendar: the personal feed, which joins every calendar, is not offered here.
+        assert reverse("skeleton_calendar_me:feed-token") not in section and "só daquele calendário" in section
+        assert "Vincular à agenda médica" not in html
         assert "valem só para as agendas de atendimento" in section
         assert "Outros calendários" not in section and "Maria" not in html
     with subtests.test("the other calendars apart, after the first visit to the core calendar"):

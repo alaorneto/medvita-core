@@ -14,6 +14,7 @@ urlpatterns = [
     path("settings/types/<uuid:type_id>/", views.type_edit_view, name="type-edit"),
     path("setup/", views.setup_view, name="setup"),
     path("schedules/", views.schedules_view, name="schedules"),
+    path("calendars/<uuid:calendar_id>/subscribe/", views.calendar_subscribe, name="calendar-subscribe"),
     path("schedules/<uuid:schedule_id>/", views.schedule_view, name="schedule"),
     path("schedules/<uuid:schedule_id>/week/", views.week_view, name="week"),
     path("schedules/<uuid:schedule_id>/day/", views.day_exception_view, name="day-exception"),

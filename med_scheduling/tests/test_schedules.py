@@ -11,6 +11,7 @@ from skeleton.testing.applications import open_app
 from skeleton.testing.derived import assert_derived_access_contract
 from skeleton.testing.service_api import acting_as, build_service_scenario
 
+from .. import calendar_bridge
 from ..models import (
     AppointmentType,
     AvailabilityRule,
@@ -114,6 +115,106 @@ def test_calendars_lists_those_of_the_schedules_and_then_the_others(ready, subte
         assert listed(ready.a.finance) == ()
     with subtests.test("organization B sees nothing of A"):
         assert listed(ready.b.admin, ready.b.organization) == ()
+
+
+def origin(clinic, user, calendar_id):
+    """The app the core has the calendar as managed by, and the page it points at."""
+    with clinic.as_user(user) as actor:
+        (info,) = [item for item in CalendarService().calendars(actor=actor) if item.sysid == calendar_id]
+    return info.source_app, info.source_path
+
+
+def unmarked_calendar(actor, *, schedule_id, idempotency_key, **values):
+    """The calendar of a schedule as it was created before the core had the marker: with no origin."""
+    return (
+        CalendarService().create_shared_calendar(actor=actor, idempotency_key=f"old:{idempotency_key}", **values).sysid
+    )
+
+
+def test_the_calendar_of_a_schedule_is_managed_by_the_app(ready, subtests, monkeypatch):
+    schedule = ready.schedule
+    reception = ready.a.groups["reception"]
+    with subtests.test("a new schedule is born managed, pointing at its page"):
+        assert origin(ready, ready.a.reception, schedule.calendar_id) == (
+            "med_scheduling",
+            f"apps/med_scheduling/schedules/{schedule.sysid}/",
+        )
+        with ready.as_user(ready.a.reception) as actor:
+            (entry,) = service().calendars(actor=actor)
+        assert entry.is_managed and entry.writable
+    with subtests.test("with nothing to mark, the step marks nothing"), as_admin(ready) as admin:
+        assert service().claim_schedule_calendars(actor=admin) == 0
+    # A schedule of before the marker, of another professional: the calendar belongs to that person.
+    with as_admin(ready) as admin, monkeypatch.context() as patched:
+        patched.setattr(calendar_bridge, "create_calendar", unmarked_calendar)
+        other = service().register_professional(
+            actor=admin, display_name="Dr. Caio", membership_user_id=ready.a.finance.pk, idempotency_key="caio"
+        )
+        old = service().create_schedule(
+            actor=admin,
+            name="Agenda do Dr. Caio",
+            professional_id=other.sysid,
+            writer_group_ids=(reception,),
+            idempotency_key="caio",
+        )
+    assert origin(ready, ready.a.reception, old.calendar_id) == ("", "")
+    with subtests.test("the list says which calendar is not managed yet"), ready.as_user(ready.a.reception) as actor:
+        flags = {entry.schedule_id: entry.is_managed for entry in service().calendars(actor=actor)}
+        assert flags == {schedule.sysid: True, old.sysid: False}
+    with subtests.test("only who manages access marks"):
+        with ready.as_user(ready.a.reception) as actor, pytest.raises(Forbidden):
+            service().claim_schedule_calendars(actor=actor)
+        assert origin(ready, ready.a.reception, old.calendar_id) == ("", "")
+    with subtests.test("organization B marks nothing of A"):
+        with ready.as_user(ready.b.admin, ready.b.organization) as actor:
+            assert service().claim_schedule_calendars(actor=actor) == 0
+        assert origin(ready, ready.a.reception, old.calendar_id) == ("", "")
+    with subtests.test("the old schedule is marked once; repeating marks nothing"), as_admin(ready) as admin:
+        assert service().claim_schedule_calendars(actor=admin) == 1
+        assert service().claim_schedule_calendars(actor=admin) == 0
+    assert origin(ready, ready.a.reception, old.calendar_id) == (
+        "med_scheduling",
+        f"apps/med_scheduling/schedules/{old.sysid}/",
+    )
+    with subtests.test("the access of a managed calendar still follows the schedule"):
+        with as_admin(ready) as admin:
+            service().set_schedule_access(
+                actor=admin,
+                schedule_id=old.sysid,
+                writer_group_ids=(),
+                reader_group_ids=(ready.a.groups["professionals"],),
+                expected_revision=old.revision,
+            )
+        assert old.calendar_id not in calendar_ids(ready, ready.a.reception)
+        assert old.calendar_id in calendar_ids(ready, ready.a.doctor)
+        # The owner keeps the calendar: Dr. Caio is the person of the finance team.
+        assert old.calendar_id in calendar_ids(ready, ready.a.finance)
+
+
+def test_calendar_pages_point_at_the_core_for_who_reads_the_calendar(ready, subtests):
+    calendar = ready.schedule.calendar_id
+    with subtests.test("the page of the calendar and the one of its subscription link"):
+        with ready.as_user(ready.a.reception) as actor:
+            pages = service().calendar_pages(actor=actor, calendar_id=calendar)
+        assert pages.calendar_path == f"apps/skeleton_calendar/calendars/{calendar}/"
+        assert pages.subscription_path == f"apps/skeleton_calendar/calendars/{calendar}/link/"
+    with subtests.test("who does not read the schedule"):
+        with ready.as_user(ready.a.finance) as actor, pytest.raises(NotFound):
+            service().calendar_pages(actor=actor, calendar_id=calendar)
+    with subtests.test("organization B"):
+        with ready.as_user(ready.b.admin, ready.b.organization) as actor, pytest.raises(NotFound):
+            service().calendar_pages(actor=actor, calendar_id=calendar)
+    with subtests.test("who loses the schedule loses the page, on the next request"):
+        with as_admin(ready) as admin:
+            service().set_schedule_access(
+                actor=admin,
+                schedule_id=ready.schedule.sysid,
+                writer_group_ids=(),
+                reader_group_ids=(),
+                expected_revision=ready.schedule.revision,
+            )
+        with ready.as_user(ready.a.reception) as actor, pytest.raises(NotFound):
+            service().calendar_pages(actor=actor, calendar_id=calendar)
 
 
 def test_set_schedule_access_mirrors_the_calendar(ready):

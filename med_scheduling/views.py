@@ -26,7 +26,7 @@ from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
 from django.utils.http import urlencode
 from django.utils.translation import gettext, ngettext
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from applications.med_patients.service_api import PatientService
 from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
@@ -1221,15 +1221,41 @@ def _core_url(name: str, **kwargs: Any) -> str:
         return ""
 
 
-def _calendar_section(request: HttpRequest, organization_id: UUID) -> dict[str, Any]:
-    """The calendars the person reads, with the ways out the core calendar already has.
+def _organization_address(organization_id: UUID, path: str) -> str:
+    """A path the core gives relative to the organization, as an address of this organization."""
+    home = reverse("med_scheduling:home", args=(organization_id,))
+    own = "apps/med_scheduling/"
+    if not home.endswith(own) or path.startswith("/") or "//" in path or ".." in path:
+        raise Http404
+    return home.removesuffix(own) + path
+
+
+@require_GET
+@practice_page
+def calendar_subscribe(request: HttpRequest, organization_id: UUID, calendar_id: UUID) -> HttpResponse:
+    """To the page of the core where the person makes their own subscription link to one calendar.
+
+    The app makes no link and sees no token: the core authorizes the calendar, issues the link and
+    checks it at each request. Who does not read the calendar (so, the schedule) gets a 404.
+    """
+    try:
+        pages = _service().calendar_pages(actor=request.user, calendar_id=calendar_id)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    return redirect(_organization_address(organization_id, pages.subscription_path))
+
+
+def _calendar_section(request: HttpRequest, organization_id: UUID, *, manager: bool = False) -> dict[str, Any]:
+    """The calendars the person reads, with the ways out the core calendar has.
 
     The app makes no link of its own and keeps no token: opening, downloading and subscribing are
-    pages of the core, which authorizes each one.
+    pages of the core, which authorizes each one. ``pending`` counts the calendars of schedules an
+    access manager can still mark as managed by this app.
     """
     rows = [
         {
             "entry": entry,
+            "subscribe_url": reverse("med_scheduling:calendar-subscribe", args=(organization_id, entry.calendar_id)),
             "schedule_url": (
                 reverse("med_scheduling:schedule", args=(organization_id, entry.schedule_id))
                 if entry.schedule_id
@@ -1245,7 +1271,12 @@ def _calendar_section(request: HttpRequest, organization_id: UUID) -> dict[str, 
         "schedules": [row for row in rows if row["entry"].schedule_id],
         "others": [row for row in rows if not row["entry"].schedule_id],
         "open_url": _core_url("skeleton_calendar:home", organization_id=organization_id),
-        "feed_url": _core_url("skeleton_calendar_me:feed-token"),
+        "shared_url": _core_url("skeleton_calendar:calendars", organization_id=organization_id),
+        "pending": (
+            sum(1 for row in rows if row["entry"].schedule_id and row["entry"].writable and not row["entry"].is_managed)
+            if manager
+            else 0
+        ),
     }
 
 
@@ -1268,6 +1299,23 @@ def schedules_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     if request.method == "POST":
         if not manager:
             raise Http404
+        if request.POST.get("form") == "claim":
+            try:
+                with transaction.atomic():
+                    marked = _service().claim_schedule_calendars(actor=request.user)
+            except (NotFound, Forbidden):
+                raise Http404 from None
+            except Conflict as error:
+                messages.error(request, conflict_text(error))
+            else:
+                done = ngettext(
+                    "%(count)d calendário foi vinculado à agenda médica.",
+                    "%(count)d calendários foram vinculados à agenda médica.",
+                    marked,
+                ) % {"count": marked}
+                nothing = gettext("Os calendários das agendas já estavam vinculados à agenda médica.")
+                messages.success(request, done if marked else nothing)
+            return redirect("med_scheduling:schedules", organization_id)
         status = 400
         if form.is_valid():
             values = form.cleaned_data
@@ -1300,7 +1348,7 @@ def schedules_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             organization_id,
             "schedules",
             schedules=_service().schedules(actor=request.user, active_only=False),
-            calendars=_calendar_section(request, organization_id),
+            calendars=_calendar_section(request, organization_id, manager=manager),
             form=form,
             manager=manager,
             idempotency_key=_key(request),

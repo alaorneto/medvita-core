@@ -65,6 +65,8 @@ __all__ = [
     "AvailabilityRuleInfo",
     "AvailabilityRuleInput",
     "BlockInfo",
+    "CalendarEntry",
+    "CalendarPages",
     "DayAgenda",
     "DayException",
     "DayWindowInput",
@@ -264,7 +266,9 @@ class CalendarEntry:
 
     ``schedule_id`` names the schedule the calendar belongs to. It is ``None`` for any other
     calendar (a personal or a shared one), which holds common events of the core: no appointment
-    rule applies to it. ``is_own`` marks the actor's own personal calendar.
+    rule applies to it. ``is_own`` marks the actor's own personal calendar. ``is_managed`` says
+    the core has the calendar of a schedule as managed by this app (its pages do not change it);
+    ``writable`` says the actor writes on the calendar.
     """
 
     calendar_id: UUID
@@ -273,6 +277,20 @@ class CalendarEntry:
     is_own: bool = False
     schedule_id: UUID | None = None
     schedule_is_active: bool = True
+    is_managed: bool = False
+    writable: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class CalendarPages:
+    """Where the core shows a calendar: paths relative to the organization.
+
+    ``subscription_path`` is the page where a person makes their own link to that one calendar,
+    for a calendar client (the phone's). The link belongs to the core: this app never sees it.
+    """
+
+    calendar_path: str
+    subscription_path: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -2257,13 +2275,65 @@ class SchedulingService(ServiceAPI):
                         info.kind,
                         schedule_id=schedule.pk,
                         schedule_is_active=schedule.is_active,
+                        is_managed=calendar_bridge.is_managed(info),
+                        writable=info.writable,
                     )
                 )
             else:
                 own = info.kind == "personal" and info.owner_id == actor.pk
-                others.append(CalendarEntry(info.sysid, info.name, info.kind, is_own=own))
+                others.append(CalendarEntry(info.sysid, info.name, info.kind, is_own=own, writable=info.writable))
         of_schedules.sort(key=lambda entry: (entry.name.casefold(), str(entry.calendar_id)))
         return (*of_schedules, *others)
+
+    @service_method(read_only=True, since="0.1.0")
+    def calendar_pages(self, *, actor: Any, calendar_id: UUID) -> CalendarPages:
+        """Where the core shows a calendar and gives the person their subscription link to it.
+
+        The paths are relative to the organization. The link is one per person and calendar; the
+        core makes, keeps and checks it, and reads the access again at each request: who stops
+        reading the schedule stops receiving its events. This app makes no link and keeps no token.
+        Autorização: leitura do calendário no núcleo, que é a da agenda no calendário de uma agenda.
+        Erros: NotFound para calendário inexistente, ilegível ou de outra organização; Unavailable
+        com a agenda do núcleo desativada.
+        Efeitos: nenhum.
+        """
+        from . import calendar_bridge
+
+        links = calendar_bridge.calendar_links(actor, calendar_id)
+        return CalendarPages(links.calendar_path, links.subscription_path)
+
+    @service_method(read_only=False, since="0.1.0")
+    def claim_schedule_calendars(self, *, actor: Any) -> int:
+        """Mark in the core, as managed by this app, the calendars of the schedules that are not yet.
+
+        The pages of the core calendar do not rename, share nor delete a managed calendar: its
+        access changes only with the schedule (``set_schedule_access``). ``create_schedule`` marks
+        the calendar it creates; this is the step for the schedules created before the marker
+        existed. Repeating it marks nothing.
+        Autorização: a capacidade ``access.manage``; cada calendário pela escrita dele no núcleo (o
+        que o ator não escreve fica como está).
+        Erros: Forbidden sem a capacidade; Conflict("stale_revision") para calendário alterado
+        durante a marcação; Unavailable com a agenda do núcleo desativada.
+        Efeitos: grava a origem em cada calendário (auditada pelo núcleo), na transação do
+        chamador; devolve quantos calendários marcou.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        from . import calendar_bridge
+
+        common.require_access_manager(actor)
+        schedules = dict(authorized_queryset(Schedule, user=actor, action="read").values_list("calendar_id", "pk"))
+        marked = 0
+        for info in calendar_bridge.readable_calendars(actor):
+            schedule_id = schedules.get(info.sysid)
+            # A calendar some app already manages (this one included) and one the actor does not write stay as they are.
+            if schedule_id is None or info.source_app or not info.writable:
+                continue
+            calendar_bridge.claim_calendar(
+                actor, calendar_id=info.sysid, schedule_id=schedule_id, expected_revision=info.revision
+            )
+            marked += 1
+        return marked
 
     @service_method(read_only=False, since="0.1.0")
     def create_schedule(
@@ -2282,6 +2352,8 @@ class SchedulingService(ServiceAPI):
         """Create the schedule of a professional or room, with its shared calendar and the same access.
 
         The owner is the professional's person (or the actor, for a room): the owner always writes.
+        The calendar is born managed by this app in the core, whose pages then leave it alone: its
+        access changes only with the schedule, and it keeps the name the schedule was created with.
         Autorização: a capacidade ``access.manage`` e ``create`` em med_scheduling.schedule.
         Erros: Forbidden; NotFound para profissional ou sala ilegível; InvalidInput para nome vazio,
         sem profissional nem sala, intervalo fora de 5 a 120 minutos, mais de 20 grupos ou pessoas;
@@ -2332,6 +2404,7 @@ class SchedulingService(ServiceAPI):
             writer_group_ids=writers,
             reader_group_ids=readers,
             idempotency_key=key,
+            schedule_id=sysid,
         )
         schedule = Schedule(
             sysid=sysid,

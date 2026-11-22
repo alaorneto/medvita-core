@@ -128,6 +128,14 @@ Book the appointment of a waiting patient and mark the entry booked, in one tran
 - **Erros:** NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada ou com duração fora de 5 a 480 minutos; Conflict("stale_revision", "invalid_transition", "type_not_allowed", "slot_unavailable", "mode_mismatch", "session_full"): com o horário ocupado, a sessão lotada ou o tipo não atendido pela agenda, a entrada continua aguardando.
 - **Efeitos:** os de ``book`` e a entrada em "agendado" com a consulta.
 
+#### `calendar_pages(*, actor, calendar_id) -> CalendarPages`
+
+Where the core shows a calendar and gives the person their subscription link to it.
+
+- **Autorização:** leitura do calendário no núcleo, que é a da agenda no calendário de uma agenda.
+- **Erros:** NotFound para calendário inexistente, ilegível ou de outra organização; Unavailable com a agenda do núcleo desativada.
+- **Efeitos:** nenhum.
+
 #### `calendars(*, actor) -> tuple[CalendarEntry, ...]`
 
 The calendars of the core the actor reads: those of the schedules by name, then the others.
@@ -159,6 +167,14 @@ Register that the patient arrived, with CAS, and tell the professional.
 - **Autorização:** alteração na agenda.
 - **Erros:** NotFound; Forbidden; InvalidInput para prioridade que não seja verdadeiro ou falso; Conflict("stale_revision", "invalid_transition"), sem dar número.
 - **Efeitos:** grava a situação, a hora, o número de chegada e a prioridade, publica ``med_scheduling.appointment_arrived`` e notifica o profissional da agenda (uma vez por consulta; a notificação leva o código, nunca o paciente nem a prioridade).
+
+#### `claim_schedule_calendars(*, actor) -> int`
+
+Mark in the core, as managed by this app, the calendars of the schedules that are not yet.
+
+- **Autorização:** a capacidade ``access.manage``; cada calendário pela escrita dele no núcleo (o que o ator não escreve fica como está).
+- **Erros:** Forbidden sem a capacidade; Conflict("stale_revision") para calendário alterado durante a marcação; Unavailable com a agenda do núcleo desativada.
+- **Efeitos:** grava a origem em cada calendário (auditada pelo núcleo), na transação do chamador; devolve quantos calendários marcou.
 
 #### `clear_day_exception(*, actor, schedule_id, date, expected_revision, convert_existing=False, expected_affected=None) -> None`
 
@@ -574,6 +590,30 @@ A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice
 | `reason` | `str` |
 | `note` | `str` |
 | `revision` | `int` |
+
+### `CalendarEntry`
+
+A calendar of the core the actor reads, as the schedules page lists it.
+
+| Campo | Tipo |
+|---|---|
+| `calendar_id` | `UUID` |
+| `name` | `str` |
+| `kind` | `str` |
+| `is_own` | `bool` |
+| `schedule_id` | `UUID | None` |
+| `schedule_is_active` | `bool` |
+| `is_managed` | `bool` |
+| `writable` | `bool` |
+
+### `CalendarPages`
+
+Where the core shows a calendar: paths relative to the organization.
+
+| Campo | Tipo |
+|---|---|
+| `calendar_path` | `str` |
+| `subscription_path` | `str` |
 
 ### `DayAgenda`
 

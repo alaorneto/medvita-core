@@ -9,6 +9,8 @@ import logging
 from datetime import date
 
 import pytest
+from django.test import Client
+from django.urls import reverse
 
 from applications.med_finance.service_api import FinanceService
 from applications.med_patients.service_api import PatientService
@@ -263,3 +265,107 @@ def test_a_morning_by_order_of_arrival(ready):
         assert not [secret for secret in (*secrets, first.code, second.code) if secret in shown]
         for row in (first, second):
             assert calendar.managed_event(actor=reader, source_app="med_scheduling", source_key=str(row.sysid)) is None
+
+
+def test_the_calendar_file_of_a_schedule_names_no_patient(ready):
+    """What leaves to a calendar client (the phone's): the kind and the code of an appointment, how
+    many patients a session by order of arrival has, and the blocks. Never a patient, a note or a
+    priority, whoever reads; and only the owner of the schedule and who booked read even that much."""
+    a = ready.a
+    clinic = ready
+    scheduling = SchedulingService()
+    walker = new_patient(clinic, a, full_name=NAME, cpf=CPF, phone=PHONE)
+    elder = new_patient(clinic, a, full_name="Olga Idosa Sigilosa")
+    with clinic.as_user(a.reception) as actor:
+        (schedule,) = scheduling.schedules(actor=actor)
+        (kind,) = scheduling.appointment_types(actor=actor)
+        scheduling.set_availability(
+            actor=actor,
+            schedule_id=schedule.sysid,
+            rules=(
+                AvailabilityRuleInput(0, 8 * 60, 12 * 60, date(2026, 1, 1)),
+                AvailabilityRuleInput(0, 14 * 60, 18 * 60, date(2026, 1, 1), mode="walk_in", capacity=10),
+            ),
+            expected_revision=schedule.revision,
+        )
+        timed = scheduling.book(
+            actor=actor,
+            schedule_id=schedule.sysid,
+            patient_id=walker.sysid,
+            appointment_type_id=kind.sysid,
+            starts_at=monday_at(9),
+            notes=COMPLAINT,
+            idempotency_key="timed",
+        )
+        arrivals = [
+            scheduling.book(
+                actor=actor,
+                schedule_id=schedule.sysid,
+                patient_id=patient.sysid,
+                appointment_type_id=kind.sysid,
+                starts_at=monday_at(14),
+                mode="walk_in",
+                notes=COMPLAINT,
+                idempotency_key=f"arrival-{index}",
+            )
+            for index, patient in enumerate((walker, elder))
+        ]
+        scheduling.check_in(
+            actor=actor, appointment_id=arrivals[1].sysid, expected_revision=arrivals[1].revision, priority=True
+        )
+        scheduling.add_block(
+            actor=actor,
+            schedule_id=schedule.sysid,
+            starts_at=monday_at(11),
+            ends_at=monday_at(12),
+            reason="other",
+            note=ALLERGY,
+            idempotency_key="block",
+        )
+    secrets = (NAME, CPF, PHONE, COMPLAINT, ALLERGY, "Olga", str(walker.sysid), str(elder.sysid), "priorit")
+    organization = a.organization.pk
+    download = reverse("skeleton_calendar:calendar-ics", args=(organization, schedule.calendar_id))
+    link_page = reverse("skeleton_calendar:calendar-link", args=(organization, schedule.calendar_id))
+
+    def files(user):
+        """The file downloaded with the session and the one a calendar client gets through the person's link."""
+        client = Client()
+        client.force_login(user)
+        downloaded = client.get(download)
+        issued = client.post(link_page)
+        assert (downloaded.status_code, issued.status_code) == (200, 201)
+        subscribed = Client().get(issued.context["url"])
+        assert subscribed.status_code == 200
+        return downloaded.content.decode(), subscribed.content.decode()
+
+    # The doctor owns the schedule and the reception booked: both read the titles the app wrote.
+    for user in (a.doctor, a.reception):
+        for body in files(user):
+            assert f"Consulta · {timed.code}" in body
+            assert "Ordem de chegada · 2 pacientes" in body and "Bloqueio" in body
+            assert not [secret for secret in secrets if secret in body]
+            assert not [row.code for row in arrivals if row.code in body]
+    # Anyone else who reads the schedule gets the hours as busy, and nothing more.
+    with clinic.as_user(a.admin) as admin:
+        current = scheduling.schedule(actor=admin, schedule_id=schedule.sysid)
+        scheduling.set_schedule_access(
+            actor=admin,
+            schedule_id=schedule.sysid,
+            writer_group_ids=(a.groups["reception"],),
+            reader_group_ids=(a.groups["finance"],),
+            writer_user_ids=(a.doctor.pk,),
+            expected_revision=current.revision,
+        )
+    for body in files(a.finance):
+        assert "Ocupado" in body and "Consulta" not in body and "Ordem de chegada" not in body
+        assert timed.code not in body and not [secret for secret in secrets if secret in body]
+    # A person of organization B has no file of A.
+    other = Client()
+    other.force_login(ready.b.admin)
+    assert other.get(download).status_code == 404
+    assert (
+        other.get(
+            reverse("skeleton_calendar:calendar-ics", args=(ready.b.organization.pk, schedule.calendar_id))
+        ).status_code
+        == 404
+    )
