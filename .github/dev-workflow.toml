@@ -150,6 +150,11 @@ search = '"version": "{current}"'
 path = "med_finance/manifest.json"
 search = '"version": "{current}"'
 
+# The MedVita theme of the instance ships with med_patients and moves with the suite (#65).
+[[versioning.files]]
+path = "med_patients/themes/medvita/theme.json"
+search = '"version": "{current}"'
+
 [[versioning.files]]
 path = "med_scheduling/manifest.json"
 regex = '"io\.katua\.sk\.med\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'

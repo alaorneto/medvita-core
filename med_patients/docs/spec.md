@@ -8,6 +8,10 @@ O paciente é um registro da organização, nunca um usuário. Esta app guarda i
 
 `med_patients` é instalada globalmente e ativada por organização; instalar o código não concede permissões. A app nasce indisponível e desativada: a plataforma concede a disponibilidade e cada organização ativa a app.
 
+### Tema da instância
+
+Por ser a app que toda instalação da suíte tem, `med_patients` carrega o tema MedVita da instância em `themes/medvita/` (`runtime.instance_themes`, `id` `io.katua.sk.med.patients.theme.medvita`). É dado estático validado pelo núcleo, sem código da app: aparece em `/platform/appearance/` como tema da app, o administrador da plataforma o ativa, e a desinstalação da app o tira do catálogo. `tests/test_theme.py` roda `assert_app_themes_valid` e confere que o CSS não fixa token de marca, para a cor de uma clínica continuar vencendo. O `README.md` do diretório diz a origem de cada arquivo.
+
 ### Acesso
 
 O único contêiner é o `PatientRegistry` (o cadastro de pacientes da clínica, `SecuredRecord` exposto). Toda outra tabela é derivada dele (`TableSpec.access_parent`): ler um paciente exige `read` no cadastro, criar, alterar, excluir ou restaurar exige `update` nele. Operações de privacidade exigem `manage_access` no cadastro. O modelo completo está em `docs/access-model.md` da raiz do repositório.

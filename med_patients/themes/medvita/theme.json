@@ -1,0 +1,35 @@
+{
+  "format": 1,
+  "id": "io.katua.sk.med.patients.theme.medvita",
+  "version": "0.0.0",
+  "name": "MedVita",
+  "description": "Tema da marca MedVita: azul, verde e petróleo do logo, claro e escuro, títulos em Poppins.",
+  "publisher": "katua-tech",
+  "compatibility": {
+    "skeleton": ">=0.3.0,<0.4.0"
+  },
+  "tokens": {
+    "brand_color": "#1273c4",
+    "radius": "default",
+    "font": "inter",
+    "font_family": ""
+  },
+  "brand": {
+    "product_name": "MedVita",
+    "footer_text": "MedVita · gestão do consultório"
+  },
+  "images": {
+    "logo": "images/logo.svg",
+    "logo_dark": "images/logo-dark.svg",
+    "icon": "images/icon.png"
+  },
+  "fonts": [
+    {
+      "family": "Poppins",
+      "file": "fonts/poppins-semibold.woff2",
+      "weight": "600",
+      "style": "normal"
+    }
+  ],
+  "css": "theme.css"
+}

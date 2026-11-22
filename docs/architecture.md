@@ -17,15 +17,17 @@ sk_med_core/                      <- raiz do repositório git; não é pacote Py
     apps.py  registration.py  models.py  policies.py  services.py
     service_api.py  extension.py  forms.py  views.py  urls.py  api_urls.py
     migrations/  templates/med_patients/  static/med_patients/
+    themes/medvita/               <- o tema MedVita da instância (pacote de tema do núcleo)
     docs/spec.md  docs/adr.md  docs/service-api.md
     tests/
-  med_scheduling/  med_records/  med_finance/      <- mesma forma
+  med_scheduling/  med_records/  med_finance/      <- mesma forma, sem themes/
 ```
 
 - O `.gitattributes` que vale no empacotamento é o de cada pacote: `package build --app-root <pacote> --git-ref <rev>` exporta só a subárvore, com as regras dela. `AGENTS.md` e o próprio `.gitattributes` ficam fora do pacote.
 - Nenhum arquivo de `config/` nem cópia do núcleo entra no repositório.
 - `extension.py` guarda os registries que a app oferece; `service_api.py` os reexporta, porque é o único módulo que outra app pode importar.
 - `policies.py` guarda os atalhos de autorização da app, sempre sobre `authorized_queryset` e `require_record_action`.
+- **Tema da instância:** a marca MedVita (cores nos dois modos, Poppins nos títulos, logo, logo escuro, ícone, nome do produto e rodapé) vive em `med_patients/themes/medvita/`, no formato do pacote de tema do Skeleton, declarada em `runtime.instance_themes` do manifesto do `med_patients`, a app que toda instalação da suíte tem. Ela chega à instância com a app, nunca se ativa sozinha e sai quando a app é desinstalada. Para mudar a marca, edite o diretório e confira com `python -m django appearance check-package med_patients/themes/medvita`; a versão do `theme.json` acompanha a da suíte. Nenhum template do núcleo é sobrescrito: o núcleo serve o tema pelas rotas `/brand/` e a marca da clínica vence por cima. O `README.md` do diretório diz de onde veio cada arquivo.
 
 ## Identidade das apps
 
