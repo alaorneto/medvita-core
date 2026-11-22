@@ -3,14 +3,20 @@
 The core test kit has no public helper to create identities, memberships and groups outside
 ``build_service_scenario``. Until it has one (see AGENTS.md of the core, "skeleton/testing"), this
 module uses the same core provisioning functions the kit itself uses. It lives at the root of the
-repository and never ships in a package; app code and app tests use only the ``clinic`` fixture.
+repository and never ships in a package; app code and app tests use only the ``clinic`` and
+``native_clients`` fixtures.
 """
 
 from __future__ import annotations
 
+import base64
+import functools
+import hashlib
+import secrets
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 # Load order of the suite apps and the first-party apps they need: a dependency comes first.
@@ -27,6 +33,10 @@ PASSWORD = "clinic-fixture-password"  # noqa: S105 - disposable identity of the 
 ROLES = ("admin", "reception", "doctor", "finance")
 GROUPS = {"reception": "Recepção", "professionals": "Profissionais de saúde", "finance": "Financeiro"}
 GROUP_MEMBERS = {"reception": ("reception",), "professionals": ("doctor",), "finance": ("finance",)}
+NATIVE_CLIENT_ID = "medvita-desktop"
+NATIVE_REDIRECT = "http://127.0.0.1/callback"
+# A loopback redirect may use any port (RFC 8252): the provider matches the registered one without it.
+NATIVE_CALLBACK = "http://127.0.0.1:53682/callback"
 
 
 @dataclass(frozen=True)
@@ -140,3 +150,92 @@ def build_clinic(slug: str = "clinic") -> Clinic:
     for label in APPS:
         open_app(label)
     return Clinic(a=_side("a", slug), b=_side("b", slug))
+
+
+# --------------------------------------------------------------------------- native clients
+
+
+@functools.cache
+def oidc_signing_key() -> str:
+    """One RSA key per test process for the core's OIDC provider (generating it is the slow part)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+    ).decode()
+
+
+@dataclass
+class NativeClients:
+    """Access tokens of a native client, as the Medvita Desktop gets them (#61).
+
+    Each call runs the authorization code flow with PKCE of the core's OIDC provider for a
+    signed-in browser session and returns what the desktop keeps: the access token. The provider
+    needs the signing key in the settings; the ``native_clients`` fixture sets it.
+    """
+
+    registered: set[str] = field(default_factory=set)
+    client_id: str = NATIVE_CLIENT_ID
+
+    def register(self, client_id: str = NATIVE_CLIENT_ID, *, scopes: tuple[str, ...] = ()) -> None:
+        """Register the client once per test; ``scopes`` are the core scopes the operator allows it."""
+        from skeleton.accounts.idp.clients import register_client
+        from skeleton.tenancy.context import system_context
+
+        if client_id in self.registered:
+            return
+        with system_context(reason="test:native-client"):
+            register_client(
+                client_id=client_id,
+                name="Medvita Desktop",
+                redirect_uris=[NATIVE_REDIRECT],
+                skip_consent=True,
+                scopes=list(scopes),
+            )
+        self.registered.add(client_id)
+
+    def access_token(self, user: Any, *, scope: str = "openid profile email", client_id: str = NATIVE_CLIENT_ID) -> str:
+        from django.test import Client
+        from django.urls import reverse
+
+        self.register(client_id)
+        verifier = secrets.token_urlsafe(48)
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        browser = Client()
+        browser.force_login(user)
+        authorized = browser.get(
+            reverse("oidc-authorize"),
+            {
+                "client_id": client_id,
+                "response_type": "code",
+                "redirect_uri": NATIVE_CALLBACK,
+                "scope": scope,
+                "state": "state-1",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+            },
+        )
+        assert authorized.status_code == 302, authorized.content
+        code = parse_qs(urlsplit(authorized["Location"]).query).get("code", [None])[0]
+        assert code, authorized["Location"]
+        tokens = Client().post(
+            reverse("oidc-token"),
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": NATIVE_CALLBACK,
+                "client_id": client_id,
+                "code_verifier": verifier,
+            },
+        )
+        assert tokens.status_code == 200, tokens.content
+        return tokens.json()["access_token"]
+
+    def client(self, user: Any, **keywords: Any) -> Any:
+        """A ``Client`` sending only ``Authorization: Bearer <access token>`` of ``user`` (no session, CSRF on)."""
+        from django.test import Client
+
+        token = self.access_token(user, **keywords)
+        return Client(enforce_csrf_checks=True, HTTP_AUTHORIZATION=f"Bearer {token}")

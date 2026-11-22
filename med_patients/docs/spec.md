@@ -135,13 +135,15 @@ As abas das outras apps (`register_patient_section`) entram depois das próprias
 
 Em `/api/v1/o/<org>/apps/med_patients/`:
 
-| Método e caminho | O que faz |
-|---|---|
-| `GET patients/?q=&status=&cursor=&page_size=` | Busca (`PatientSummary`) |
-| `POST patients/` | Cadastra; `Idempotency-Key` opcional; devolve 201 com `ETag` |
-| `GET patients/<id>/` | Lê (`PatientInfo`), com `ETag` |
-| `PATCH patients/<id>/` | Altera campos de `PatientInput`; exige `If-Match` com a revisão; campo fora da lista é 400 |
-| `GET patients/<id>/guardians/`, `GET patients/<id>/coverages/` | Responsáveis e convênios |
+| Método e caminho | O que faz | Token |
+|---|---|---|
+| `GET patients/?q=&status=&cursor=&page_size=` | Busca (`PatientSummary`) | `patients:read` |
+| `POST patients/` | Cadastra; `Idempotency-Key` opcional; devolve 201 com `ETag` | `patients:write` |
+| `GET patients/<id>/` | Lê (`PatientInfo`), com `ETag` | `patients:read` |
+| `PATCH patients/<id>/` | Altera campos de `PatientInput`; exige `If-Match` com a revisão; campo fora da lista é 400 | `patients:write` |
+| `GET patients/<id>/guardians/`, `GET patients/<id>/coverages/` | Responsáveis e convênios | `patients:read` |
+
+Toda rota aceita a sessão do navegador e o token de um cliente fora dele (o access token OIDC de um cliente nativo, como o Medvita Desktop, ou um token `skt_`) nos métodos da coluna "Token", com as mesmas respostas, filtros, `ETag`, `If-Match` e `Idempotency-Key` da sessão. O escopo só restringe: o serviço autoriza o papel da pessoa como para a sessão, e um token com o escopo continua sem ver o que o papel não alcança. O token amplo (`openid profile email`) leva todos os escopos; um cliente que o operador limitou (`native_client register --scope`) precisa do escopo da coluna e do escopo de tabela do contêiner que o serviço autoriza (`med_patients.patientregistry:read`, e `:update` para alterar). Sem o escopo, a resposta é 403 `permission_denied` ("O token não tem o escopo exigido."); método fora da coluna é 403 `token_not_allowed`. Cada operação aparece no `/api/v1/openapi.json` só para quem pode chamá-la.
 
 Sem exclusão nem anonimização pela API.
 

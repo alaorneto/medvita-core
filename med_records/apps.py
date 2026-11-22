@@ -24,6 +24,7 @@ class MedRecordsConfig(AppConfig):
         registration.register_icd10()
         registration.register_documents()
         registration.register_access_log()
+        registration.register_token_scopes()
         from . import integration
 
         integration.register()

@@ -140,14 +140,16 @@ No `ready()`: a aba "Consultas" (`register_patient_section`, ordem 20), a linha 
 
 Em `/api/v1/o/<org>/apps/med_scheduling/`:
 
-| Método e caminho | O que faz |
-|---|---|
-| `GET schedules/` | Agendas legíveis (`ScheduleInfo`) |
-| `GET schedules/<id>/slots/?start=&end=&type=` | Horários livres (`Slot`), datas `AAAA-MM-DD`, até 62 dias |
-| `GET appointments/?schedule=&patient=&start=&end=&status=&cursor=&page_size=` | Consultas (`AppointmentInfo`, sem observação) |
-| `POST appointments/` | Marca; exige `Idempotency-Key`; campos `schedule`, `patient`, `appointment_type`, `starts_at` (ISO 8601 com fuso) e opcionais `duration_minutes`, `fit_in`, `notes`, `payment_kind`, `room`; devolve 201 com `ETag` |
-| `GET appointments/<id>/` | Detalhe (`AppointmentDetail`, com a observação), com `ETag` |
-| `POST appointments/<id>/<mudança>/` | `confirm`, `check-in`, `start`, `complete`, `no-show`, `cancel` (`reason`, `note`) e `reschedule` (`starts_at`, `schedule`); exigem `If-Match` com a revisão |
+| Método e caminho | O que faz | Token |
+|---|---|---|
+| `GET schedules/` | Agendas legíveis (`ScheduleInfo`) | `scheduling:read` |
+| `GET schedules/<id>/slots/?start=&end=&type=` | Horários livres (`Slot`), datas `AAAA-MM-DD`, até 62 dias | `scheduling:read` |
+| `GET appointments/?schedule=&patient=&start=&end=&status=&cursor=&page_size=` | Consultas (`AppointmentInfo`, sem observação) | `scheduling:read` |
+| `POST appointments/` | Marca; exige `Idempotency-Key`; campos `schedule`, `patient`, `appointment_type`, `starts_at` (ISO 8601 com fuso) e opcionais `duration_minutes`, `fit_in`, `notes`, `payment_kind`, `room`; devolve 201 com `ETag` | `scheduling:write` |
+| `GET appointments/<id>/` | Detalhe (`AppointmentDetail`, com a observação), com `ETag` | `scheduling:read` |
+| `POST appointments/<id>/<mudança>/` | `confirm`, `check-in`, `start`, `complete`, `no-show`, `cancel` (`reason`, `note`) e `reschedule` (`starts_at`, `schedule`); exigem `If-Match` com a revisão | `scheduling:write` |
+
+Toda rota aceita a sessão do navegador e o token de um cliente fora dele (o access token OIDC de um cliente nativo, como o Medvita Desktop, ou um token `skt_`) nos métodos da coluna "Token", com as mesmas respostas, filtros, `ETag`, `If-Match` e `Idempotency-Key` da sessão. O escopo só restringe: o serviço autoriza o papel da pessoa como para a sessão, e um token com o escopo continua sem ver o que o papel não alcança. O token amplo (`openid profile email`) leva todos os escopos; um cliente que o operador limitou (`native_client register --scope`) precisa do escopo da coluna e do escopo de tabela do contêiner que o serviço autoriza (`med_scheduling.practice:read` e `med_scheduling.schedule:read`, e as ações de escrita da agenda para marcar). Sem o escopo, a resposta é 403 `permission_denied` ("O token não tem o escopo exigido."); método fora da coluna é 403 `token_not_allowed`. Cada operação aparece no `/api/v1/openapi.json` só para quem pode chamá-la.
 
 Campo fora da lista é 400; sem revisão é 400; revisão vencida é 409; agenda sem acesso ou de outra organização é 404. Sem exclusão pela API.
 

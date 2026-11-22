@@ -320,3 +320,13 @@ def count_active_professionals(organization_id) -> int:
     from .models import Professional
 
     return Professional.objects.filter(organization_id=organization_id, is_active=True).count()
+
+
+def register_token_scopes() -> None:
+    """Named scopes of the REST API (#61); a broad OIDC token carries them too, the role still decides."""
+    from skeleton.integrations.tokens.scopes import register_token_scope
+
+    from .api_support import SCOPE_READ, SCOPE_WRITE
+
+    register_token_scope(SCOPE_READ, _("Ler agendas, horários livres e consultas pela API"))
+    register_token_scope(SCOPE_WRITE, _("Marcar consultas e mudar a situação delas pela API"))

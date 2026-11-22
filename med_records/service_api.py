@@ -450,10 +450,14 @@ class AccessLogEntry:
     target_table: str
     target_id: UUID | None
     at: datetime
+    origin: str = "web"
+    client_id: str = ""
 
 
 def access_log_entry(row: AccessLog) -> AccessLogEntry:
-    return AccessLogEntry(row.pk, row.actor_id, row.action, row.target_table, row.target_id, as_utc(row.at))
+    return AccessLogEntry(
+        row.pk, row.actor_id, row.action, row.target_table, row.target_id, as_utc(row.at), row.origin, row.client_id
+    )
 
 
 # ------------------------------------------------------------------------------------ helpers

@@ -221,3 +221,17 @@ def clinic(skeleton_db: None) -> Any:
     from tests.support import build_clinic
 
     return build_clinic()
+
+
+@pytest.fixture
+def native_clients(clinic: Any, settings: Any) -> Any:
+    """Access tokens of a native client of the core's OIDC provider for the clinic's people (#61).
+
+    ``native_clients.client(clinic.a.doctor)`` is a ``Client`` that authenticates only by the access
+    token, like the Medvita Desktop; ``scope=`` asks for core scopes and ``register(scopes=...)``
+    limits the client to them, as the operator does with ``native_client register --scope``.
+    """
+    from tests.support import NativeClients, oidc_signing_key
+
+    settings.IDP_OIDC_PRIVATE_KEY = oidc_signing_key()
+    return NativeClients()

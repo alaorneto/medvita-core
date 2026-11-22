@@ -332,6 +332,8 @@ Recompute the seal of an encounter from the stored content and its sections.
 | `target_table` | `str` |
 | `target_id` | `UUID | None` |
 | `at` | `datetime` |
+| `origin` | `str` |
+| `client_id` | `str` |
 
 ### `AllergyInfo`
 

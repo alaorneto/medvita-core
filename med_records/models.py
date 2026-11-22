@@ -273,13 +273,25 @@ class AccessLog(OrganizationRecord):
         DOWNLOAD_ATTACHMENT = "download_attachment", gettext_lazy("Download de anexo")
         EXPORT = "export", gettext_lazy("Exportação")
 
+    class Origin(models.TextChoices):
+        """Where the read came from, by the credential of the request (#61)."""
+
+        WEB = "web", gettext_lazy("Sessão web")
+        NATIVE_CLIENT = "native_client", gettext_lazy("Cliente nativo")
+        API_TOKEN = "api_token", gettext_lazy("Token de API")
+        OTHER = "other", gettext_lazy("Outra")
+
     chart = models.ForeignKey(PatientChart, on_delete=models.PROTECT, related_name="+")
     actor = models.ForeignKey("sk_accounts.User", on_delete=models.PROTECT, related_name="+")
     action = models.CharField(max_length=20, choices=Action.choices)
     target_table = models.CharField(max_length=60, blank=True)
     target_id = models.UUIDField(null=True, blank=True)
     at = models.DateTimeField()
-    immutable_fields = ("chart_id", "actor_id", "action", "target_table", "target_id", "at")
+    # Every read before #61 came from a web session: tokens were refused by every view of the app.
+    origin = models.CharField(max_length=20, choices=Origin.choices, default=Origin.WEB)
+    # The OIDC client of a native client read (2 to 64 characters, never a secret); empty otherwise.
+    client_id = models.CharField(max_length=64, blank=True)
+    immutable_fields = ("chart_id", "actor_id", "action", "target_table", "target_id", "at", "origin", "client_id")
 
     class Meta(OrganizationRecord.Meta):
         indexes = [models.Index(fields=("chart", "at"), name="med_records_access_chart")]

@@ -16,10 +16,13 @@ from django.db import transaction
 from django.utils.translation import gettext
 from rest_framework.response import Response
 
-from skeleton.api.views import TenantAPI, request_fields
+from skeleton.api.openapi import BOOLEAN, INTEGER, Operation, obj, results, string
+from skeleton.api.openapi import UUID as UUID_SCHEMA
+from skeleton.api.views import request_fields
 from skeleton.service_api import InvalidInput
 
-from .service_api import SchedulingService
+from .api_support import SCOPE_READ, SCOPE_WRITE, ScopedAPI, cursor_page, dto_schema
+from .service_api import AppointmentDetail, AppointmentInfo, ScheduleInfo, SchedulingService, Slot
 
 PAGE_SIZE = 50
 
@@ -104,13 +107,32 @@ def _page_size(request: Any) -> int:
     return int(size) if size.isdigit() else PAGE_SIZE
 
 
-class SchedulesAPI(TenantAPI):
+class SchedulesAPI(ScopedAPI):
+    token_methods = ("GET",)
+    token_scopes = {"GET": SCOPE_READ}
+    openapi = {"GET": Operation("Agendas ativas", lambda: results(dto_schema(ScheduleInfo)), scope=SCOPE_READ)}
+
     def get(self, request, organization_id):
         rows = _service().schedules(actor=request.user)
         return Response({"results": _json(rows)})
 
 
-class SlotsAPI(TenantAPI):
+class SlotsAPI(ScopedAPI):
+    token_methods = ("GET",)
+    token_scopes = {"GET": SCOPE_READ}
+    openapi = {
+        "GET": Operation(
+            "Horários livres da agenda",
+            lambda: results(dto_schema(Slot)),
+            query=(
+                ("start", string(format="date"), "Primeiro dia (AAAA-MM-DD)"),
+                ("end", string(format="date"), "Último dia; padrão: o primeiro"),
+                ("type", UUID_SCHEMA, "Tipo de atendimento"),
+            ),
+            scope=SCOPE_READ,
+        )
+    }
+
     def get(self, request, organization_id, schedule_id):
         params = request.query_params
         start = _date(params.get("start", ""), "start")
@@ -138,7 +160,48 @@ BOOK_FIELDS = (
 )
 
 
-class AppointmentsAPI(TenantAPI):
+BOOK_INPUT = obj(
+    {
+        "schedule": UUID_SCHEMA,
+        "patient": UUID_SCHEMA,
+        "appointment_type": UUID_SCHEMA,
+        "starts_at": string(format="date-time"),
+        "duration_minutes": INTEGER,
+        "fit_in": BOOLEAN,
+        "notes": string(),
+        "payment_kind": string(),
+        "room": UUID_SCHEMA,
+    },
+    required=("schedule", "patient", "appointment_type", "starts_at"),
+)
+APPOINTMENT_QUERY = (
+    ("schedule", UUID_SCHEMA, "Agenda"),
+    ("patient", UUID_SCHEMA, "Paciente"),
+    ("start", string(format="date-time"), "Início do intervalo (ISO 8601 com fuso)"),
+    ("end", string(format="date-time"), "Fim do intervalo (ISO 8601 com fuso)"),
+    ("status", string(), "Situação"),
+    ("cursor", string(), "Cursor devolvido pela página anterior"),
+    ("page_size", INTEGER, "Tamanho da página"),
+)
+
+
+class AppointmentsAPI(ScopedAPI):
+    token_methods = ("GET", "POST")
+    token_scopes = {"GET": SCOPE_READ, "POST": SCOPE_WRITE}
+    openapi = {
+        "GET": Operation(
+            "Consultas", lambda: cursor_page(dto_schema(AppointmentInfo)), query=APPOINTMENT_QUERY, scope=SCOPE_READ
+        ),
+        "POST": Operation(
+            "Marcação de consulta (exige Idempotency-Key)",
+            lambda: dto_schema(AppointmentInfo),
+            status=201,
+            request=BOOK_INPUT,
+            etag=True,
+            scope=SCOPE_WRITE,
+        ),
+    }
+
     def get(self, request, organization_id):
         params = request.query_params
         page = _service().appointments(
@@ -181,13 +244,43 @@ class AppointmentsAPI(TenantAPI):
         return _with_etag(Response(_json(info), status=201), info.revision)
 
 
-class AppointmentAPI(TenantAPI):
+class AppointmentAPI(ScopedAPI):
+    token_methods = ("GET",)
+    token_scopes = {"GET": SCOPE_READ}
+    openapi = {
+        "GET": Operation("Detalhe da consulta", lambda: dto_schema(AppointmentDetail), etag=True, scope=SCOPE_READ)
+    }
+
     def get(self, request, organization_id, appointment_id):
         detail = _service().appointment(actor=request.user, appointment_id=appointment_id)
         return _with_etag(Response(_json(detail)), detail.appointment.revision)
 
 
-class AppointmentTransitionAPI(TenantAPI):
+TRANSITION_INPUT = obj(
+    {"reason": string(), "note": string(), "starts_at": string(format="date-time"), "schedule": UUID_SCHEMA},
+    required=(),
+)
+
+
+class AppointmentTransitionAPI(ScopedAPI):
+    token_methods = ("POST",)
+    token_scopes = {"POST": SCOPE_WRITE}
+    openapi = {
+        "POST": Operation(
+            "Mudança de situação da consulta",
+            lambda: dto_schema(AppointmentInfo),
+            request=TRANSITION_INPUT,
+            request_required=False,
+            etag=True,
+            if_match=True,
+            scope=SCOPE_WRITE,
+            description=(
+                "A transição vem no caminho: confirm, check-in, start, complete, no-show, cancel (reason, note) "
+                "ou reschedule (starts_at, schedule; aceita Idempotency-Key)."
+            ),
+        )
+    }
+
     def post(self, request, organization_id, appointment_id, transition):
         revision = _if_match(request)
         service = _service()

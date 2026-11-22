@@ -35,3 +35,6 @@ class MedPatientsConfig(AppConfig):
         from .registration import register_quota_metrics
 
         register_quota_metrics()
+        from .registration import register_token_scopes
+
+        register_token_scopes()

@@ -26,3 +26,4 @@ class MedFinanceConfig(AppConfig):
 
         integration.register()
         registration.register_contributions()
+        registration.register_token_scopes()

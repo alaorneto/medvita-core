@@ -53,3 +53,18 @@ O administrador cria os grupos na tela de acesso da organização (`/o/<org>/acc
 | Tabela de preços | lê | lê | lê | lê e altera |
 
 Com um prontuário único, os dois médicos dividem um `Archive` e ganham `update` nele pelo grupo Profissionais de saúde.
+
+## Clientes fora do navegador
+
+As APIs REST das quatro apps aceitam, além da sessão, o access token OIDC de um cliente nativo (o Medvita Desktop) e os tokens `skt_` do núcleo, nos métodos que cada view declara em `token_methods` (#61). Nada muda nas regras acima: o token age como a pessoa, o serviço autoriza o papel dela pelo contêiner, a MFA de administrador e a separação entre organizações são as da sessão, e um token nunca administra.
+
+| App | Escopo de leitura | Escopo de escrita |
+|---|---|---|
+| `med_patients` | `patients:read` | `patients:write` |
+| `med_scheduling` | `scheduling:read` | `scheduling:write` |
+| `med_records` | `records:read` | nenhum: a escrita clínica é só pelas páginas, e a API do prontuário só aceita `GET` com token |
+| `med_finance` | `finance:read` | `finance:write` |
+
+O escopo só restringe. Um token sem o escopo da app recebe 403 antes da view; com ele, o serviço ainda exige o papel e o escopo de tabela do contêiner, que o núcleo aplica num ponto só. O token amplo (`openid profile email`) leva todos; um cliente que o operador limitou precisa dos dois, como `records:read` e `med_records.archive:read`. As tabelas e os métodos de cada app estão na seção "API REST" do `docs/spec.md` dela.
+
+Cada leitura de conteúdo clínico grava na trilha do prontuário (`AccessLog`) a origem da requisição: sessão web, cliente nativo com o `client_id` (o identificador do aplicativo registrado pelo operador, nunca uma pessoa ou um segredo), token de API ou outra. As leituras anteriores a esta mudança ficam como sessão web, a única credencial que as apps aceitavam.

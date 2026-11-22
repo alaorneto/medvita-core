@@ -295,13 +295,22 @@ def register_access_log() -> None:
     register(
         TableSpec(
             model=AccessLog,
-            description=_("Trilha de leitura do prontuário: quem leu conteúdo clínico, o quê e quando."),
+            description=_("Trilha de leitura do prontuário: quem leu conteúdo clínico, o quê, quando e de onde."),
             label=_("Trilha de leitura"),
             scope="organization",
-            read_fields=("chart", "actor", "action", "target_table", "target_id", "at"),
+            read_fields=("chart", "actor", "action", "target_table", "target_id", "at", "origin", "client_id"),
             write_fields=(),
             sensitive_fields=(),
             expose_api=False,
             access_parent="chart",
         )
     )
+
+
+def register_token_scopes() -> None:
+    """The named scope of the read-only REST API (#61); clinical writing has no scope, it stays on the pages."""
+    from skeleton.integrations.tokens.scopes import register_token_scope
+
+    from .api_support import SCOPE_READ
+
+    register_token_scope(SCOPE_READ, _("Ler prontuários, atendimentos e documentos pela API"))

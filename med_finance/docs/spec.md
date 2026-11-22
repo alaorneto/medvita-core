@@ -109,14 +109,16 @@ Em `/o/<org>/apps/med_finance/` (nomes `med_finance:<nome>`); toda leitura e esc
 
 Em `/api/v1/o/<org>/apps/med_finance/`, valores em centavos:
 
-| Método e caminho | O que faz |
-|---|---|
-| `GET price-items/?q=` | Itens ativos da tabela padrão |
-| `GET charges/?patient=&status=&cursor=&page_size=` | Contas (`ChargeInfo`) |
-| `POST charges/` | Cria (e confirma, salvo `confirm: false`) uma conta; exige `Idempotency-Key`; campos `patient`, `items` (`code`, `description`, `quantity`, `unit_amount`, `discount_amount`), `payer_name`, `payer_document`, `note` |
-| `GET charges/<id>/` | A conta com os itens, com `ETag` |
-| `GET charges/<id>/payments/`, `POST charges/<id>/payments/` | Pagamentos; receber exige `Idempotency-Key` e `If-Match` com a revisão da conta (`method`, `amount`, `installments`, `authorization_code`) |
-| `GET receipts/<id>/` | O recibo |
+| Método e caminho | O que faz | Token |
+|---|---|---|
+| `GET price-items/?q=` | Itens ativos da tabela padrão | `finance:read` |
+| `GET charges/?patient=&status=&cursor=&page_size=` | Contas (`ChargeInfo`) | `finance:read` |
+| `POST charges/` | Cria (e confirma, salvo `confirm: false`) uma conta; exige `Idempotency-Key`; campos `patient`, `items` (`code`, `description`, `quantity`, `unit_amount`, `discount_amount`), `payer_name`, `payer_document`, `note` | `finance:write` |
+| `GET charges/<id>/` | A conta com os itens, com `ETag` | `finance:read` |
+| `GET charges/<id>/payments/`, `POST charges/<id>/payments/` | Pagamentos; receber exige `Idempotency-Key` e `If-Match` com a revisão da conta (`method`, `amount`, `installments`, `authorization_code`) | `finance:read`; `finance:write` |
+| `GET receipts/<id>/` | O recibo | `finance:read` |
+
+Toda rota aceita a sessão do navegador e o token de um cliente fora dele (o access token OIDC de um cliente nativo, como o Medvita Desktop, ou um token `skt_`) nos métodos da coluna "Token", com as mesmas respostas, filtros, `ETag`, `If-Match` e `Idempotency-Key` da sessão. O escopo só restringe: o serviço autoriza o papel da pessoa como para a sessão, e um token com o escopo continua sem ver o que o papel não alcança. O token amplo (`openid profile email`) leva todos os escopos; um cliente que o operador limitou (`native_client register --scope`) precisa do escopo da coluna e do escopo de tabela do contêiner que o serviço autoriza (`med_finance.pricelist:read` e `med_finance.cashdesk:read`, e as ações de escrita do caixa para cobrar e receber). Sem o escopo, a resposta é 403 `permission_denied` ("O token não tem o escopo exigido."); método fora da coluna é 403 `token_not_allowed`. Cada operação aparece no `/api/v1/openapi.json` só para quem pode chamá-la.
 
 Campo fora da lista é 400; conta ou recibo sem acesso ou de outra organização é 404.
 
