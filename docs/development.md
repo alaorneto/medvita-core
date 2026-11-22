@@ -10,7 +10,7 @@ sk_med_core/          <- raiz do repositório git; não é pacote Python
   med_patients/  med_scheduling/  med_records/  med_finance/   <- um pacote por app
 ```
 
-O núcleo entra no virtualenv como pacote instalado, nunca por cópia de código. Enquanto o núcleo não tem release publicada, ele vem de um commit fixo do repositório público do Skeleton; o mesmo commit está em `SKELETON_REF` no `.github/workflows/ci.yml`:
+O núcleo entra no virtualenv como pacote instalado, nunca por cópia de código. Ele vem do repositório público do Skeleton, na tag de uma release publicada; a mesma tag está em `SKELETON_REF` no `.github/workflows/ci.yml` (hoje `v0.3.0`):
 
 ```bash
 uv venv --python 3.14 .venv
@@ -18,9 +18,9 @@ uv pip install --python .venv/Scripts/python.exe "django-skeleton @ git+https://
 uv pip install --python .venv/Scripts/python.exe pytest==9.2.0 pytest-django==4.14.0 pytest-xdist==3.8.0 ruff==0.17.4
 ```
 
-Com release publicada, troque a primeira instalação pelo wheel da release (`django_skeleton-<versão>-py3-none-any.whl`) e suba a faixa `compatibility.skeleton` dos quatro manifestos na mesma mudança.
+Quando a release do núcleo anexar o wheel (`django_skeleton-<versão>-py3-none-any.whl`), a primeira instalação pode usá-lo no lugar da tag.
 
-Para ler o código do núcleo, use o que está instalado em `.venv/Lib/site-packages/skeleton/` ou um clone do Skeleton no mesmo commit.
+Para ler o código do núcleo, use o que está instalado em `.venv/Lib/site-packages/skeleton/` ou um clone do Skeleton na mesma tag.
 
 ## Variáveis
 
@@ -91,11 +91,11 @@ Ninguém edita `version` dos manifestos nem o `CHANGELOG.md`: a automação do `
 | Job | O que faz |
 |---|---|
 | `lint` | `ruff check .` e `ruff format --check .` |
-| `test` | PostgreSQL 16 de serviço; instala o núcleo de `SKELETON_REF`; provisiona `ci_skeleton_test` e um banco por worker; `django check --fail-level WARNING`; `makemigrations --check`; `pytest -n 4`. Em Python 3.12 e 3.14 |
+| `test` | PostgreSQL 16 de serviço; instala o núcleo da tag `SKELETON_REF`; provisiona `ci_skeleton_test` e um banco por worker; `django check --fail-level WARNING`; `makemigrations --check`; `pytest -n 4`. Em Python 3.12 e 3.14 |
 | `packages` | `package doctor <pacote> --git-ref HEAD` dos quatro pacotes |
 | `CI` | agregador: falha se qualquer job falhar. É o check que o ruleset da `main` exige, ao lado de "Verificação do PR" |
 
-Trocar o núcleo é uma mudança própria: suba `SKELETON_REF` (ou, com release, troque pelo wheel da release) junto com `compatibility.skeleton` dos manifestos. O job de publicação dos pacotes assinados não existe ainda: ele nasce com a primeira release, junto com o guia de publicação.
+Trocar o núcleo é uma mudança própria: suba na mesma mudança `SKELETON_REF` no `ci.yml` e no `publish.yml`, a faixa `compatibility.skeleton` dos manifestos (piso na versão da tag, teto no minor seguinte), as faixas de `org.skeleton.calendar` e `org.skeleton.ledger`, que acompanham a versão do núcleo, e os links fixados na tag (`AGENTS.md` da raiz, guia de implantação e `docs/service-api.md` de cada app). O job de publicação dos pacotes assinados não existe ainda: ele nasce com a primeira release, junto com o guia de publicação.
 
 ## PRs empilhados
 

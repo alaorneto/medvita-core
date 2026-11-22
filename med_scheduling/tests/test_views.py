@@ -200,9 +200,14 @@ def test_day_page_query_count_does_not_grow(ready):
     address = url(ready, "day") + f"?date={ready.monday:%Y-%m-%d}"
 
     def count():
-        with CaptureQueriesContext(connection) as context:
-            assert client.get(address).status_code == 200
-        return len(context)
+        # The core rereads the instance appearance at most every few seconds per process, so one of
+        # two back-to-back requests may carry that read; the smaller count is the page's own.
+        sizes = []
+        for _ in range(2):
+            with CaptureQueriesContext(connection) as context:
+                assert client.get(address).status_code == 200
+            sizes.append(len(context))
+        return min(sizes)
 
     book(ready, 8)
     client.get(address)
