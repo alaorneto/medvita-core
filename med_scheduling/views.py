@@ -829,11 +829,13 @@ def _kept(rule: Any) -> AvailabilityRuleInput:
         rule.valid_until,
         None,
         rule.appointment_type_ids,
+        rule.mode,
+        rule.capacity,
     )
 
 
-def _typed(period: Any) -> AvailabilityRuleInput:
-    """A period a form read (``forms.Period``)."""
+def _typed(period: Any, was: Any = None) -> AvailabilityRuleInput:
+    """A period a form read (``forms.Period``); it keeps the mode and the capacity of the period it changes (``was``)."""
     return AvailabilityRuleInput(
         period.weekday,
         period.start_minute,
@@ -842,6 +844,8 @@ def _typed(period: Any) -> AvailabilityRuleInput:
         period.valid_until,
         None,
         period.kinds,
+        was.mode if was is not None else "booked",
+        was.capacity if was is not None else None,
     )
 
 
@@ -1044,7 +1048,7 @@ def period_edit_view(request: HttpRequest, organization_id: UUID, schedule_id: U
                     _service().set_availability(
                         actor=request.user,
                         schedule_id=schedule_id,
-                        rules=(*map(_kept, others), _typed(form.period)),
+                        rules=(*map(_kept, others), _typed(form.period, rule)),
                         expected_revision=_revision(request),
                     )
             except (NotFound, Forbidden):

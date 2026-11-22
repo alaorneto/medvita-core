@@ -48,6 +48,7 @@ def ready(clinic):
         encounter = RecordsService().start_encounter(actor=doctor, chart_id=chart.sysid, idempotency_key="e")
     ids = {
         "patient": patient.sysid,
+        "schedule": a.schedule.sysid,
         "appointment": appointment.sysid,
         "charge": charge.sysid,
         "chart": chart.sysid,
@@ -59,16 +60,20 @@ def ready(clinic):
 READS = {
     "patient": lambda actor, ids: PatientService().get(actor=actor, patient_id=ids["patient"]),
     "appointment": lambda actor, ids: SchedulingService().appointment(actor=actor, appointment_id=ids["appointment"]),
+    # The queue of the walk-in sessions carries the priority mark: it follows the schedule, like the appointment.
+    "queue": lambda actor, ids: SchedulingService().queue(
+        actor=actor, schedule_id=ids["schedule"], date=monday_at(9).date()
+    ),
     "chart": lambda actor, ids: RecordsService().chart(actor=actor, chart_id=ids["chart"]),
     "encounter": lambda actor, ids: RecordsService().encounter(actor=actor, encounter_id=ids["encounter"]),
     "charge": lambda actor, ids: FinanceService().charge(actor=actor, charge_id=ids["charge"]),
 }
 # Who of organization A reads each record (docs/access-model.md).
 EXPECTED = {
-    "reception": {"patient", "appointment", "charge"},
-    "doctor": {"patient", "appointment", "chart", "encounter"},
+    "reception": {"patient", "appointment", "queue", "charge"},
+    "doctor": {"patient", "appointment", "queue", "chart", "encounter"},
     "finance": {"patient", "charge"},
-    "admin": {"patient", "appointment", "chart", "encounter", "charge"},
+    "admin": {"patient", "appointment", "queue", "chart", "encounter", "charge"},
 }
 
 

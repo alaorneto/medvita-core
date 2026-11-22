@@ -1,6 +1,6 @@
 # Agenda médica
 
-A agenda do consultório: configuração (profissionais, salas, tipos de atendimento), grade de horários, bloqueios, consultas com situação, encaixe, lista de espera e recepção. As consultas são projetadas no `skeleton_calendar`. A app não guarda dado clínico nem valor: só um `billing_code` opaco que o financeiro resolve.
+A agenda do consultório: configuração (profissionais, salas, tipos de atendimento), grade de horários com períodos de hora marcada e de ordem de chegada, bloqueios, consultas com situação, encaixe, fila de chegada, lista de espera e recepção. As consultas são projetadas no `skeleton_calendar`. A app não guarda dado clínico nem valor: só um `billing_code` opaco que o financeiro resolve.
 
 ## Contract
 
@@ -41,7 +41,7 @@ O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do
 
 **`Schedule`** (contêiner): `practice`, `name`, `professional` ou `room` (pelo menos um), `calendar` (o calendário compartilhado do `skeleton_calendar` que projeta a agenda; imutável), `slot_minutes` (5 a 120), `booking_horizon_days` (1 a 730), `is_active`, e os grupos e pessoas com que a agenda foi compartilhada (`writer_groups`, `reader_groups`, `writer_users`).
 
-**`AvailabilityRule`** (derivada da agenda): um período da grade semanal. `weekday` (0 = segunda a 6 = domingo), `start_minute` e `end_minute` (minutos do dia no fuso do consultório; fim depois do início, até 1440), `valid_from`, `valid_until` (opcional). Períodos da mesma agenda não se sobrepõem no mesmo dia e período de validade, e uma agenda tem até 100. `appointment_type` é a forma antiga de restringir o período a um tipo só: continua lida e não é mais escrita.
+**`AvailabilityRule`** (derivada da agenda): um período da grade semanal. `weekday` (0 = segunda a 6 = domingo), `start_minute` e `end_minute` (minutos do dia no fuso do consultório; fim depois do início, até 1440), `valid_from`, `valid_until` (opcional). Períodos da mesma agenda não se sobrepõem no mesmo dia e período de validade, e uma agenda tem até 100. `appointment_type` é a forma antiga de restringir o período a um tipo só: continua lida e não é mais escrita. `mode` é `booked` (hora marcada, o padrão) ou `walk_in` (ordem de chegada); `capacity` são as vagas de um período de ordem de chegada (1 a 500, opcional; o banco recusa vagas em hora marcada).
 
 **`AvailabilityRuleType`** (derivada do período; tabela `med_scheduling_rule_type`): `rule` e `appointment_type` (imutáveis; uma linha viva por período e tipo). São os tipos que o período atende. Um período sem nenhuma linha (e sem o `appointment_type` antigo) atende todos os tipos que a agenda atende. O acesso segue a agenda pelo período: com o período excluído, as linhas dele deixam de ser alcançadas.
 
@@ -53,7 +53,7 @@ O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do
 
 - `create_schedule` (só com `access.manage`) cria, numa transação, o calendário compartilhado do núcleo (dono: a pessoa do profissional; numa agenda de sala, quem cria), a agenda e as concessões nas duas: grupos de escrita recebem leitura e alteração, de leitura só leitura, e as pessoas de escrita leitura e alteração.
 - `set_schedule_access` é o único caminho para mudar o acesso de uma agenda: ele iguala as concessões da agenda e do calendário. Mudar só um lado pela tela de acesso do núcleo quebra a projeção.
-- `set_availability` faz a grade ser a lista recebida, com a revisão da agenda como CAS, comparando com o que existe: o período que continua (mesmo dia da semana, minutos e validade) mantém a linha, e nele só os tipos que mudaram são gravados; o que saiu é excluído logicamente, os tipos dele antes. Gravar a mesma grade não escreve nenhuma linha além da revisão nova da agenda. Cada período diz os tipos em `appointment_type_ids` (`appointment_type_id`, o nome antigo de um tipo só, entra no conjunto). Um tipo que **entra** num período tem de ser um que a agenda atende (ativo, da organização e, na agenda configurada, escolhido); um tipo que já estava num período fica, mesmo que a agenda tenha deixado de atendê-lo. A linha antiga com `appointment_type` perde a coluna quando os tipos do período mudam. `availability` devolve cada período com `appointment_type_ids`; `appointment_type_id` responde enquanto houver um tipo só.
+- `set_availability` faz a grade ser a lista recebida, com a revisão da agenda como CAS, comparando com o que existe: o período que continua (mesmo dia da semana, minutos e validade) mantém a linha, e nele só os tipos que mudaram são gravados; o que saiu é excluído logicamente, os tipos dele antes. Gravar a mesma grade não escreve nenhuma linha além da revisão nova da agenda. O modo e as vagas de um período que continua são alterados na própria linha; períodos de modos diferentes também não se sobrepõem. Cada período diz os tipos em `appointment_type_ids` (`appointment_type_id`, o nome antigo de um tipo só, entra no conjunto). Um tipo que **entra** num período tem de ser um que a agenda atende no modo do período (ativo, da organização e, na agenda configurada, escolhido com aquele modo); um tipo que já estava num período fica, mesmo que a agenda tenha deixado de atendê-lo, e trocar o modo do período confere todos os tipos dele. A linha antiga com `appointment_type` perde a coluna quando os tipos do período mudam. `availability` devolve cada período com `appointment_type_ids`, `mode` e `capacity`; `appointment_type_id` responde enquanto houver um tipo só. Mudar a grade não muda as consultas já marcadas.
 - `set_schedule_types` troca os tipos atendidos pela agenda, com a mesma revisão como CAS (salvar a grade e salvar os tipos a partir da mesma página não vencem os dois): a linha que continua é alterada no lugar, a que sai é excluída logicamente e a lista vazia devolve a agenda a "todos os tipos ativos". `schedule_types` devolve os tipos atendidos com a duração em vigor em cada um. As consultas já marcadas não mudam.
 - Um bloqueio vira evento gerenciado no calendário (título "Bloqueio"); removê-lo remove o evento.
 - O `setup` também dá ao papel `member` leitura e alteração da tabela de calendários do núcleo: quem tem concessão numa agenda precisa enxergar o calendário dela.
@@ -64,7 +64,11 @@ O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do
 |---|---|
 | `schedule`, `code`, `patient`, `rescheduled_from` | imutáveis; `code` é `A` + 7 dígitos da sequência `med_scheduling.appointment` |
 | `appointment_type`, `professional`, `room` | o profissional é copiado da agenda na marcação; a sala é a pedida ou a da agenda |
-| `starts_at`, `ends_at` | fim depois do início |
+| `starts_at`, `ends_at` | fim depois do início; na ordem de chegada são os limites do período, não uma hora da consulta |
+| `mode` | `booked` (hora marcada) ou `walk_in` (ordem de chegada) |
+| `duration_minutes` | a duração planejada (5 a 480); numa consulta anterior à coluna vale o intervalo |
+| `arrival_number` | o número de chegada na sessão; só na ordem de chegada, único por agenda e início do período, nunca reaproveitado |
+| `is_priority` | **sensível**: a marca de prioridade legal (Lei 10.048), sem o motivo |
 | `status` | `scheduled`, `confirmed`, `arrived`, `in_progress`, `completed`, `no_show`, `cancelled`; muda só pela máquina de `transitions.py` |
 | `is_fit_in` | encaixe |
 | `billing_code` | cópia do tipo na marcação |
@@ -82,10 +86,16 @@ A FK do paciente não é oculta: o banco e o núcleo impedem excluir um paciente
 - **Duração.** Vale a informada na marcação; sem ela, a da agenda para o tipo; sem ela, a do tipo. Sempre de 5 a 480 minutos.
 - **Forma de pagamento.** A consulta nasce com a do tipo; um valor explícito na marcação vence. Mudar o tipo depois não muda as consultas marcadas, e a remarcação para outra agenda leva a forma de pagamento que a consulta tinha.
 - O calendário da agenda recebe o evento gerenciado "<tipo> · <código>", com o profissional como participante: nunca nome, telefone ou observação do paciente.
-- `reschedule` na mesma agenda muda o horário, mantém o código e volta a "agendada" se estava confirmada; para outra agenda, cancela a atual ("remarcada") e marca uma nova que aponta para ela, na sala da agenda de destino. Nos dois casos a consulta continua encaixe ou regular como era; `fit_in` explícito muda isso. As agendas são travadas em ordem de identificador antes da consulta, a mesma ordem de toda operação que trava as duas.
-- `cancel` vale para agendada, confirmada ou paciente chegou; remove o evento do calendário.
-- `day` devolve, de cada agenda legível, as consultas e os horários livres do dia local, com um número fixo de consultas ao banco.
-- Eventos `med_scheduling.appointment_*` com payload `code`, `schedule`, `patient`, `appointment_type`, `billing_code`, `starts_at`, `ends_at`, `status`.
+- **Modo explícito.** `book(mode="booked")` marca com hora, num período de hora marcada; `book(mode="walk_in")` marca sem hora: `starts_at` é qualquer instante de um período de ordem de chegada, e a consulta fica com os limites do período e com a duração planejada. A hora dentro de um período de ordem de chegada, ou a marcação sem hora num período de hora marcada, responde `Conflict("mode_mismatch")`; fora de qualquer período, `slot_unavailable`. O encaixe com hora continua aceito em qualquer dia, inclusive dentro de um período de ordem de chegada.
+- **Sessão.** A agenda e um período de ordem de chegada num dia formam a sessão: as consultas dela dividem o intervalo do período. A sessão comporta as vagas do período (`capacity`); sem vagas, a soma das durações planejadas não passa dos minutos abertos do período, que são os minutos dele menos o que os bloqueios da agenda tomam. Além disso responde `Conflict("session_full")`. Contam as consultas não canceladas que não são encaixe: cancelar libera a vaga, e o encaixe dispensa a lotação e os tipos do período, nunca o bloqueio (o período todo bloqueado responde `slot_unavailable`) nem os tipos da agenda.
+- **Tipo na ordem de chegada.** O tipo precisa de `allow_walk_in` na agenda configurada e de estar na lista do período, quando ele lista tipos; fora disso responde `type_not_allowed`.
+- **Sala.** As consultas de uma sessão não disputam a sala da agenda entre si, nem com um encaixe com hora da mesma agenda; continuam disputando com as consultas de outras agendas na mesma sala.
+- **Calendário da sessão.** Uma consulta de ordem de chegada não tem evento próprio: a sessão tem um evento gerenciado "Ordem de chegada · N pacientes", com os limites do período e o profissional como participante, em que N conta as consultas não canceladas (a sessão não some do calendário enquanto os pacientes são atendidos). O evento nasce na primeira marcação e sai com a última cancelada. Chave `session:<agenda>:<AAAAMMDD>:<minuto>`, caminho `apps/med_scheduling/schedules/<id>/queue/<data>/`.
+- `reschedule` na mesma agenda muda o horário, mantém o código e volta a "agendada" se estava confirmada; para outra agenda, cancela a atual ("remarcada") e marca uma nova que aponta para ela, na sala da agenda de destino. Nos dois casos a consulta continua encaixe ou regular como era, e no modo em que estava; `fit_in` e `mode` explícitos mudam isso. Para a ordem de chegada, `starts_at` é um instante do período de destino, com as regras da sessão (a consulta não conta a si mesma na lotação), e a consulta mantém a duração planejada; o evento próprio dá lugar ao da sessão, e o contrário na volta à hora marcada. A consulta de ordem de chegada cujo paciente já chegou não é remarcada, e a de hora marcada que já chegou não entra numa sessão: a fila mantém os números. As agendas são travadas em ordem de identificador antes da consulta, a mesma ordem de toda operação que trava as duas.
+- `cancel` vale para agendada, confirmada ou paciente chegou; remove o evento do calendário (na ordem de chegada, o evento da sessão passa a contar uma a menos). Trava a agenda antes da consulta, como toda operação que mexe numa sessão.
+- `day` devolve, de cada agenda legível, as consultas, os horários livres (só de hora marcada) e as sessões de ordem de chegada do dia local com as filas, com um número fixo de consultas ao banco.
+- `day_plan(schedule_id, start_date, end_date)` devolve os períodos efetivos de até 62 dias (`PeriodPlan`): modo, vagas, tipos, quantas consultas e minutos o período já tem, os minutos abertos e, na ordem de chegada, se está lotado.
+- Eventos `med_scheduling.appointment_*` com payload `code`, `schedule`, `patient`, `appointment_type`, `billing_code`, `starts_at`, `ends_at`, `status`, `mode`. Numa consulta de ordem de chegada `starts_at` e `ends_at` são os limites do período: quem mostra a hora olha `mode`.
 
 ### Atendimento
 
@@ -94,11 +104,16 @@ A máquina de situações (`transitions.py`) é a única fonte das mudanças:
 ```text
 scheduled ──confirm──► confirmed ──check_in──► arrived ──start──► in_progress ──complete──► completed
     │  └───────────check_in────────────────────►┘          └────────────complete──────────►┘
-    ├── mark_no_show ──► no_show       (de scheduled ou confirmed, só depois do início)
+    ├── mark_no_show ──► no_show       (de scheduled ou confirmed, só depois do início;
+    │                                   na ordem de chegada, só depois do fim do período)
     └── cancel ──► cancelled           (de scheduled, confirmed ou arrived)
 ```
 
 `completed`, `no_show` e `cancelled` são finais: erro de situação se corrige com outra consulta. Cada transição grava a hora, usa CAS e publica o evento dela. A chegada (`check_in`) notifica o profissional da agenda, uma vez por consulta; a notificação leva o código e o horário, nunca o paciente.
+
+**Fila da ordem de chegada.** Na chegada, a consulta de ordem de chegada recebe o próximo número da sessão, dado com a agenda travada (a agenda antes da consulta) e garantido por restrição única no banco; o número de uma cancelada não é dado de novo. `check_in(priority=True)` põe a marca de prioridade legal; `set_priority` a põe ou tira, com CAS, enquanto o atendimento não começou. `queue(schedule_id, date)` devolve as sessões do dia (`QueueSession`): quem aguarda, na ordem de chamada (prioritários primeiro, depois o número de chegada), os esperados (que ainda não chegaram, na ordem em que foram marcados), quem está em atendimento e quem já foi atendido ou faltou, com as vagas e a ocupação. Uma sessão cujo período saiu da grade continua aparecendo enquanto tiver consultas.
+
+A marca de prioridade é dado sensível: sai só em `QueueEntry` (em `queue` e em `day`) e em `AppointmentDetail`, para quem lê a agenda; nunca em `AppointmentInfo`, em evento, na notificação da chegada ou no calendário, e fica `[REDACTED]` na auditoria. Pôr ou tirar a marca não publica evento.
 
 Outras apps põem botões na consulta com `register_appointment_action(AppointmentAction(code, label, url_name, statuses, order))`; `appointment_actions` devolve os das apps ativas para a situação atual, em ordem.
 
@@ -108,14 +123,14 @@ Outras apps põem botões na consulta com `register_appointment_action(Appointme
 
 - Incluir, cancelar e marcar a partir da lista exigem alteração no consultório: a lista é do grupo de gestão do consultório (em geral, a recepção).
 - `waitlist_candidates` devolve as entradas aguardando que cabem num horário livre (agenda preferida, período do dia, datas, duração do tipo), alta prioridade primeiro, depois a mais antiga. Ninguém é marcado sozinho: a recepção escolhe.
-- `book_from_waitlist` marca a consulta do tipo da entrada (com a duração da agenda para o tipo, ou a informada em `duration_minutes`, e a forma de pagamento do tipo) e muda a entrada para "agendado" na mesma transação; com o horário ocupado, ou o tipo não atendido pela agenda, a entrada continua aguardando.
+- `book_from_waitlist` marca a consulta do tipo da entrada (com a duração da agenda para o tipo, ou a informada em `duration_minutes`, e a forma de pagamento do tipo) e muda a entrada para "agendado" na mesma transação; com o horário ocupado, a sessão lotada ou o tipo não atendido pela agenda, a entrada continua aguardando. `mode="walk_in"` põe o paciente na sessão do período de ordem de chegada do horário.
 - O job diário `med_scheduling.expire_waitlist` (uma organização por job) marca como expiradas as entradas com a última data vencida; repetir não muda nada.
 
 ### Horários livres
 
 `available_slots(schedule_id, start_date, end_date, appointment_type_id=None, duration_minutes=None)` devolve os horários livres de até 62 dias (`slots.py`, funções puras). Um tipo que a agenda não atende com hora marcada não tem horário livre.
 
-1. Os períodos válidos do dia da semana viram janelas no relógio local do consultório. O período que lista tipos só dá horário ao tipo pedido que esteja na lista; sem tipo pedido, só os períodos sem lista dão horário.
+1. Os períodos de hora marcada válidos do dia da semana viram janelas no relógio local do consultório (o período de ordem de chegada não tem horário livre: `plan.py` cuida dele). O período que lista tipos só dá horário ao tipo pedido que esteja na lista; sem tipo pedido, só os períodos sem lista dão horário.
 2. Cada janela é cortada em horários de `slot_minutes`; um horário serve se a duração (a informada; sem ela, a da agenda para o tipo pedido, depois a do tipo; sem tipo, o intervalo da agenda) termina dentro da janela.
 3. Saem os horários que cruzam um bloqueio, uma consulta viva da agenda ou um compromisso do profissional no calendário do núcleo (`free_busy` com os eventos de que ele participa).
 4. Saem os que já passaram e os além de `booking_horizon_days`.
@@ -156,7 +171,7 @@ Agenda ou consulta que o ator não lê responde 404. Quem lê a agenda e não l�
 
 ### Integração com a página do paciente
 
-No `ready()`: a aba "Consultas" (`register_patient_section`, ordem 20), a linha do tempo ("Consulta agendada", "Consulta realizada", "Falta", "Consulta cancelada", sem observação), o relatório do titular (data, código e situação de cada consulta legível) e o passo "Agenda médica" da lista de configuração. Cada contribuição só mostra consultas de agendas que o ator lê.
+No `ready()`: a aba "Consultas" (`register_patient_section`, ordem 20), a linha do tempo ("Consulta agendada", "Consulta por ordem de chegada" enquanto ela não aconteceu, "Consulta realizada", "Falta", "Consulta cancelada", sem observação), o relatório do titular (data, código e situação de cada consulta legível; na ordem de chegada, o período em vez da hora; nunca a prioridade) e o passo "Agenda médica" da lista de configuração. Cada contribuição só mostra consultas de agendas que o ator lê.
 
 ### API REST
 
@@ -189,6 +204,15 @@ Campo fora da lista é 400; sem revisão é 400; revisão vencida é 409; agenda
 - São recusados: mais de 100 períodos, períodos sobrepostos, e tipo novo num período que seja de outra organização, inativo ou não atendido pela agenda.
 - Pela página da agenda se adiciona um período em vários dias de uma vez, três ou mais períodos no mesmo dia, e se altera e remove um período; a sobreposição aparece no campo; quem só lê a agenda vê a semana e não a altera.
 - A agenda do dia faz o mesmo número de consultas ao banco com 1 ou 8 períodos com tipos.
+- A grade aceita modo e vagas por período; vagas num período de hora marcada, modo desconhecido e tipo sem o modo do período são recusados.
+- Marcar por ordem de chegada grava os limites do período e a duração planejada; `mode_mismatch` nos dois sentidos, e o encaixe com hora dentro de um período de ordem de chegada é aceito.
+- Além das vagas, ou do tempo aberto do período quando não há vagas, a marcação responde `session_full`; cancelar libera a vaga, o encaixe passa, e o período todo bloqueado não aceita nem encaixe.
+- Duas consultas da mesma sessão numa agenda com sala não respondem `room_unavailable`; a de outra agenda na mesma sala responde.
+- A chegada numera 1, 2, 3 na sessão; o número de uma cancelada não é reaproveitado; o prioritário passa à frente; `set_priority` corrige com CAS; revisão vencida na chegada não numera.
+- Falta na ordem de chegada só depois do fim do período; quem já chegou não é remarcado.
+- O calendário tem um evento por sessão, com a contagem certa depois de marcar e de cancelar e removido com a última cancelada, sem nome nem código; nenhuma consulta de ordem de chegada tem evento próprio.
+- A prioridade não aparece em `AppointmentInfo`, em evento nem na notificação da chegada, e sai `[REDACTED]` na auditoria.
+- Recepção e médico leem a fila; quem não lê a agenda e a organização B recebem `NotFound`.
 - Nome, número do conselho e CPF do profissional saem `[REDACTED]` na auditoria.
 - Um grupo removido por `set_schedule_access` perde o acesso à agenda e ao calendário dela.
 - Com o `skeleton_calendar` desativado, a agenda médica fica indisponível.

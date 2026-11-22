@@ -25,6 +25,13 @@ class PaymentKind(models.TextChoices):
     COURTESY = "courtesy", gettext_lazy("Cortesia")
 
 
+class Mode(models.TextChoices):
+    """How a period sees its patients: at a booked time, or in the order they arrive."""
+
+    BOOKED = "booked", gettext_lazy("Hora marcada")
+    WALK_IN = "walk_in", gettext_lazy("Ordem de chegada")
+
+
 def validate_timezone(value: str) -> None:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -240,7 +247,11 @@ class ScheduleAppointmentType(OrganizationRecord):
 
 
 class AvailabilityRule(OrganizationRecord):
-    """A weekly working window of a schedule, in minutes of the day of the practice's time zone."""
+    """A weekly working window of a schedule, in minutes of the day of the practice's time zone.
+
+    ``mode`` says how the period sees its patients. A walk-in period may have a ``capacity`` (how
+    many appointments one day of it takes); without one, the planned durations fill its minutes.
+    """
 
     schedule = models.ForeignKey(Schedule, on_delete=models.PROTECT, related_name="+")
     weekday = models.PositiveSmallIntegerField()  # 0 = Monday ... 6 = Sunday
@@ -251,10 +262,17 @@ class AvailabilityRule(OrganizationRecord):
     appointment_type = models.ForeignKey(
         AppointmentType, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
+    mode = models.CharField(max_length=8, choices=Mode.choices, default=Mode.BOOKED)
+    capacity = models.PositiveSmallIntegerField(null=True, blank=True)
     immutable_fields = ("schedule_id",)
 
     class Meta(OrganizationRecord.Meta):
         constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(condition=Q(mode__in=("booked", "walk_in")), name="med_scheduling_rule_mode"),
+            models.CheckConstraint(
+                condition=Q(capacity__isnull=True) | Q(mode="walk_in", capacity__gte=1, capacity__lte=500),
+                name="med_scheduling_rule_capacity",
+            ),
             models.CheckConstraint(condition=Q(weekday__lte=6), name="med_scheduling_rule_weekday"),
             models.CheckConstraint(
                 condition=Q(start_minute__lt=models.F("end_minute"), end_minute__lte=1440),
@@ -318,7 +336,13 @@ class ScheduleBlock(OrganizationRecord):
 
 
 class Appointment(OrganizationRecord):
-    """An appointment of a patient in a schedule; its state changes only through ``transitions.py``."""
+    """An appointment of a patient in a schedule; its state changes only through ``transitions.py``.
+
+    A walk-in appointment (``mode``) has no time of its own: ``starts_at`` and ``ends_at`` are the
+    bounds of its period on that day, which with the schedule make its session. It keeps the
+    duration planned for it and, once the patient arrives, the arrival number in the session.
+    ``is_priority`` marks the legal priority in the queue and is sensitive: it says nothing of why.
+    """
 
     class Status(models.TextChoices):
         SCHEDULED = "scheduled", gettext_lazy("Agendada")
@@ -361,6 +385,10 @@ class Appointment(OrganizationRecord):
     cancel_reason = models.CharField(max_length=12, choices=CancelReason.choices, blank=True)
     cancel_note = models.CharField(max_length=200, blank=True)
     rescheduled_from = models.ForeignKey("self", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    mode = models.CharField(max_length=8, choices=Mode.choices, default=Mode.BOOKED)
+    duration_minutes = models.PositiveSmallIntegerField(null=True, blank=True)
+    arrival_number = models.PositiveIntegerField(null=True, blank=True)
+    is_priority = models.BooleanField(default=False)
     immutable_fields = ("schedule_id", "code", "patient_id", "rescheduled_from_id")
 
     class Meta(OrganizationRecord.Meta):
@@ -380,6 +408,23 @@ class Appointment(OrganizationRecord):
             models.CheckConstraint(
                 condition=Q(payment_kind__in=("private", "insurance", "courtesy")),
                 name="med_scheduling_appointment_payment_kind",
+            ),
+            models.CheckConstraint(condition=Q(mode__in=("booked", "walk_in")), name="med_scheduling_appointment_mode"),
+            models.CheckConstraint(
+                condition=Q(duration_minutes__isnull=True) | Q(duration_minutes__gte=5, duration_minutes__lte=480),
+                name="med_scheduling_appointment_duration",
+            ),
+            models.CheckConstraint(
+                condition=Q(arrival_number__isnull=True) | Q(mode="walk_in", arrival_number__gte=1),
+                name="med_scheduling_appointment_arrival",
+            ),
+            # One number per arrival in a session (the schedule and the start of the period). A
+            # cancelled appointment keeps its number: it is never given again.
+            models.UniqueConstraint(
+                fields=("schedule", "starts_at", "arrival_number"),
+                condition=Q(arrival_number__isnull=False),
+                name="med_scheduling_appointment_arrival_number",
+                violation_error_code="unique",
             ),
         ]
         indexes = [

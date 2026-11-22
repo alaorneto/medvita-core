@@ -20,9 +20,10 @@ O que o produto faz e o que não faz em relação às normas que se aplicam a um
 | Classe | Onde se declara | Efeito | Exemplos |
 |---|---|---|---|
 | Dado pessoal | `TableSpec.personal_fields` | Legível pela API; `[REDACTED]` na auditoria | nome, CPF, RG, CNS, telefone, email, endereço, nome da mãe |
-| Dado sensível (saúde) | `TableSpec.sensitive_fields` | `[REDACTED]` na auditoria; fora de eventos e de DTOs, salvo método que documente | conteúdo das seções da evolução, texto de documento clínico, alergia, medicamento, CID, observações da consulta |
+| Dado sensível (saúde) | `TableSpec.sensitive_fields` | `[REDACTED]` na auditoria; fora de eventos e de DTOs, salvo método que documente | conteúdo das seções da evolução, texto de documento clínico, alergia, medicamento, CID, observações da consulta, marca de prioridade na fila |
 
 - Payload de evento, snapshot de notificação e título de evento da agenda nunca levam dado pessoal nem de saúde: levam `sysid`, código comercial e situação.
+- A marca de prioridade legal da fila (Lei 10.048) permite inferir idade, gestação ou deficiência: é dado sensível, guardada sem o motivo, e sai só na fila e no detalhe da consulta, para quem lê a agenda.
 - Nada é apagado fisicamente. Paciente com prontuário não é excluído nem anonimizado antes do fim da guarda; a regra é implementada por guardas de retenção registradas pelas apps.
 - A leitura de prontuário é registrada numa trilha própria do `med_records`: a auditoria do núcleo só cobre escrita.
 

@@ -8,6 +8,9 @@ professional are removed, and so are slots in the past or beyond the booking hor
 Daylight saving time: slots are generated on the local clock and converted; a local time that
 does not exist (the clock jumps forward) is skipped, and an ambiguous one (the clock goes back)
 takes its first occurrence.
+
+Only the windows of booked time give slots. A walk-in window (``mode`` "walk_in") is a period in
+which patients are seen in the order they arrive: it has no slots, and ``plan.py`` deals with it.
 """
 
 from __future__ import annotations
@@ -18,6 +21,9 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
+
+BOOKED = "booked"
+WALK_IN = "walk_in"
 
 
 @dataclass(frozen=True)
@@ -31,6 +37,8 @@ class Window:
     valid_until: date | None = None
     appointment_type_id: UUID | None = None
     appointment_type_ids: frozenset[UUID] = frozenset()
+    mode: str = BOOKED
+    capacity: int | None = None
 
     @property
     def types(self) -> frozenset[UUID]:
@@ -77,7 +85,7 @@ def candidates(
     found: list[tuple[datetime, Window]] = []
     midnight = datetime.combine(day, time())
     for window in windows:
-        if not applies(window, day, appointment_type_id, any_type=any_type):
+        if window.mode != BOOKED or not applies(window, day, appointment_type_id, any_type=any_type):
             continue
         minute = window.start_minute
         while minute + duration_minutes <= window.end_minute:
@@ -171,7 +179,7 @@ def fits_grid(
     timezone: str,
     appointment_type_id: UUID | None = None,
 ) -> bool:
-    """Whether ``[start, end)`` lies inside one window of the grid on its local day."""
+    """Whether ``[start, end)`` lies inside one window of booked time of the grid on its local day."""
     zone = ZoneInfo(timezone)
     local_start = start.astimezone(zone)
     local_end = end.astimezone(zone)
@@ -183,7 +191,8 @@ def fits_grid(
     start_minute = local_start.hour * 60 + local_start.minute
     end_minute = start_minute + int((end - start).total_seconds() // 60)
     return any(
-        applies(window, day, appointment_type_id)
+        window.mode == BOOKED
+        and applies(window, day, appointment_type_id)
         and window.start_minute <= start_minute
         and end_minute <= window.end_minute
         for window in windows
@@ -213,6 +222,8 @@ def windows_of(rules: Iterable[Any], kinds: Mapping[Any, Iterable[UUID]] | None 
             rule.valid_until,
             rule.appointment_type_id,
             frozenset(kinds.get(getattr(rule, "pk", None), ())),
+            getattr(rule, "mode", BOOKED),
+            getattr(rule, "capacity", None),
         )
         for rule in rules
     ]

@@ -33,6 +33,7 @@ from .models import (
     AppointmentType,
     AvailabilityRule,
     AvailabilityRuleType,
+    Mode,
     PaymentKind,
     Practice,
     Professional,
@@ -51,6 +52,8 @@ SCHEDULE_TABLE = "med_scheduling.schedule"
 MEMBER_TABLES = (PRACTICE_TABLE, SCHEDULE_TABLE, "skeleton_calendar.calendar")
 QUOTA_ACTIVE_PROFESSIONALS = "med_scheduling.active_professionals"
 Scalar = str | int | bool | date | None
+BOOKED = Mode.BOOKED.value
+WALK_IN = Mode.WALK_IN.value
 
 __all__ = [
     "APP_ID",
@@ -63,8 +66,11 @@ __all__ = [
     "AvailabilityRuleInput",
     "BlockInfo",
     "DayAgenda",
+    "PeriodPlan",
     "PracticeInfo",
     "ProfessionalInfo",
+    "QueueEntry",
+    "QueueSession",
     "RoomInfo",
     "ScheduleInfo",
     "ScheduleTypeInfo",
@@ -255,6 +261,9 @@ class AvailabilityRuleInput:
 
     ``appointment_type_ids`` are the kinds the period takes; none means every kind the schedule
     takes. ``appointment_type_id`` is the older way of naming a single kind and joins the set.
+    ``mode`` is "booked" (each appointment has its time) or "walk_in" (patients are seen in the
+    order they arrive); a walk-in period may say its ``capacity``, how many appointments a day of
+    it takes.
     """
 
     weekday: int
@@ -264,6 +273,8 @@ class AvailabilityRuleInput:
     valid_until: date | None = None
     appointment_type_id: UUID | None = None
     appointment_type_ids: tuple[UUID, ...] = ()
+    mode: str = "booked"
+    capacity: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +288,8 @@ class AvailabilityRuleInfo:
     valid_until: date | None
     appointment_type_id: UUID | None
     appointment_type_ids: tuple[UUID, ...] = ()
+    mode: str = "booked"
+    capacity: int | None = None
 
 
 def rule_info(row: AvailabilityRule, kinds: Any = ()) -> AvailabilityRuleInfo:
@@ -292,6 +305,8 @@ def rule_info(row: AvailabilityRule, kinds: Any = ()) -> AvailabilityRuleInfo:
         row.valid_until,
         ids[0] if len(ids) == 1 else None,
         ids,
+        str(row.mode),
+        row.capacity,
     )
 
 
@@ -334,7 +349,12 @@ class Slot:
 
 @dataclass(frozen=True, slots=True)
 class AppointmentInfo:
-    """An appointment as lists show it: never the notes of the reception."""
+    """An appointment as lists show it: never the notes of the reception nor the priority mark.
+
+    In a walk-in appointment (``mode`` "walk_in") ``starts_at`` and ``ends_at`` are the bounds of
+    its period, not a time of its own; ``duration_minutes`` is what was planned for it and
+    ``arrival_number`` its number in the session once the patient arrives.
+    """
 
     sysid: UUID
     code: str
@@ -351,6 +371,14 @@ class AppointmentInfo:
     payment_kind: str
     rescheduled_from_id: UUID | None
     revision: int
+    mode: str = "booked"
+    duration_minutes: int = 0
+    arrival_number: int | None = None
+
+
+def _planned(row: Any) -> int:
+    """The minutes planned for an appointment; a row from before the column says them by its interval."""
+    return row.duration_minutes or int((row.ends_at - row.starts_at).total_seconds() // 60)
 
 
 def appointment_info(row: Appointment) -> AppointmentInfo:
@@ -370,12 +398,15 @@ def appointment_info(row: Appointment) -> AppointmentInfo:
         row.payment_kind,
         row.rescheduled_from_id,
         row.revision,
+        str(row.mode),
+        _planned(row),
+        row.arrival_number,
     )
 
 
 @dataclass(frozen=True, slots=True)
 class AppointmentDetail:
-    """One appointment with the notes and the history of its state."""
+    """One appointment with the notes, the history of its state and the priority mark (sensitive)."""
 
     appointment: AppointmentInfo
     notes: str
@@ -387,6 +418,7 @@ class AppointmentDetail:
     cancel_reason: str
     cancel_note: str
     writable: bool
+    is_priority: bool = False
 
 
 def appointment_detail(row: Appointment, *, writable: bool) -> AppointmentDetail:
@@ -404,14 +436,83 @@ def appointment_detail(row: Appointment, *, writable: bool) -> AppointmentDetail
         row.cancel_reason,
         row.cancel_note,
         writable,
+        row.is_priority,
     )
 
 
 @dataclass(frozen=True, slots=True)
+class QueueEntry:
+    """An appointment of a walk-in session as the queue shows it, with the priority mark (sensitive).
+
+    ``position`` is the place in the call order among those who wait (1 is called next); ``None``
+    for whoever is not waiting.
+    """
+
+    appointment: AppointmentInfo
+    arrived_at: datetime | None
+    is_priority: bool
+    position: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class QueueSession:
+    """A walk-in session: a schedule and one of its walk-in periods on a day.
+
+    ``taken`` counts the appointments that use the room of the session (not cancelled, not a
+    fit-in) and ``planned_minutes`` adds their durations; ``is_full`` says no other fits.
+    ``waiting`` is in the call order (priority first, then the arrival number), ``expected`` (not
+    arrived yet) in the order they were booked; ``finished`` gathers who was seen and who missed.
+    """
+
+    schedule_id: UUID
+    day: date
+    starts_at: datetime
+    ends_at: datetime
+    capacity: int | None
+    taken: int
+    planned_minutes: int
+    open_minutes: int
+    is_full: bool
+    waiting: tuple[QueueEntry, ...]
+    expected: tuple[QueueEntry, ...]
+    in_progress: tuple[QueueEntry, ...]
+    finished: tuple[QueueEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PeriodPlan:
+    """A period a schedule works on one day, with how much of it is taken.
+
+    ``taken`` counts the appointments of the period that are not cancelled nor a fit-in, and
+    ``planned_minutes`` adds their durations; ``open_minutes`` are the minutes no block takes.
+    ``is_full`` is about a walk-in period (in booked time the free slots say it).
+    ``is_exception`` tells a period that holds only on that day from one of the weekly grid.
+    """
+
+    schedule_id: UUID
+    day: date
+    start_minute: int
+    end_minute: int
+    starts_at: datetime
+    ends_at: datetime
+    mode: str
+    capacity: int | None
+    appointment_type_ids: tuple[UUID, ...]
+    taken: int
+    planned_minutes: int
+    open_minutes: int
+    is_full: bool
+    is_exception: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class DayAgenda:
+    """A schedule on one day; ``sessions`` are its walk-in sessions, whose appointments are in ``appointments`` too."""
+
     schedule: ScheduleInfo
     appointments: tuple[AppointmentInfo, ...]
     free: tuple[Slot, ...]
+    sessions: tuple[QueueSession, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -537,6 +638,18 @@ def _aware(value: object, field: str) -> datetime:
     return value
 
 
+def _check_mode(value: object) -> str:
+    if not isinstance(value, str) or value not in Mode.values:
+        raise InvalidInput({"mode": [gettext("Modo de atendimento desconhecido.")]})
+    return str(value)
+
+
+def _check_flag(value: object, field: str) -> bool:
+    if type(value) is not bool:
+        raise InvalidInput({field: [gettext("Informe verdadeiro ou falso.")]})
+    return value
+
+
 def _input_kinds(rule: AvailabilityRuleInput) -> frozenset[UUID]:
     ids = rule.appointment_type_ids
     if not isinstance(ids, tuple) or len(ids) > MAX_SCHEDULE_TYPES:
@@ -612,6 +725,10 @@ def _check_rules(rules: object) -> list[tuple[AvailabilityRuleInput, frozenset[U
             rule.valid_until is not None and rule.valid_until < rule.valid_from
         ):
             raise InvalidInput({"valid_until": [gettext("A validade termina antes de começar.")]})
+        if _check_mode(rule.mode) != WALK_IN and rule.capacity is not None:
+            raise InvalidInput({"capacity": [gettext("Só um período de ordem de chegada tem vagas.")]})
+        if rule.capacity is not None and (type(rule.capacity) is not int or not 1 <= rule.capacity <= 500):
+            raise InvalidInput({"capacity": [gettext("Use de 1 a 500 vagas.")]})
         kinds[id(rule)] = _input_kinds(rule)
     from .slots import collide
 
@@ -632,6 +749,24 @@ def _schedule_type_rows(actor: Any, schedule: Schedule) -> dict[UUID, ScheduleAp
 
     rows = authorized_queryset(ScheduleAppointmentType, user=actor, action="read").filter(schedule=schedule)
     return {row.appointment_type_id: row for row in rows}
+
+
+def _schedule_windows(actor: Any, schedule: Schedule) -> list[Any]:
+    """Every window of the weekly grid of a schedule, with the kinds, the mode and the capacity of each."""
+    from skeleton.access.policies import authorized_queryset
+
+    return _windows(actor, authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule=schedule))
+
+
+def _blocked(actor: Any, schedule: Schedule, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
+    """The blocks of a schedule that overlap an interval."""
+    from skeleton.access.policies import authorized_queryset
+
+    return list(
+        authorized_queryset(ScheduleBlock, user=actor, action="read")
+        .filter(schedule=schedule, starts_at__lt=end, ends_at__gt=start)
+        .values_list("starts_at", "ends_at")
+    )
 
 
 def _type_duration(actor: Any, schedule: Schedule, kind: AppointmentType, *, mode: str = "booked") -> int | None:
@@ -770,6 +905,7 @@ def _payload(row: Appointment) -> tuple[tuple[str, str], ...]:
         ("starts_at", as_utc(row.starts_at).isoformat()),
         ("ends_at", as_utc(row.ends_at).isoformat()),
         ("status", row.status),
+        ("mode", str(row.mode)),
     )
 
 
@@ -781,10 +917,48 @@ def _publish(actor: Any, suffix: str, row: Appointment) -> None:
     )
 
 
+def _project_session(actor: Any, schedule: Schedule, starts_at: datetime) -> None:
+    """The walk-in session that starts at ``starts_at`` in the schedule's calendar: how many, never who.
+
+    One event for the session, counting its appointments that are not cancelled, so that it stays
+    in the calendar while the patients are seen; with none left the event goes away.
+    """
+    from zoneinfo import ZoneInfo
+
+    from . import calendar_bridge
+    from .transitions import CANCELLED
+
+    rows = Appointment.objects.filter(schedule=schedule, mode=WALK_IN, starts_at=starts_at).exclude(status=CANCELLED)
+    ends_at = rows.values_list("ends_at", flat=True).first()
+    local = starts_at.astimezone(ZoneInfo(schedule.practice.timezone))
+    attendees = ()
+    if schedule.professional_id is not None:
+        user = Professional.objects.filter(pk=schedule.professional_id).values_list("user_id", flat=True).first()
+        attendees = (user,) if user else ()
+    calendar_bridge.put_session_event(
+        actor,
+        schedule_id=schedule.pk,
+        calendar_id=schedule.calendar_id,
+        day=local.date(),
+        minute=local.hour * 60 + local.minute,
+        count=rows.count() if ends_at is not None else 0,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        tzid=schedule.practice.timezone,
+        attendee_user_ids=attendees,
+    )
+
+
 def _project(actor: Any, row: Appointment, schedule: Schedule) -> None:
-    """The appointment in the schedule's calendar: kind and code only, never the patient."""
+    """The appointment in the schedule's calendar: kind and code only, never the patient.
+
+    A walk-in appointment has no event of its own: its session has one.
+    """
     from . import calendar_bridge
 
+    if row.mode == WALK_IN:
+        _project_session(actor, schedule, row.starts_at)
+        return
     attendees = ()
     if row.professional_id is not None:
         user = Professional.objects.filter(pk=row.professional_id).values_list("user_id", flat=True).first()
@@ -827,6 +1001,7 @@ def _book(
     room_id: object,
     idempotency_key: object,
     rescheduled_from: Appointment | None = None,
+    mode: object = "booked",
 ) -> Appointment:
     """Book an appointment (the body of ``SchedulingService.book``, shared with a reschedule)."""
     from datetime import timedelta
@@ -838,6 +1013,7 @@ def _book(
 
     key = common.key(idempotency_key)
     starts_at = _aware(starts_at, "starts_at")
+    mode = _check_mode(mode)
     if payment_kind is not None and payment_kind not in PaymentKind.values:
         raise InvalidInput({"payment_kind": [gettext("Forma de pagamento desconhecida.")]})
     if len(str(notes)) > 2000:
@@ -852,14 +1028,21 @@ def _book(
     require_parent_action(Appointment, schedule, user=actor, action="create")
     patient = _readable_patient(actor, patient_id)
     kind = common.row(actor, AppointmentType, appointment_type_id, field="appointment_type_id", write=False)
-    own_duration = _type_duration(actor, schedule, kind)
+    own_duration = _type_duration(actor, schedule, kind, mode=mode)
     if own_duration is None:
-        raise Conflict("type_not_allowed", gettext("Esta agenda não atende este tipo de atendimento."))
+        raise _type_not_taken(mode)
     room = common.row(actor, Room, room_id, field="room_id", write=False) if room_id is not None else schedule.room
     if kind.requires_room and room is None:
         raise InvalidInput({"room_id": [gettext("Este tipo de atendimento exige uma sala.")]})
-    ends_at = starts_at + timedelta(minutes=duration_minutes or own_duration)
-    _check_interval(actor, schedule, kind, starts_at, ends_at, fit_in=bool(fit_in), room=room)
+    planned = duration_minutes or own_duration
+    if mode == WALK_IN:
+        # No time of its own: the appointment takes the bounds of the walk-in period that holds the instant.
+        period = _session_for(actor, schedule, starts_at)
+        _check_session(actor, schedule, kind, period, planned, fit_in=bool(fit_in), room=room)
+        starts_at, ends_at = period.starts_at, period.ends_at
+    else:
+        ends_at = starts_at + timedelta(minutes=planned)
+        _check_interval(actor, schedule, kind, starts_at, ends_at, fit_in=bool(fit_in), room=room)
     number = SequenceService().next_number(actor=actor, key=APPOINTMENT_SEQUENCE)
     row = Appointment(
         sysid=sysid,
@@ -877,6 +1060,8 @@ def _book(
         payment_kind=str(kind.payment_kind if payment_kind is None else payment_kind),
         notes=str(notes).strip(),
         rescheduled_from=rescheduled_from,
+        mode=mode,
+        duration_minutes=planned,
     )
     row.save()
     _project(actor, row, schedule)
@@ -895,22 +1080,29 @@ def _check_interval(
     room: Room | None,
     ignore: UUID | None = None,
 ) -> None:
-    """The rules of a booking: inside the grid and free (unless a fit-in), never over a block."""
-    from skeleton.access.policies import authorized_queryset
+    """The rules of a booking with a time: in the grid of booked time and free (unless a fit-in), never over a block.
 
+    A time inside a walk-in period is refused as ``mode_mismatch``: there the booking has no time.
+    """
+    from . import plan
     from .slots import fits_grid
     from .transitions import LIVE
 
-    blocks = authorized_queryset(ScheduleBlock, user=actor, action="read").filter(
-        schedule=schedule, starts_at__lt=ends_at, ends_at__gt=starts_at
-    )
-    if blocks.exists():
+    if _blocked(actor, schedule, starts_at, ends_at):
         raise Conflict("slot_unavailable", gettext("O horário está bloqueado."))
     if not fit_in:
-        rules = authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule=schedule)
-        if not fits_grid(
-            _windows(actor, rules), starts_at, ends_at, timezone=schedule.practice.timezone, appointment_type_id=kind.pk
-        ):
+        windows = _schedule_windows(actor, schedule)
+        timezone = schedule.practice.timezone
+        if not fits_grid(windows, starts_at, ends_at, timezone=timezone, appointment_type_id=kind.pk):
+            periods = plan.periods_on(windows, plan.local_day(starts_at, timezone), timezone)
+            if any(
+                period.mode == WALK_IN and period.starts_at < ends_at and starts_at < period.ends_at
+                for period in periods
+            ):
+                raise Conflict(
+                    "mode_mismatch",
+                    gettext("Este período atende por ordem de chegada: marque sem hora, ou como encaixe."),
+                )
             raise Conflict("slot_unavailable", gettext("O horário está fora da grade da agenda."))
         live = Appointment.objects.filter(
             schedule=schedule, status__in=LIVE, starts_at__lt=ends_at, ends_at__gt=starts_at
@@ -920,32 +1112,177 @@ def _check_interval(
         if live.exists():
             raise Conflict("slot_unavailable", gettext("Já existe consulta neste horário."))
     if room is not None:
-        busy_room = Appointment.objects.filter(room=room, status__in=LIVE, starts_at__lt=ends_at, ends_at__gt=starts_at)
+        # The walk-in appointments of this schedule share their period: they take the room as one.
+        busy_room = Appointment.objects.filter(
+            room=room, status__in=LIVE, starts_at__lt=ends_at, ends_at__gt=starts_at
+        ).exclude(schedule=schedule, mode=WALK_IN)
         if ignore is not None:
             busy_room = busy_room.exclude(pk=ignore)
         if busy_room.exists():
             raise Conflict("room_unavailable", gettext("A sala já está ocupada neste horário."))
 
 
-def _transition(actor: Any, appointment_id: object, expected_revision: object, action: str) -> Appointment:
-    """Apply one transition of ``transitions.py`` with CAS, stamp its time and publish its event."""
+def _type_not_taken(mode: str) -> Conflict:
+    if mode == WALK_IN:
+        return Conflict(
+            "type_not_allowed", gettext("Esta agenda não atende este tipo de atendimento por ordem de chegada.")
+        )
+    return Conflict("type_not_allowed", gettext("Esta agenda não atende este tipo de atendimento."))
+
+
+# The shortest appointment: a session with less room than this is full.
+MIN_DURATION = 5
+
+
+def _session_for(actor: Any, schedule: Schedule, moment: datetime) -> Any:
+    """The walk-in period of the schedule that holds the instant (``plan.Period``)."""
+    from . import plan
+
+    timezone = schedule.practice.timezone
+    periods = plan.periods_on(_schedule_windows(actor, schedule), plan.local_day(moment, timezone), timezone)
+    found = plan.period_at(periods, moment, WALK_IN)
+    if found is None:
+        if plan.period_at(periods, moment) is not None:
+            raise Conflict("mode_mismatch", gettext("Este período atende com hora marcada: escolha um horário."))
+        raise Conflict("slot_unavailable", gettext("Não há período de ordem de chegada neste horário."))
+    return found
+
+
+def _check_session(
+    actor: Any,
+    schedule: Schedule,
+    kind: AppointmentType,
+    period: Any,
+    planned: int,
+    *,
+    fit_in: bool,
+    room: Room | None,
+    ignore: UUID | None = None,
+) -> None:
+    """The rules of a walk-in booking: a period some block leaves open, of the kind and with room (unless a fit-in).
+
+    The room of the session is its capacity, or its open minutes against the planned durations.
+    The appointments of the session share the interval, so they never dispute the schedule's room
+    with each other, only with other schedules.
+    """
+    from . import plan
+    from .transitions import CANCELLED, LIVE
+
+    blocked = _blocked(actor, schedule, period.starts_at, period.ends_at)
+    if plan.open_minutes(period, blocked) <= 0:
+        raise Conflict("slot_unavailable", gettext("O período está bloqueado."))
+    if not fit_in:
+        if period.kinds and kind.pk not in period.kinds:
+            raise Conflict("type_not_allowed", gettext("Este período não atende este tipo de atendimento."))
+        rows = Appointment.objects.filter(
+            schedule=schedule, mode=WALK_IN, starts_at=period.starts_at, is_fit_in=False
+        ).exclude(status=CANCELLED)
+        if ignore is not None:
+            rows = rows.exclude(pk=ignore)
+        taken = [_planned(row) for row in rows.only("duration_minutes", "starts_at", "ends_at")]
+        if plan.is_full(period, taken, planned, blocked=blocked):
+            raise Conflict("session_full", gettext("O período de ordem de chegada está lotado."))
+    if room is not None:
+        busy_room = Appointment.objects.filter(
+            room=room, status__in=LIVE, starts_at__lt=period.ends_at, ends_at__gt=period.starts_at
+        ).exclude(schedule=schedule)
+        if busy_room.exists():
+            raise Conflict("room_unavailable", gettext("A sala já está ocupada neste horário."))
+
+
+def _locked(actor: Any, appointment_id: object, expected_revision: object) -> tuple[Schedule, Appointment]:
+    """The schedule and then the appointment, locked in the order every operation uses, with CAS."""
+    # Read without a lock only to learn the schedule, which never changes.
+    seen = _appointment(actor, appointment_id, write=True)
+    schedule = _schedule(actor, seen.schedule_id, write=True, lock=True)
+    row = _appointment(actor, appointment_id, write=True, lock=True)
+    common.check_revision(row, expected_revision)
+    return schedule, row
+
+
+def _sessions(
+    schedule_id: UUID, day: date, periods: Any, rows: Any, blocked: list[tuple[datetime, datetime]]
+) -> tuple[QueueSession, ...]:
+    """The walk-in sessions of a schedule on a day, from its periods and the appointments already read.
+
+    A session whose period left the grid since still shows, by the bounds its appointments keep.
+    """
+    from . import plan, queue
+    from .transitions import ARRIVED, CANCELLED, COMPLETED, CONFIRMED, IN_PROGRESS, NO_SHOW, SCHEDULED
+
+    booked: dict[datetime, list[Appointment]] = {}
+    for row in rows:
+        if row.mode == WALK_IN:
+            booked.setdefault(row.starts_at, []).append(row)
+    bounds = {period.starts_at: period for period in periods if period.mode == WALK_IN}
+    for start, found in booked.items():
+        bounds.setdefault(start, plan.Period(day, 0, 0, start, found[0].ends_at, WALK_IN))
+
+    def entry(row: Appointment, position: int | None = None) -> QueueEntry:
+        return QueueEntry(
+            appointment_info(row), as_utc(row.arrived_at) if row.arrived_at else None, row.is_priority, position
+        )
+
+    result = []
+    for start in sorted(bounds):
+        period = bounds[start]
+        found = sorted(booked.get(start, []), key=lambda row: (row.code, str(row.pk)))  # The order they were booked.
+        counted = [_planned(row) for row in found if row.status != CANCELLED and not row.is_fit_in]
+        waiting = queue.call_order(row for row in found if row.status == ARRIVED)
+        result.append(
+            QueueSession(
+                schedule_id,
+                day,
+                as_utc(period.starts_at),
+                as_utc(period.ends_at),
+                period.capacity,
+                len(counted),
+                sum(counted),
+                plan.open_minutes(period, blocked),
+                plan.is_full(period, counted, MIN_DURATION, blocked=blocked),
+                tuple(entry(row, position) for position, row in enumerate(waiting, start=1)),
+                tuple(entry(row) for row in found if row.status in (SCHEDULED, CONFIRMED)),
+                tuple(entry(row) for row in found if row.status == IN_PROGRESS),
+                tuple(entry(row) for row in found if row.status in (COMPLETED, NO_SHOW)),
+            )
+        )
+    return tuple(result)
+
+
+def _transition(
+    actor: Any, appointment_id: object, expected_revision: object, action: str, *, extra: Any = None
+) -> Appointment:
+    """Apply one transition of ``transitions.py`` with CAS, stamp its time and publish its event.
+
+    ``extra(schedule, row)`` gives more values to save with the state; it runs once the transition
+    is known to be allowed, with the schedule locked before the appointment.
+    """
     from django.utils import timezone
 
     from . import transitions
 
-    row = _appointment(actor, appointment_id, write=True, lock=True)
-    common.check_revision(row, expected_revision)
+    schedule = None
+    if extra is None:
+        row = _appointment(actor, appointment_id, write=True, lock=True)
+        common.check_revision(row, expected_revision)
+    else:
+        schedule, row = _locked(actor, appointment_id, expected_revision)
     try:
         state = transitions.target(action, row.status)
     except transitions.InvalidTransition:
         raise Conflict("invalid_transition", gettext("Esta mudança de situação não é permitida agora.")) from None
     now = timezone.now()
-    if action == "mark_no_show" and now < row.starts_at:
-        raise Conflict("invalid_transition", gettext("Só é possível marcar falta depois do horário da consulta."))
+    if action == "mark_no_show":
+        if row.mode == WALK_IN and now < row.ends_at:
+            raise Conflict("invalid_transition", gettext("Só é possível marcar falta depois do fim do período."))
+        if now < row.starts_at:
+            raise Conflict("invalid_transition", gettext("Só é possível marcar falta depois do horário da consulta."))
     values: dict[str, Any] = {"status": state}
     stamp = transitions.STAMP_OF.get(action)
     if stamp is not None:
         values[stamp] = now
+    if extra is not None:
+        values.update(extra(schedule, row))
     common.apply_changes(row, values)
     _publish(actor, transitions.EVENT_OF[action], row)
     return row
@@ -1667,14 +2004,17 @@ class SchedulingService(ServiceAPI):
         """Make the weekly grid of a schedule be ``rules``, with the schedule's revision as CAS.
 
         The grid is compared with what exists: a window that stays (same weekday, minutes and
-        validity) keeps its row, and only the kinds that changed in it are written. A window lists
-        the kinds its period takes (none: every kind the schedule takes).
+        validity) keeps its row, and only what changed in it is written (kinds, mode, capacity). A
+        window lists the kinds its period takes (none: every kind the schedule takes) and says its
+        mode: booked time, or walk-in with an optional capacity.
         Autorização: alteração na agenda.
         Erros: NotFound; Forbidden; InvalidInput para faixa inválida ou sobreposta, mais de 100
-        faixas, ou tipo novo num período que seja desconhecido, inativo, de outra organização ou que
-        a agenda não atende; Conflict("stale_revision").
+        faixas, modo desconhecido, vagas fora de 1 a 500 ou num período de hora marcada, ou tipo
+        novo num período que seja desconhecido, inativo, de outra organização ou que a agenda não
+        atende naquele modo; Conflict("stale_revision").
         Efeitos: grava as faixas novas, exclui logicamente as que saíram (os tipos delas antes) e
-        acerta os tipos das que ficaram; a agenda ganha uma revisão nova.
+        acerta os tipos, o modo e as vagas das que ficaram; a agenda ganha uma revisão nova. As
+        consultas já marcadas não mudam.
         """
         from skeleton.access.policies import authorized_queryset
 
@@ -1694,15 +2034,20 @@ class SchedulingService(ServiceAPI):
             rule_id__in=[row.pk for row in (*existing.values(), *leaving)]
         ):
             links.setdefault(link.rule_id, {})[link.appointment_type_id] = link
-        taken = {item.appointment_type_id for item in _schedule_types(actor, schedule)}
+        types = _schedule_types(actor, schedule)
+        taken = {
+            BOOKED: {item.appointment_type_id for item in types if item.allow_booked},
+            WALK_IN: {item.appointment_type_id for item in types if item.allow_walk_in},
+        }
 
-        def refuse_unknown(kinds: frozenset[UUID]) -> None:
-            if kinds - taken:
+        def refuse_unknown(kinds: frozenset[UUID], mode: str) -> None:
+            if kinds - taken[mode]:
                 raise InvalidInput(
                     {
                         "appointment_type_ids": [
                             gettext(
-                                "O período lista um tipo de atendimento desconhecido, inativo ou que a agenda não atende."
+                                "O período lista um tipo de atendimento desconhecido, inativo ou que a agenda"
+                                " não atende neste modo."
                             )
                         ]
                     }
@@ -1712,7 +2057,7 @@ class SchedulingService(ServiceAPI):
             row = existing.pop(_shape(rule), None)
             current: dict[UUID, AvailabilityRuleType] = {}
             if row is None:
-                refuse_unknown(kinds)
+                refuse_unknown(kinds, rule.mode)
                 row = AvailabilityRule(
                     organization_id=schedule.organization_id,
                     schedule=schedule,
@@ -1721,18 +2066,21 @@ class SchedulingService(ServiceAPI):
                     end_minute=rule.end_minute,
                     valid_from=rule.valid_from,
                     valid_until=rule.valid_until,
+                    mode=rule.mode,
+                    capacity=rule.capacity,
                 )
                 row.save()
             else:
                 current = links.get(row.pk, {})
                 had = frozenset(_kinds_of_rule(row, current))
-                if had == kinds:
+                same_mode = row.mode == rule.mode
+                if had == kinds and same_mode and row.capacity == rule.capacity:
                     continue
-                # Only what comes in is checked: a kind the window already had may have left the schedule since.
-                refuse_unknown(kinds - had)
-                if row.appointment_type_id is not None:
-                    # The single kind of an older row moves to the link rows with the others.
-                    common.apply_changes(row, {"appointment_type_id": None})
+                # While the mode stays only what comes in is checked: a kind the window already had
+                # may have left the schedule since.
+                refuse_unknown(kinds - had if same_mode else kinds, rule.mode)
+                # The single kind of an older row moves to the link rows with the others.
+                common.apply_changes(row, {"mode": rule.mode, "capacity": rule.capacity, "appointment_type_id": None})
             for type_id, link in current.items():
                 if type_id not in kinds:
                     link.delete()
@@ -1923,18 +2271,28 @@ class SchedulingService(ServiceAPI):
         payment_kind: str | None = None,
         room_id: UUID | None = None,
         idempotency_key: str,
+        mode: str = "booked",
     ) -> AppointmentInfo:
         """Book an appointment; a fit-in skips the grid and the overlap check, never a block.
 
         The schedule is locked while the interval is checked: two bookings of the same slot never
         both win. The calendar of the schedule gets the event "<tipo> · <código>", never the patient.
-        The kind must be active and taken by the schedule, fit-in or not. Without ``duration_minutes``
-        the appointment lasts what the schedule gives the kind, then the duration of the kind; without
-        ``payment_kind`` it is paid for as the kind says.
+        The kind must be active and taken by the schedule in the mode, fit-in or not. Without
+        ``duration_minutes`` the appointment lasts what the schedule gives the kind, then the duration
+        of the kind; without ``payment_kind`` it is paid for as the kind says.
+
+        ``mode`` is explicit. "booked" takes the time asked for, which must be in a period of booked
+        time. "walk_in" has no time: ``starts_at`` is any instant of a walk-in period, and the
+        appointment takes the bounds of that period (its session) and keeps the planned duration.
+        A session takes its capacity or, without one, the durations that fit its open minutes; the
+        kind must be one the period lists. A fit-in skips the room of the session and the kinds of
+        the period, and with a time it is taken inside a walk-in period too. The calendar gets one
+        event per session ("Ordem de chegada · N pacientes"), not one per appointment.
         Autorização: alteração na agenda e leitura do paciente.
         Erros: NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda;
-        InvalidInput (horário sem fuso, duração fora de 5 a 480, forma de pagamento, observação
-        longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable",
+        InvalidInput (horário sem fuso, duração fora de 5 a 480, modo, forma de pagamento,
+        observação longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable",
+        "mode_mismatch" para hora num período de ordem de chegada ou o contrário, "session_full",
         "room_unavailable", "patient_inactive", "processing_restricted").
         Efeitos: código da sequência sem lacunas, consulta gravada, evento no calendário e
         ``med_scheduling.appointment_booked`` publicados; a mesma chave devolve a já marcada.
@@ -1952,6 +2310,7 @@ class SchedulingService(ServiceAPI):
                 payment_kind=payment_kind,
                 room_id=room_id,
                 idempotency_key=idempotency_key,
+                mode=mode,
             )
         )
 
@@ -1966,25 +2325,35 @@ class SchedulingService(ServiceAPI):
         schedule_id: UUID | None = None,
         idempotency_key: str | None = None,
         fit_in: bool | None = None,
+        mode: str | None = None,
     ) -> AppointmentInfo:
         """Move an appointment to another time (same duration), with CAS; to another schedule, a new one.
 
         In the same schedule the appointment keeps its code and goes back to "agendada"; to another
         schedule the current one is cancelled ("remarcada") and a new one is booked pointing to it.
-        It stays the fit-in or the regular appointment it was, unless ``fit_in`` says otherwise.
+        It stays the fit-in or the regular appointment it was, unless ``fit_in`` says otherwise, and
+        in the mode it had, unless ``mode`` says otherwise: to "walk_in", ``starts_at`` is an instant
+        of the walk-in period it goes to, as in ``book``. A walk-in appointment whose patient already
+        arrived is not moved, nor is an arrived one moved into a session: the queue keeps its numbers.
         The schedules are locked before the appointment, in the order of their ids.
         Autorização: alteração na agenda atual (e na nova, quando outra).
         Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "invalid_transition",
-        "slot_unavailable", "room_unavailable"; "type_not_allowed" quando a outra agenda não atende
-        o tipo).
-        Efeitos: atualiza (ou cancela e cria) a consulta e o evento do calendário e publica
-        ``appointment_rescheduled`` (ou ``appointment_cancelled`` e ``appointment_booked``).
+        "slot_unavailable", "mode_mismatch", "session_full", "room_unavailable"; "type_not_allowed"
+        quando a agenda de destino não atende o tipo, ou não naquele modo ou período).
+        Efeitos: atualiza (ou cancela e cria) a consulta e os eventos do calendário (o da consulta
+        ou o da sessão de onde sai e o da sessão aonde chega) e publica ``appointment_rescheduled``
+        (ou ``appointment_cancelled`` e ``appointment_booked``).
         """
-        from .transitions import CANCELLED, CONFIRMED, LIVE, SCHEDULED
+        from datetime import timedelta
+
+        from . import calendar_bridge
+        from .transitions import ARRIVED, CANCELLED, CONFIRMED, LIVE, SCHEDULED
 
         starts_at = _aware(starts_at, "starts_at")
         if fit_in is not None and type(fit_in) is not bool:
             raise InvalidInput({"fit_in": [gettext("Informe se é encaixe com verdadeiro ou falso.")]})
+        if mode is not None:
+            _check_mode(mode)
         # Read without a lock only to learn the schedule (it never changes), so that every operation
         # locks in the same order: the schedules by id, then the appointment.
         seen = _appointment(actor, appointment_id, write=True)
@@ -1995,18 +2364,26 @@ class SchedulingService(ServiceAPI):
         common.check_revision(row, expected_revision)
         if row.status not in LIVE or row.status == "in_progress":
             raise Conflict("invalid_transition", gettext("Esta consulta não pode mais ser remarcada."))
-        duration = row.ends_at - row.starts_at
+        target_mode = str(row.mode) if mode is None else mode
+        if row.status == ARRIVED and WALK_IN in (row.mode, target_mode):
+            raise Conflict(
+                "invalid_transition",
+                gettext("O paciente já chegou: na ordem de chegada a consulta não é remarcada."),
+            )
+        minutes = _planned(row)
         as_fit_in = row.is_fit_in if fit_in is None else fit_in
+        left = (str(row.mode), row.starts_at)
         if target_id != row.schedule_id:
             from django.utils import timezone as dj_timezone
-
-            from . import calendar_bridge
 
             row.status = CANCELLED
             row.cancel_reason = Appointment.CancelReason.RESCHEDULED
             row.cancelled_at = dj_timezone.now()
             row.save(update_fields={"status", "cancel_reason", "cancelled_at"})
-            calendar_bridge.remove_event(actor, source_key=str(row.pk))
+            if left[0] == WALK_IN:
+                _project_session(actor, locked[row.schedule_id], left[1])
+            else:
+                calendar_bridge.remove_event(actor, source_key=str(row.pk))
             _publish(actor, "cancelled", row)
             moved = _book(
                 actor,
@@ -2014,31 +2391,43 @@ class SchedulingService(ServiceAPI):
                 patient_id=row.patient_id,
                 appointment_type_id=row.appointment_type_id,
                 starts_at=starts_at,
-                duration_minutes=int(duration.total_seconds() // 60),
+                duration_minutes=minutes,
                 fit_in=as_fit_in,
                 notes=row.notes,
                 payment_kind=row.payment_kind,
                 room_id=None,
                 idempotency_key=idempotency_key or f"reschedule:{row.pk}:{starts_at.isoformat()}",
                 rescheduled_from=row,
+                mode=target_mode,
             )
             return appointment_info(moved)
         schedule = locked[row.schedule_id]
-        ends_at = starts_at + duration
-        _check_interval(
-            actor,
-            schedule,
-            row.appointment_type,
-            starts_at,
-            ends_at,
-            fit_in=as_fit_in,
-            room=row.room,
-            ignore=row.pk,
-        )
-        values = {"starts_at": starts_at, "ends_at": ends_at, "is_fit_in": as_fit_in}
+        kind = row.appointment_type
+        if target_mode != row.mode and _type_duration(actor, schedule, kind, mode=target_mode) is None:
+            raise _type_not_taken(target_mode)
+        if target_mode == WALK_IN:
+            period = _session_for(actor, schedule, starts_at)
+            _check_session(actor, schedule, kind, period, minutes, fit_in=as_fit_in, room=row.room, ignore=row.pk)
+            starts_at, ends_at = period.starts_at, period.ends_at
+        else:
+            ends_at = starts_at + timedelta(minutes=minutes)
+            _check_interval(actor, schedule, kind, starts_at, ends_at, fit_in=as_fit_in, room=row.room, ignore=row.pk)
+        values = {
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "is_fit_in": as_fit_in,
+            "mode": target_mode,
+            "duration_minutes": minutes,
+            # The number belongs to the session the appointment leaves.
+            "arrival_number": None,
+        }
         if row.status == CONFIRMED:
             values["status"] = SCHEDULED
         common.apply_changes(row, values)
+        if left[0] == WALK_IN:
+            _project_session(actor, schedule, left[1])
+        elif target_mode == WALK_IN:
+            calendar_bridge.remove_event(actor, source_key=str(row.pk))
         _project(actor, row, schedule)
         _publish(actor, "rescheduled", row)
         return appointment_info(row)
@@ -2052,8 +2441,9 @@ class SchedulingService(ServiceAPI):
         Autorização: alteração na agenda.
         Erros: NotFound; Forbidden; InvalidInput para motivo desconhecido ou observação acima de 200
         caracteres; Conflict("stale_revision", "invalid_transition").
-        Efeitos: grava a situação e o motivo, remove o evento do calendário e publica
-        ``med_scheduling.appointment_cancelled``.
+        Efeitos: grava a situação e o motivo, remove o evento do calendário (o de uma consulta de
+        ordem de chegada é o da sessão, que passa a contar uma a menos e some com a última) e
+        publica ``med_scheduling.appointment_cancelled``. O número de chegada fica com a cancelada.
         """
         from django.utils import timezone
 
@@ -2063,8 +2453,7 @@ class SchedulingService(ServiceAPI):
             raise InvalidInput({"reason": [gettext("Motivo desconhecido.")]})
         if len(str(note)) > 200:
             raise InvalidInput({"note": [gettext("Texto longo demais.")]})
-        row = _appointment(actor, appointment_id, write=True, lock=True)
-        common.check_revision(row, expected_revision)
+        schedule, row = _locked(actor, appointment_id, expected_revision)
         try:
             state = transitions.target("cancel", row.status)
         except transitions.InvalidTransition:
@@ -2078,7 +2467,10 @@ class SchedulingService(ServiceAPI):
                 "cancelled_at": timezone.now(),
             },
         )
-        calendar_bridge.remove_event(actor, source_key=str(row.pk))
+        if row.mode == WALK_IN:
+            _project_session(actor, schedule, row.starts_at)
+        else:
+            calendar_bridge.remove_event(actor, source_key=str(row.pk))
         _publish(actor, "cancelled", row)
         return appointment_info(row)
 
@@ -2133,9 +2525,10 @@ class SchedulingService(ServiceAPI):
     def day(self, *, actor: Any, date: date, schedule_ids: tuple[UUID, ...] | None = None) -> tuple[DayAgenda, ...]:
         """The appointments and free slots of one local day, for every schedule the actor reads.
 
-        The free slots are those of every window of the day, whatever the kinds a window is
-        restricted to; each slot says the kinds of its window. The number of queries does not grow
-        with the number of appointments or of windows.
+        The free slots are those of every window of booked time of the day, whatever the kinds a
+        window is restricted to; each slot says the kinds of its window. ``sessions`` are the
+        walk-in sessions of the day with their queues. The number of queries does not grow with the
+        number of appointments or of windows.
         Autorização: leitura de cada agenda.
         Erros: InvalidInput para data inválida ou mais de 20 agendas.
         Efeitos: nenhum.
@@ -2144,7 +2537,7 @@ class SchedulingService(ServiceAPI):
 
         from skeleton.access.policies import authorized_queryset
 
-        from . import calendar_bridge
+        from . import calendar_bridge, plan
         from .slots import typed_slots, windows_of
         from .transitions import LIVE
 
@@ -2189,8 +2582,9 @@ class SchedulingService(ServiceAPI):
         for schedule in schedules:
             live = [(row.starts_at, row.ends_at) for row in appointments[schedule.pk] if row.status in LIVE]
             person = schedule.professional.user_id if schedule.professional_id else None
+            windows = windows_of(rules[schedule.pk], rule_kinds)
             free = typed_slots(
-                windows=windows_of(rules[schedule.pk], rule_kinds),
+                windows=windows,
                 taken=blocks[schedule.pk] + live + busy.get(person, []),
                 start_date=day,
                 end_date=day,
@@ -2209,9 +2603,116 @@ class SchedulingService(ServiceAPI):
                         Slot(slot_start, slot_end, schedule.pk, tuple(sorted(kinds, key=str)))
                         for slot_start, slot_end, kinds in free
                     ),
+                    _sessions(
+                        schedule.pk,
+                        day,
+                        plan.periods_on(windows, day, schedule.practice.timezone),
+                        appointments[schedule.pk],
+                        blocks[schedule.pk],
+                    ),
                 )
             )
         return tuple(result)
+
+    @service_method(read_only=True, since="0.1.0")
+    def day_plan(self, *, actor: Any, schedule_id: UUID, start_date: date, end_date: date) -> tuple[PeriodPlan, ...]:
+        """The periods a schedule works between two local dates (inclusive, at most 62 days), with what is taken.
+
+        Each period says its mode, its capacity, the kinds it takes (none: every kind of the
+        schedule) and how many appointments and minutes it already holds.
+        Autorização: leitura da agenda.
+        Erros: NotFound para agenda ilegível; InvalidInput para intervalo invertido ou acima de 62 dias.
+        Efeitos: nenhum.
+        """
+        from datetime import timedelta
+
+        from skeleton.access.policies import authorized_queryset
+
+        from . import plan
+        from .transitions import CANCELLED
+
+        if not isinstance(start_date, date) or not isinstance(end_date, date) or end_date < start_date:
+            raise InvalidInput({"end_date": [gettext("O fim precisa ser depois do início.")]})
+        if (end_date - start_date).days >= MAX_SLOT_DAYS:
+            raise InvalidInput({"end_date": [gettext("Consulte no máximo 62 dias por vez.")]})
+        schedule = _schedule(actor, schedule_id)
+        timezone = schedule.practice.timezone
+        windows = _schedule_windows(actor, schedule)
+        start, end = _day_window(start_date, end_date, timezone)
+        blocked = _blocked(actor, schedule, start, end)
+        rows = list(
+            authorized_queryset(Appointment, user=actor, action="read")
+            .filter(schedule=schedule, starts_at__lt=end, ends_at__gt=start, is_fit_in=False)
+            .exclude(status=CANCELLED)
+            .only("mode", "starts_at", "ends_at", "duration_minutes")
+        )
+        result = []
+        day = start_date
+        while day <= end_date:
+            for period in plan.periods_on(windows, day, timezone):
+                if period.mode == WALK_IN:
+                    planned = [
+                        _planned(row) for row in rows if row.mode == WALK_IN and row.starts_at == period.starts_at
+                    ]
+                else:
+                    planned = [
+                        _planned(row)
+                        for row in rows
+                        if row.mode != WALK_IN and period.starts_at <= row.starts_at < period.ends_at
+                    ]
+                result.append(
+                    PeriodPlan(
+                        schedule.pk,
+                        day,
+                        period.start_minute,
+                        period.end_minute,
+                        as_utc(period.starts_at),
+                        as_utc(period.ends_at),
+                        period.mode,
+                        period.capacity,
+                        tuple(sorted(period.kinds, key=str)),
+                        len(planned),
+                        sum(planned),
+                        plan.open_minutes(period, blocked),
+                        period.mode == WALK_IN and plan.is_full(period, planned, MIN_DURATION, blocked=blocked),
+                    )
+                )
+            day += timedelta(days=1)
+        return tuple(result)
+
+    @service_method(read_only=True, since="0.1.0")
+    def queue(self, *, actor: Any, schedule_id: UUID, date: date) -> tuple[QueueSession, ...]:
+        """The walk-in sessions of a schedule on one local day, each with its queue.
+
+        Who waits is in the call order: legal priority first, then the arrival number. The priority
+        mark is sensitive and leaves only here and in the detail of an appointment. The patient is
+        an id: the name comes from the patients service, for whoever reads the patient.
+        Autorização: leitura da agenda.
+        Erros: NotFound para agenda inexistente, de outra organização ou ilegível; InvalidInput para data inválida.
+        Efeitos: nenhum.
+        """
+        from django.utils import timezone as dj_timezone
+
+        from skeleton.access.policies import authorized_queryset
+
+        from . import plan
+
+        day = date
+        if not isinstance(day, type(dj_timezone.localdate())):
+            raise InvalidInput({"date": [gettext("Informe uma data.")]})
+        schedule = _schedule(actor, schedule_id)
+        timezone = schedule.practice.timezone
+        start, end = _day_window(day, day, timezone)
+        rows = authorized_queryset(Appointment, user=actor, action="read").filter(
+            schedule=schedule, mode=WALK_IN, starts_at__gte=start, starts_at__lt=end
+        )
+        return _sessions(
+            schedule.pk,
+            day,
+            plan.periods_on(_schedule_windows(actor, schedule), day, timezone),
+            list(rows),
+            _blocked(actor, schedule, start, end),
+        )
 
     # ------------------------------------------------------------------ attendance
 
@@ -2226,16 +2727,57 @@ class SchedulingService(ServiceAPI):
         return appointment_info(_transition(actor, appointment_id, expected_revision, "confirm"))
 
     @service_method(read_only=False, since="0.1.0")
-    def check_in(self, *, actor: Any, appointment_id: UUID, expected_revision: int) -> AppointmentInfo:
+    def check_in(
+        self, *, actor: Any, appointment_id: UUID, expected_revision: int, priority: bool = False
+    ) -> AppointmentInfo:
         """Register that the patient arrived, with CAS, and tell the professional.
 
+        In a walk-in session the arrival takes the next number of the session, given with the
+        schedule locked: a number is never repeated nor used again, even after a cancellation.
+        ``priority`` marks the legal priority (Lei 10.048), which puts the patient ahead in the
+        queue; False leaves the mark as it is (``set_priority`` takes it off). The mark is sensitive:
+        it is in no event and in no notification.
         Autorização: alteração na agenda.
-        Erros: NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
-        Efeitos: grava a situação e a hora, publica ``med_scheduling.appointment_arrived`` e notifica
-        o profissional da agenda (uma vez por consulta; a notificação leva o código, nunca o paciente).
+        Erros: NotFound; Forbidden; InvalidInput para prioridade que não seja verdadeiro ou falso;
+        Conflict("stale_revision", "invalid_transition"), sem dar número.
+        Efeitos: grava a situação, a hora, o número de chegada e a prioridade, publica
+        ``med_scheduling.appointment_arrived`` e notifica o profissional da agenda (uma vez por
+        consulta; a notificação leva o código, nunca o paciente nem a prioridade).
         """
-        row = _transition(actor, appointment_id, expected_revision, "check_in")
+        from . import queue
+
+        _check_flag(priority, "priority")
+
+        def arrival(schedule: Schedule, row: Appointment) -> dict[str, Any]:
+            values: dict[str, Any] = {"is_priority": row.is_priority or priority}
+            if row.mode == WALK_IN:
+                given = Appointment.all_objects.filter(schedule=schedule, mode=WALK_IN, starts_at=row.starts_at)
+                values["arrival_number"] = queue.next_number(given.values_list("arrival_number", flat=True))
+            return values
+
+        row = _transition(actor, appointment_id, expected_revision, "check_in", extra=arrival)
         _notify_arrival(actor, row)
+        return appointment_info(row)
+
+    @service_method(read_only=False, since="0.1.0")
+    def set_priority(
+        self, *, actor: Any, appointment_id: UUID, priority: bool, expected_revision: int
+    ) -> AppointmentInfo:
+        """Set or take off the legal priority mark of an appointment not yet started, with CAS.
+
+        The mark is sensitive: the answer does not carry it (``appointment`` and ``queue`` do).
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; InvalidInput para prioridade que não seja verdadeiro ou falso;
+        Conflict("stale_revision"; "invalid_transition" fora de agendada, confirmada ou aguardando).
+        Efeitos: grava a marca; nenhum evento nem notificação.
+        """
+        from .transitions import ARRIVED, CONFIRMED, SCHEDULED
+
+        _check_flag(priority, "priority")
+        _schedule_row, row = _locked(actor, appointment_id, expected_revision)
+        if row.status not in (SCHEDULED, CONFIRMED, ARRIVED):
+            raise Conflict("invalid_transition", gettext("A prioridade só muda antes do atendimento começar."))
+        common.apply_changes(row, {"is_priority": priority})
         return appointment_info(row)
 
     @service_method(read_only=False, since="0.1.0")
@@ -2260,7 +2802,7 @@ class SchedulingService(ServiceAPI):
 
     @service_method(read_only=False, since="0.1.0")
     def mark_no_show(self, *, actor: Any, appointment_id: UUID, expected_revision: int) -> AppointmentInfo:
-        """Mark that the patient did not come (only after the start time), with CAS.
+        """Mark that the patient did not come, with CAS: after the start time, or after the end of a walk-in period.
 
         Autorização: alteração na agenda.
         Erros: NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
@@ -2435,16 +2977,19 @@ class SchedulingService(ServiceAPI):
         expected_revision: int,
         idempotency_key: str,
         duration_minutes: int | None = None,
+        mode: str = "booked",
     ) -> AppointmentInfo:
         """Book the appointment of a waiting patient and mark the entry booked, in one transaction.
 
         The kind is the one of the entry; without ``duration_minutes`` the appointment lasts what the
-        schedule gives that kind.
+        schedule gives that kind. ``mode`` is the one of ``book``: "walk_in" puts the patient in the
+        session of the walk-in period that holds ``starts_at``.
         Autorização: alteração no consultório e na agenda.
         Erros: NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada ou com duração
         fora de 5 a 480 minutos;
-        Conflict("stale_revision", "invalid_transition", "type_not_allowed", "slot_unavailable"): com
-        o horário ocupado, ou o tipo não atendido pela agenda, a entrada continua aguardando.
+        Conflict("stale_revision", "invalid_transition", "type_not_allowed", "slot_unavailable",
+        "mode_mismatch", "session_full"): com o horário ocupado, a sessão lotada ou o tipo não
+        atendido pela agenda, a entrada continua aguardando.
         Efeitos: os de ``book`` e a entrada em "agendado" com a consulta.
         """
         entry = common.row(actor, WaitlistEntry, entry_id, field="entry_id", write=True, lock=True)
@@ -2465,6 +3010,7 @@ class SchedulingService(ServiceAPI):
             payment_kind=None,
             room_id=None,
             idempotency_key=idempotency_key,
+            mode=mode,
         )
         common.apply_changes(entry, {"status": WaitlistEntry.Status.BOOKED, "booked_appointment_id": appointment.pk})
         return appointment_info(appointment)
