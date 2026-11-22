@@ -113,7 +113,9 @@ def test_the_empty_lines_are_marked_for_the_page():
     assert [(line["number"], line["empty"]) for line in blank.lines()] == [(1, True), (2, True), (3, True)]
     typed = periods_form({"weekdays": ["0"], "start_1": "08:00", "end_1": "09:00", "end_3": "11:00"})
     assert [line["empty"] for line in typed.lines()] == [False, True, False]
-    assert list(typed.fields)[:8] == ["weekdays", "start_1", "end_1", "start_2", "end_2", "start_3", "end_3", "kinds"]
+    # The hours first, then how the period sees its patients, then the kinds it takes.
+    hours = ["start_1", "end_1", "start_2", "end_2", "start_3", "end_3"]
+    assert list(typed.fields)[:10] == ["weekdays", *hours, "mode", "capacity", "kinds"]
 
 
 def test_one_period_is_changed_against_the_others(subtests):

@@ -6,7 +6,7 @@
 <div class="table-scroll"><table>
 <caption class="sr-only">{% translate "Consultas do paciente" %}</caption>
 <thead><tr><th scope="col" class="col-date">{% translate "Data" %}</th><th scope="col">{% translate "Código" %}</th><th scope="col">{% translate "Situação" %}</th></tr></thead>
-<tbody>{% for item in rows %}<tr><td class="col-date"><a href="{% url 'med_scheduling:appointment' organization_id item.row.sysid %}">{{ item.local|date:"SHORT_DATETIME_FORMAT" }}</a></td><td>{{ item.row.code }}</td><td>{% with label=item.row.status|scheduling_label:"status" %}{{ item.row.status|status_badge:label }}{% endwith %}</td></tr>
+<tbody>{% for item in rows %}<tr><td class="col-date"><a href="{% url 'med_scheduling:appointment' organization_id item.row.sysid %}">{% if item.walk_in %}{{ item.local|date:"SHORT_DATE_FORMAT" }} · {% translate "Ordem de chegada" %} {{ item.hours }}{% else %}{{ item.local|date:"SHORT_DATETIME_FORMAT" }}{% endif %}</a></td><td>{{ item.row.code }}</td><td>{% with label=item.row.status|scheduling_label:"status" %}{{ item.row.status|status_badge:label }}{% endwith %}</td></tr>
 {% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=3 message=_("Nenhuma consulta que você possa ver.") %}{% endfor %}</tbody>
 </table></div>
 {% endblock %}

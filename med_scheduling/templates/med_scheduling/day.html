@@ -1,13 +1,14 @@
 {% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Agenda do dia" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}">{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{{ practice.name }}</p><h1>{% blocktranslate with day=day|date:"l, d/m/Y" %}Agenda de {{ day }}{% endblocktranslate %}</h1><p class="page-description">{% translate "Consultas e horários livres de cada agenda que você vê." %}</p></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{{ practice.name }}</p><h1>{% blocktranslate with day=day|date:"l, d/m/Y" %}Agenda de {{ day }}{% endblocktranslate %}</h1><p class="page-description">{% translate "Consultas, períodos de ordem de chegada e horários livres de cada agenda que você vê." %}</p></div>
 <nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="?date={{ previous|date:'Y-m-d' }}">{% translate "Dia anterior" %}</a><a class="btn btn-secondary" href="?date={{ following|date:'Y-m-d' }}">{% translate "Próximo dia" %}</a><a class="btn btn-primary" href="{% url 'med_scheduling:book' organization_id %}">{% translate "Marcar consulta" %}</a></nav></div>
 {% include "med_scheduling/_nav.html" %}
 {% if not columns %}<div class="empty-state"><p>{% translate "Nenhuma agenda para mostrar." %}</p></div>{% endif %}
 <div class="day-columns">{% for column in columns %}
 <section class="card" aria-labelledby="schedule-{{ column.schedule.sysid }}"><h2 id="schedule-{{ column.schedule.sysid }}"><a href="{% url 'med_scheduling:week' organization_id column.schedule.sysid %}?start={{ day|date:'Y-m-d' }}">{{ column.schedule.name }}</a></h2>
-{% for item in column.appointments %}{% include "med_scheduling/_appointment_item.html" %}{% empty %}<p class="helptext">{% translate "Nenhuma consulta." %}</p>{% endfor %}
+{% for item in column.appointments %}{% include "med_scheduling/_appointment_item.html" %}{% empty %}{% if not column.sessions %}<p class="helptext">{% translate "Nenhuma consulta." %}</p>{% endif %}{% endfor %}
+{% for card in column.sessions %}{% include "med_scheduling/_session.html" %}{% endfor %}
 {% if column.free %}<h3 class="section-heading">{% translate "Horários livres" %}</h3><div class="slot-list">{% for slot in column.free %}<span class="badge badge-neutral"><time datetime="{{ slot|date:'c' }}">{{ slot|time:"H:i" }}</time></span>{% endfor %}</div>{% endif %}
 </section>{% endfor %}</div>
 {% endblock %}

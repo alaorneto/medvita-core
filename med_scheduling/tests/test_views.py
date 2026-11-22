@@ -1,7 +1,7 @@
 """Pages of the scheduling app: booking and attendance through the screens, authorization, safe HTML."""
 
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,7 +12,7 @@ from django.urls import reverse
 from applications.med_patients.service_api import PatientService
 
 from ..service_api import AvailabilityRuleInput, ScheduleTypeInput, SchedulingService
-from .booking import at, book, prepare
+from .booking import SP, at, book, prepare
 
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)", re.IGNORECASE)
 UNSAFE = re.compile(r"\sstyle=|\son[a-z]+=", re.IGNORECASE)
@@ -52,6 +52,8 @@ def detail(ready, appointment_id, user=None):
 def test_pages_use_only_the_services():
     source = (APP_DIR / "views.py").read_text(encoding="utf-8")
     assert ".objects" not in source and "authorized_queryset" not in source and "from .services" not in source
+    # Every page is on the practice's clock: none takes the core's decorator directly.
+    assert "@tenant_page" not in source and source.count("@practice_page") >= 23
 
 
 def test_every_page_renders_safe_html(ready, subtests):
@@ -63,6 +65,7 @@ def test_every_page_renders_safe_html(ready, subtests):
         "book": url(ready, "book") + f"?patient={ready.patient.sysid}",
         "appointment": url(ready, "appointment", appointment.sysid),
         "reception": url(ready, "reception"),
+        "queue": url(ready, "queue", ready.schedule.sysid, ready.monday.isoformat()),
         "waitlist": url(ready, "waitlist"),
         "settings": url(ready, "settings"),
         "type-edit": url(ready, "type-edit", ready.kind.sysid),
@@ -233,7 +236,7 @@ def test_the_appointment_takes_the_color_of_its_type(ready, subtests, monkeypatc
             actor=admin, code="retorno", name="Retorno", duration_minutes=30, color="green", idempotency_key="green"
         )
     blue = book(ready, 9)
-    noon_today = datetime.combine(timezone.localdate(), time(12), tzinfo=at(ready, 9).tzinfo)
+    noon_today = datetime.combine(timezone.localdate(timezone=SP), time(12), tzinfo=SP)  # the practice's day
     booked = {}
     with ready.as_user(ready.a.reception) as actor:
         for key, starts_at, fit_in in (("monday", at(ready, 10), False), ("today", noon_today, True)):
@@ -467,6 +470,8 @@ def test_the_kinds_of_a_schedule_are_chosen_on_its_page(ready, subtests):
     client = client_for(ready.a.reception)
     page = url(ready, "schedule", ready.schedule.sysid)
     on, minutes = f"types-on_{insured.sysid.hex}", f"types-minutes_{insured.sysid.hex}"
+    # The two modes come ticked on the page; their own cases are in test_walk_in_views.
+    modes = {f"types-booked_{insured.sysid.hex}": "on", f"types-walk_in_{insured.sysid.hex}": "on"}
 
     def save(who=client, revision=None, **fields):
         fields = {"form": "types", "revision": revision or schedule_revision(ready), **fields}
@@ -477,7 +482,7 @@ def test_the_kinds_of_a_schedule_are_chosen_on_its_page(ready, subtests):
         assert "Esta agenda atende todos os tipos de atendimento ativos" in html
         assert re.search(r'name="types-scope" value="all"[^>]*checked', html)
     with subtests.test("the ticked kinds with the duration of the schedule"):
-        response = save(**{"types-scope": "chosen", on: "on", minutes: "40"})
+        response = save(**{"types-scope": "chosen", on: "on", minutes: "40", **modes})
         assert response.status_code == 200 and "Tipos de atendimento da agenda salvos" in response.content.decode()
         assert schedule_kinds(ready) == [(insured.sysid, 40, 40)]
         html = assert_safe(client.get(page))
@@ -488,7 +493,7 @@ def test_the_kinds_of_a_schedule_are_chosen_on_its_page(ready, subtests):
         response = save(**{"types-scope": "chosen"})
         assert response.status_code == 400 and "Marque ao menos um tipo de atendimento" in response.content.decode()
     with subtests.test("a duration out of range"):
-        assert save(**{"types-scope": "chosen", on: "on", minutes: "4"}).status_code == 400
+        assert save(**{"types-scope": "chosen", on: "on", minutes: "4", **modes}).status_code == 400
     with subtests.test("a page that opened before another change saves nothing"):
         response = save(revision=1, **{"types-scope": "all"})
         assert "A agenda mudou desde que a página abriu" in response.content.decode()
@@ -576,10 +581,11 @@ def test_booking_offers_the_kinds_of_the_schedule_with_the_suggested_duration(re
         assert response.status_code == 302
         latest = max(booked(ready), key=lambda row: row.starts_at)
         assert (latest.starts_at, latest.ends_at) == (at(ready, 10), at(ready, 10, 40))
-    with subtests.test("a schedule that books no kind says so"):
+    with subtests.test("a kind the schedule takes only by order of arrival has no free time"):
         take(ready, ScheduleTypeInput(insured.sysid, allow_booked=False))
-        html = assert_safe(client.get(url(ready, "book"), base))
-        assert offered_kinds(html) == [] and "não atende nenhum tipo de atendimento com hora marcada" in html
+        html = assert_safe(client.get(url(ready, "book"), {**query, "duration": "", "suggested_duration": ""}))
+        assert offered_kinds(html) == ["Unimed · 20 min"] and offered_slots(html) == set()
+        assert "A agenda não atende Unimed com hora marcada." in html
 
 
 def test_booking_from_the_waitlist_keeps_the_kind_of_the_entry(ready):
@@ -886,3 +892,54 @@ def test_day_page_query_count_does_not_grow_with_the_periods(ready):
         )
     )
     assert count() == one
+
+
+def test_the_pages_follow_the_clock_of_the_practice_not_of_the_reader(ready, subtests, monkeypatch):
+    """The reader's time zone is the instance's, UTC; the practice's is São Paulo, where 09:00 is 12:00 UTC."""
+    appointment = book(ready, 9)
+    client = client_for(ready.a.reception)
+    monday = f"{ready.monday:%d/%m/%Y}"
+    with subtests.test("the appointment"):
+        html = assert_safe(client.get(url(ready, "appointment", appointment.sysid)))
+        described = re.search(r'<p class="page-description">(.*?)</p>', html, re.S).group(1)
+        assert monday in described and "09:00–09:30" in described
+    with subtests.test("the day, with its free hours"):
+        html = assert_safe(client.get(url(ready, "day"), {"date": ready.monday.isoformat()}))
+        hours = set(re.findall(r">(\d\d:\d\d)</time>", html))
+        assert {"08:00", "09:00", "11:30"} <= hours and max(hours) == "11:30"
+    with subtests.test("the week"):
+        html = assert_safe(client.get(url(ready, "week", ready.schedule.sysid), {"start": ready.monday.isoformat()}))
+        assert ">09:00</time>" in html and ">12:00</time>" not in html
+    with subtests.test("the free hours of the booking page"):
+        query = {
+            "patient": ready.patient.sysid,
+            "schedule": ready.schedule.sysid,
+            "appointment_type": ready.kind.sysid,
+            "day": ready.monday.isoformat(),
+        }
+        html = assert_safe(client.get(url(ready, "book"), query))
+        offered = re.findall(r'name="slot" value="([^"]+)"[^>]*> (\d\d:\d\d)</label>', html)
+        assert offered and all(
+            f"{datetime.fromisoformat(value).astimezone(SP):%H:%M}" == label for value, label in offered
+        )
+    with subtests.test("today is the day of the practice"):
+        # Tuesday 01:30 UTC is still Monday 22:30 at the practice.
+        late = datetime.combine(ready.monday + timedelta(days=1), time(1, 30), tzinfo=UTC)
+        monkeypatch.setattr("django.utils.timezone.now", lambda: late)
+        client = client_for(ready.a.reception)
+        html = assert_safe(client.get(url(ready, "day")))
+        assert monday in html and ">09:00</time>" in html
+        html = assert_safe(client.get(url(ready, "reception")))
+        assert ">09:00</time>" in html and "Maria Paciente Secreta" in html
+
+
+def test_the_pages_open_before_the_practice_is_set_up(clinic):
+    client = client_for(clinic.a.admin)
+
+    def address(name):
+        return reverse(f"med_scheduling:{name}", args=(clinic.org_a.pk,))
+
+    assert_safe(client.get(address("home")))
+    assert_safe(client.get(address("setup")))
+    response = client.get(address("day"))
+    assert response.status_code == 302 and response["Location"] == address("home")

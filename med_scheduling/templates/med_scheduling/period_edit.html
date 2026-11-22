@@ -1,13 +1,14 @@
 {% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Período da grade" %} · {{ schedule.name }} · {{ site_name }}{% endblock %}
-{% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}">{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}"><script src="{% static 'med_scheduling/med_scheduling.js' %}" defer></script>{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_scheduling:schedules' organization_id %}">{% translate "Agendas" %}</a> · <a href="{% url 'med_scheduling:schedule' organization_id schedule.sysid %}">{{ schedule.name }}</a></p><h1>{% blocktranslate with day=period.weekday start=period.start end=period.end %}{{ day }}, {{ start }}–{{ end }}{% endblocktranslate %}</h1><p class="page-description">{% translate "Um período da grade semanal. As consultas já marcadas nele não mudam." %}</p></div></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_scheduling:schedules' organization_id %}">{% translate "Agendas" %}</a> · <a href="{% url 'med_scheduling:schedule' organization_id schedule.sysid %}">{{ schedule.name }}</a></p><h1>{% blocktranslate with day=period.weekday start=period.start end=period.end %}{{ day }}, {{ start }}–{{ end }}{% endblocktranslate %}</h1><p class="page-description">{% translate "Um período da grade semanal: o horário, o modo de atendimento e os tipos que ele recebe. As consultas já marcadas nele não mudam." %}</p></div></div>
 {% include "med_scheduling/_nav.html" %}
 <section class="card max-w-3xl" aria-labelledby="period-heading"><h2 id="period-heading">{% translate "Alterar o período" %}</h2>
 <form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ schedule.revision }}">
 {% include "skeleton/web/components/form-errors.html" %}
 <div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.weekday %}<div class="period-line">{% include "skeleton/web/components/form-field.html" with field=form.start %}{% include "skeleton/web/components/form-field.html" with field=form.end %}</div></div>
 <p class="helptext mb-4">{% translate "Fim às 00:00 vale o fim do dia." %}</p>
+<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.mode hide_marks=True %}<div data-walk-in-only>{% include "skeleton/web/components/form-field.html" with field=form.capacity %}</div></div>
 {% if form.kinds.field.choices %}{% include "med_scheduling/_boxes.html" with field=form.kinds %}{% endif %}
 {% if leaving %}<p class="helptext mb-4">{% blocktranslate with names=leaving|join:", " %}Este período ainda lista tipos que a agenda não atende mais ({{ names }}). Ao salvar, eles saem do período.{% endblocktranslate %}</p>{% endif %}
 <div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.valid_from %}{% include "skeleton/web/components/form-field.html" with field=form.valid_until %}</div>

@@ -11,7 +11,7 @@ from django import forms
 from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 
-from .models import COLORS, Appointment, PaymentKind, Professional, Room, ScheduleBlock, WaitlistEntry
+from .models import COLORS, Appointment, Mode, PaymentKind, Professional, Room, ScheduleBlock, WaitlistEntry
 from .slots import collide
 
 WEEKDAYS = (
@@ -38,7 +38,10 @@ class BookForm(forms.Form):
 
     ``suggested_duration`` carries the duration the page suggested, so the page tells a duration
     somebody typed from a suggestion nobody touched (which follows the kind when the kind changes).
+    ``slot`` is the one choice of the page: a free time, or a walk-in period (``walk_in_value``).
     """
+
+    WALK_IN_PREFIX = "walk_in:"
 
     schedule = forms.ChoiceField(label=_("Agenda"))
     appointment_type = forms.ChoiceField(
@@ -61,7 +64,23 @@ class BookForm(forms.Form):
     )
     slot = forms.CharField(label=_("Horário"), required=False, widget=forms.HiddenInput)
     fit_in = forms.BooleanField(label=_("Encaixe (fora da grade)"), required=False)
-    fit_in_time = forms.TimeField(label=_("Hora do encaixe"), required=False, widget=_time())
+    fit_in_time = forms.TimeField(
+        label=_("Hora do encaixe"),
+        required=False,
+        widget=_time(),
+        help_text=_(
+            "Para encaixar com hora marcada. Para encaixar num período de ordem de chegada, "
+            "escolha o período acima e deixe a hora em branco."
+        ),
+    )
+    arrived = forms.BooleanField(label=_("O paciente já está aqui: registrar a chegada agora"), required=False)
+    priority = forms.BooleanField(
+        label=_("Atendimento prioritário (Lei 10.048)"),
+        required=False,
+        help_text=_(
+            "Põe o paciente à frente na fila da ordem de chegada. A marca aparece só na fila e na página da consulta."
+        ),
+    )
     # Not shown: the appointment is paid for as its kind says. Kept for whoever posts it.
     payment_kind = forms.ChoiceField(label=_("Forma de pagamento"), choices=PaymentKind.choices, required=False)
     notes = forms.CharField(
@@ -76,10 +95,29 @@ class BookForm(forms.Form):
         self.fields["schedule"].choices = [(str(item.sysid), item.name) for item in schedules if item.writable]
         self.fields["appointment_type"].choices = list(type_choices)
 
+    @classmethod
+    def walk_in_value(cls, starts_at) -> str:
+        """The value of ``slot`` that chooses the walk-in period starting at the instant."""
+        return f"{cls.WALK_IN_PREFIX}{starts_at.isoformat()}"
+
 
 class RescheduleForm(forms.Form):
+    """The new day and time of an appointment; ``walk_in`` says the appointment has no time of its own today."""
+
     day = forms.DateField(label=_("Nova data"), widget=_date())
     time = forms.TimeField(label=_("Nova hora"), widget=_time())
+    mode = forms.ChoiceField(label=_("Modo de atendimento"), required=False)
+
+    def __init__(self, *args, walk_in=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        current = Mode.WALK_IN if walk_in else Mode.BOOKED
+        self.fields["mode"].choices = [
+            ("", gettext("Como está (%(mode)s)") % {"mode": current.label}),
+            *((value, label) for value, label in Mode.choices if value != current),
+        ]
+        self.fields["time"].help_text = _(
+            "Na ordem de chegada a consulta não tem hora: informe qualquer hora dentro do período de destino."
+        )
 
 
 class CancelForm(forms.Form):
@@ -170,6 +208,12 @@ class ScheduleTypesForm(forms.Form):
                 max_value=480,
                 required=False,
             )
+            self.fields[self.booked(kind)] = forms.BooleanField(
+                label=gettext("%(name)s com hora marcada") % {"name": kind.name}, required=False, initial=True
+            )
+            self.fields[self.walk_in(kind)] = forms.BooleanField(
+                label=gettext("%(name)s por ordem de chegada") % {"name": kind.name}, required=False, initial=True
+            )
 
     @staticmethod
     def on(kind) -> str:
@@ -179,21 +223,57 @@ class ScheduleTypesForm(forms.Form):
     def minutes(kind) -> str:
         return f"minutes_{kind.sysid.hex}"
 
+    @staticmethod
+    def booked(kind) -> str:
+        return f"booked_{kind.sysid.hex}"
+
+    @staticmethod
+    def walk_in(kind) -> str:
+        return f"walk_in_{kind.sysid.hex}"
+
     def rows(self) -> list[dict]:
-        return [{"kind": kind, "on": self[self.on(kind)], "minutes": self[self.minutes(kind)]} for kind in self.kinds]
+        return [
+            {
+                "kind": kind,
+                "on": self[self.on(kind)],
+                "minutes": self[self.minutes(kind)],
+                "booked": self[self.booked(kind)],
+                "walk_in": self[self.walk_in(kind)],
+            }
+            for kind in self.kinds
+        ]
 
     def clean(self):
         data = super().clean()
-        if data.get("scope") == self.CHOSEN and not any(data.get(self.on(kind)) for kind in self.kinds):
+        if data.get("scope") != self.CHOSEN:
+            return data
+        ticked = [kind for kind in self.kinds if data.get(self.on(kind))]
+        if not ticked:
             self.add_error(None, _("Marque ao menos um tipo de atendimento, ou escolha atender todos."))
+        for kind in ticked:
+            if not (data.get(self.booked(kind)) or data.get(self.walk_in(kind))):
+                self.add_error(
+                    self.booked(kind),
+                    gettext("Marque como a agenda atende %(name)s: com hora marcada, por ordem de chegada ou os dois.")
+                    % {"name": kind.name},
+                )
         return data
 
     def chosen(self) -> list[tuple]:
-        """(kind id, own duration or None) of each ticked kind; empty when the schedule takes them all."""
+        """(kind id, own duration or None, booked, walk-in) of each ticked kind; empty when the schedule takes them all."""
         data = self.cleaned_data
         if data["scope"] == self.ALL:
             return []
-        return [(kind.sysid, data.get(self.minutes(kind))) for kind in self.kinds if data.get(self.on(kind))]
+        return [
+            (
+                kind.sysid,
+                data.get(self.minutes(kind)),
+                bool(data.get(self.booked(kind))),
+                bool(data.get(self.walk_in(kind))),
+            )
+            for kind in self.kinds
+            if data.get(self.on(kind))
+        ]
 
 
 class ScheduleForm(forms.Form):
@@ -242,6 +322,8 @@ class Period:
     valid_until: date | None
     kinds: tuple[UUID, ...] = ()
     field: str = ""  # the field of the form the period was typed in
+    mode: str = Mode.BOOKED.value
+    capacity: int | None = None
 
 
 class Boxes(forms.CheckboxSelectMultiple):
@@ -252,12 +334,34 @@ class Boxes(forms.CheckboxSelectMultiple):
 
 
 class PeriodBase(forms.Form):
-    """What every period of the weekly grid has: the kinds it takes and when it is valid.
+    """What every period of the weekly grid has: its mode, the kinds it takes and when it is valid.
 
     ``kinds`` are the kinds the schedule takes; ``existing`` the periods the grid already has (but
     the one being changed), against which an overlap is told on the field that caused it.
+    ``walk_in_kinds`` and ``booked_kinds`` are the ids of the kinds the schedule takes in each mode.
     """
 
+    # The data-* names are the hooks of the optional script, which folds "Vagas" away in booked time.
+    mode = forms.ChoiceField(
+        label=_("Modo de atendimento"),
+        choices=Mode.choices,
+        initial=Mode.BOOKED,
+        required=False,  # A form sent without it is of booked time, as every period was before the modes.
+        widget=forms.Select(attrs={"data-period-mode": ""}),
+        help_text=_(
+            "Com hora marcada, cada paciente tem o seu horário. Por ordem de chegada, os pacientes são "
+            "marcados para o período e atendidos na ordem em que chegam."
+        ),
+    )
+    capacity = forms.IntegerField(
+        label=_("Vagas"),
+        min_value=1,
+        max_value=500,
+        required=False,
+        help_text=_(
+            "Só na ordem de chegada: quantos pacientes o período comporta. Em branco, comporta o que couber no tempo dele."
+        ),
+    )
     kinds = forms.MultipleChoiceField(
         label=_("Tipos de atendimento do período"),
         required=False,
@@ -272,10 +376,37 @@ class PeriodBase(forms.Form):
         help_text=_("Em branco, o período vale sem data para terminar."),
     )
 
-    def __init__(self, *args, kinds=(), existing=(), **kwargs):
+    def __init__(self, *args, kinds=(), existing=(), booked_kinds=None, walk_in_kinds=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["kinds"].choices = [(str(kind.sysid), kind.name) for kind in kinds]
         self.existing = tuple(existing)
+        self._names = {kind.sysid: kind.name for kind in kinds}
+        every = set(self._names)
+        self._taken = {
+            Mode.BOOKED.value: every if booked_kinds is None else set(booked_kinds),
+            Mode.WALK_IN.value: every if walk_in_kinds is None else set(walk_in_kinds),
+        }
+
+    def _mode(self, data: dict[str, Any]) -> tuple[str, int | None] | None:
+        """The mode and the capacity typed; ``None`` (with the error on the field) when they do not go together."""
+        if "mode" in self.errors or "capacity" in self.errors:
+            return None
+        mode, capacity = data.get("mode") or Mode.BOOKED.value, data.get("capacity")
+        if mode != Mode.WALK_IN and capacity is not None:
+            self.add_error(
+                "capacity",
+                _("Vagas valem só na ordem de chegada. Apague as vagas, ou troque o modo de atendimento do período."),
+            )
+            return None
+        refused = [self._names[kind] for kind in self._kinds(data) if kind not in self._taken[mode]]
+        if refused:
+            texts = {
+                Mode.WALK_IN.value: gettext("A agenda não atende por ordem de chegada: %(names)s."),
+                Mode.BOOKED.value: gettext("A agenda não atende com hora marcada: %(names)s."),
+            }
+            self.add_error("kinds", texts[mode] % {"names": ", ".join(refused)})
+            return None
+        return mode, capacity
 
     def _line(self, data: dict[str, Any], start: str, end: str) -> tuple[int, int] | None:
         """The minutes of a start and end pair; ``None`` (with the error on the field) when it is not a period."""
@@ -338,7 +469,13 @@ class PeriodsForm(PeriodBase):
         widget=Boxes,
         error_messages={"required": _("Marque ao menos um dia da semana.")},
     )
-    field_order = ("weekdays", *(f"{name}_{line}" for line in LINES for name in ("start", "end")), "kinds")
+    field_order = (
+        "weekdays",
+        *(f"{name}_{line}" for line in LINES for name in ("start", "end")),
+        "mode",
+        "capacity",
+        "kinds",
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -365,8 +502,9 @@ class PeriodsForm(PeriodBase):
         data = super().clean()
         hours = [(line, self._line(data, f"start_{line}", f"end_{line}")) for line in self.LINES]
         valid = self._validity(data)
+        mode = self._mode(data)
         self.periods: list[Period] = []
-        if self.errors or not valid:
+        if self.errors or not valid or mode is None:
             return data
         self.periods = [
             Period(
@@ -377,6 +515,7 @@ class PeriodsForm(PeriodBase):
                 data["valid_until"],
                 self._kinds(data),
                 f"start_{line}",
+                *mode,
             )
             for weekday in sorted(data["weekdays"], key=int)
             for line, minutes in hours
@@ -394,17 +533,25 @@ class PeriodForm(PeriodBase):
     weekday = forms.TypedChoiceField(label=_("Dia da semana"), choices=WEEKDAYS, coerce=int)
     start = forms.TimeField(label=_("Início"), widget=_time())
     end = forms.TimeField(label=_("Fim"), widget=_time())
-    field_order = ("weekday", "start", "end", "kinds")
+    field_order = ("weekday", "start", "end", "mode", "capacity", "kinds")
 
     def clean(self):
         data = super().clean()
         minutes = self._line(data, "start", "end")
         valid = self._validity(data)
+        mode = self._mode(data)
         self.period: Period | None = None
-        if self.errors or not valid or minutes is None:
+        if self.errors or not valid or minutes is None or mode is None:
             return data
         self.period = Period(
-            data["weekday"], minutes[0], minutes[1], data["valid_from"], data["valid_until"], self._kinds(data), "start"
+            data["weekday"],
+            minutes[0],
+            minutes[1],
+            data["valid_from"],
+            data["valid_until"],
+            self._kinds(data),
+            "start",
+            *mode,
         )
         self._refuse_overlaps([self.period])
         if self.errors:
@@ -453,8 +600,10 @@ class SetupForm(forms.Form):
         self.fields["manager_groups"].choices = choices
 
 
-def apply_service_errors(form: forms.Form, error) -> None:
+def apply_service_errors(form: forms.Form, error, aliases: dict[str, str] | None = None) -> None:
+    """Put the errors of a service on the fields of the form; ``aliases`` names the field of a service key."""
     for field, texts in error.errors.items():
+        field = (aliases or {}).get(field, field)
         target = field if field in form.fields else None
         for text in texts:
             form.add_error(target, text)

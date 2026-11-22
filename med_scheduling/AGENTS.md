@@ -41,6 +41,7 @@ Configuração do consultório (profissionais, salas, tipos de atendimento), gra
 15. A marca de prioridade (`is_priority`) só sai em `QueueEntry` e `AppointmentDetail`; nunca em `AppointmentInfo`, evento, notificação, calendário, linha do tempo ou log.
 16. A consulta de ordem de chegada não tem evento próprio no calendário: a sessão tem um, "Ordem de chegada · N pacientes", refeito a cada marcação, remarcação e cancelamento.
 17. O único JavaScript da app é `static/med_scheduling/med_scheduling.js`, opcional e ligado por `data-*`: nenhuma página depende dele.
+18. Toda página é `@practice_page` (nunca `@tenant_page()` direto): ela ativa o fuso do consultório, e hora exibida, dia corrente e hora digitada usam esse relógio, não o da preferência de quem lê.
 
 ## Testes e especificação
 
