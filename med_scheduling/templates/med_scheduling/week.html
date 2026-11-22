@@ -7,7 +7,7 @@
 <div class="table-scroll"><table>
 <caption class="sr-only">{% translate "Consultas da semana" %}</caption>
 <thead><tr><th scope="col" class="col-date">{% translate "Dia" %}</th><th scope="col">{% translate "Consultas" %}</th><th scope="col">{% translate "Horários livres" %}</th></tr></thead>
-<tbody>{% for row in rows %}<tr><td class="col-date"><a href="{% url 'med_scheduling:day' organization_id %}?date={{ row.day|date:'Y-m-d' }}">{{ row.day|date:"D d/m" }}</a></td>
+<tbody>{% for row in rows %}<tr><td class="col-date"><a href="{% url 'med_scheduling:day' organization_id %}?date={{ row.day|date:'Y-m-d' }}">{{ row.day|date:"D d/m" }}</a>{% if row.changed %} <span class="badge badge-neutral">{% translate "Dia alterado" %}</span>{% endif %}{% if row.change_url %}<p class="helptext med-scheduling-no-print"><a href="{{ row.change_url }}">{% translate "Alterar este dia" %}<span class="sr-only"> ({{ row.day|date:"d/m/Y" }})</span></a></p>{% endif %}</td>
 <td>{% for item in row.appointments %}{% include "med_scheduling/_appointment_item.html" %}{% empty %}{% if not row.sessions %}—{% endif %}{% endfor %}{% for card in row.sessions %}{% include "med_scheduling/_session.html" %}{% endfor %}</td>
 <td><div class="slot-list">{% for slot in row.free %}<span class="badge badge-neutral">{{ slot|time:"H:i" }}</span>{% empty %}—{% endfor %}</div></td></tr>{% endfor %}</tbody>
 </table></div>

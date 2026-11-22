@@ -66,7 +66,10 @@ __all__ = [
     "AvailabilityRuleInput",
     "BlockInfo",
     "DayAgenda",
+    "DayException",
+    "DayWindowInput",
     "PeriodPlan",
+    "PlanConflict",
     "PracticeInfo",
     "ProfessionalInfo",
     "QueueEntry",
@@ -290,6 +293,7 @@ class AvailabilityRuleInfo:
     appointment_type_ids: tuple[UUID, ...] = ()
     mode: str = "booked"
     capacity: int | None = None
+    on_date: date | None = None  # the day of the exception the window belongs to; none in the weekly grid
 
 
 def rule_info(row: AvailabilityRule, kinds: Any = ()) -> AvailabilityRuleInfo:
@@ -307,6 +311,7 @@ def rule_info(row: AvailabilityRule, kinds: Any = ()) -> AvailabilityRuleInfo:
         ids,
         str(row.mode),
         row.capacity,
+        row.on_date,
     )
 
 
@@ -516,6 +521,53 @@ class DayAgenda:
 
 
 @dataclass(frozen=True, slots=True)
+class DayWindowInput:
+    """A period of the exception of a day: minutes of that day on the practice's clock.
+
+    ``mode``, ``capacity`` and ``appointment_type_ids`` mean what they mean in a window of the
+    weekly grid (``AvailabilityRuleInput``).
+    """
+
+    start_minute: int
+    end_minute: int
+    mode: str = "booked"
+    capacity: int | None = None
+    appointment_type_ids: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DayException:
+    """The periods a schedule follows on one day in place of its weekly grid, by start."""
+
+    schedule_id: UUID
+    date: date
+    windows: tuple[AvailabilityRuleInfo, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PlanConflict:
+    """An appointment that a change of the periods of its day does not hold as it is.
+
+    ``reason`` says what the change does to it. Two are moves the owner confirms: "to_walk_in"
+    (it had a time and its period becomes walk-in: it goes to the session) and "to_session" (a
+    walk-in one whose period changes its bounds: it follows the period). The others refuse the
+    change (``blocking``): "to_booked" (a walk-in one whose period becomes booked time), "outside"
+    (no period holds it) and "arrived" (the patient already arrived: the queue keeps its numbers).
+    ``starts_at`` and ``ends_at`` are the bounds of the period a move goes to. A move ignores the
+    room of the session and the kinds its period lists: ``over_capacity`` and ``kind_not_listed``
+    say when it does.
+    """
+
+    appointment: AppointmentInfo
+    reason: str
+    blocking: bool
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    over_capacity: bool = False
+    kind_not_listed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class AppointmentActionInfo:
     code: str
     label: str
@@ -650,7 +702,7 @@ def _check_flag(value: object, field: str) -> bool:
     return value
 
 
-def _input_kinds(rule: AvailabilityRuleInput) -> frozenset[UUID]:
+def _input_kinds(rule: Any) -> frozenset[UUID]:
     ids = rule.appointment_type_ids
     if not isinstance(ids, tuple) or len(ids) > MAX_SCHEDULE_TYPES:
         raise InvalidInput(
@@ -694,7 +746,7 @@ def _availability(actor: Any, schedule: Schedule) -> tuple[AvailabilityRuleInfo,
 
     rows = list(
         authorized_queryset(AvailabilityRule, user=actor, action="read")
-        .filter(schedule=schedule)
+        .filter(schedule=schedule, on_date__isnull=True)
         .order_by("weekday", "start_minute", "sysid")
     )
     kinds = _rule_kinds(actor, rows)
@@ -752,7 +804,8 @@ def _schedule_type_rows(actor: Any, schedule: Schedule) -> dict[UUID, ScheduleAp
 
 
 def _schedule_windows(actor: Any, schedule: Schedule) -> list[Any]:
-    """Every window of the weekly grid of a schedule, with the kinds, the mode and the capacity of each."""
+    """Every window of a schedule, of the weekly grid and of the exceptions of its days, each with its kinds,
+    mode and capacity. Which of them a day follows is ``slots.windows_on``."""
     from skeleton.access.policies import authorized_queryset
 
     return _windows(actor, authorized_queryset(AvailabilityRule, user=actor, action="read").filter(schedule=schedule))
@@ -1317,6 +1370,406 @@ def _priority_first() -> Any:
     from django.db.models import Case, IntegerField, Value, When
 
     return Case(When(priority="high", then=Value(0)), default=Value(1), output_field=IntegerField())
+
+
+def _put_rules(
+    actor: Any,
+    schedule: Schedule,
+    wanted: list[tuple[AvailabilityRuleInput, frozenset[UUID]]],
+    rows: Any,
+    on_date: date | None = None,
+) -> None:
+    """Make ``rows`` (the weekly grid of a schedule, or the exception of ``on_date``) be the windows ``wanted``.
+
+    A window that stays (same weekday, minutes and validity) keeps its row and only what changed
+    in it is written; the others are created, and the rows no window wants are deleted, their
+    kinds first.
+    """
+    from skeleton.access.policies import authorized_queryset
+
+    existing: dict[Any, AvailabilityRule] = {}
+    leaving: list[AvailabilityRule] = []
+    for row in rows:
+        # Two live rows of the same window should not exist; if they do, one stays.
+        if _shape(row) in existing:
+            leaving.append(row)
+        else:
+            existing[_shape(row)] = row
+    links: dict[UUID, dict[UUID, AvailabilityRuleType]] = {}
+    for link in authorized_queryset(AvailabilityRuleType, user=actor, action="delete").filter(
+        rule_id__in=[row.pk for row in (*existing.values(), *leaving)]
+    ):
+        links.setdefault(link.rule_id, {})[link.appointment_type_id] = link
+    types = _schedule_types(actor, schedule)
+    taken = {
+        BOOKED: {item.appointment_type_id for item in types if item.allow_booked},
+        WALK_IN: {item.appointment_type_id for item in types if item.allow_walk_in},
+    }
+
+    def refuse_unknown(kinds: frozenset[UUID], mode: str) -> None:
+        if kinds - taken[mode]:
+            raise InvalidInput(
+                {
+                    "appointment_type_ids": [
+                        gettext(
+                            "O período lista um tipo de atendimento desconhecido, inativo ou que a agenda"
+                            " não atende neste modo."
+                        )
+                    ]
+                }
+            )
+
+    for rule, kinds in wanted:
+        row = existing.pop(_shape(rule), None)
+        current: dict[UUID, AvailabilityRuleType] = {}
+        if row is None:
+            refuse_unknown(kinds, rule.mode)
+            row = AvailabilityRule(
+                organization_id=schedule.organization_id,
+                schedule=schedule,
+                weekday=rule.weekday,
+                start_minute=rule.start_minute,
+                end_minute=rule.end_minute,
+                valid_from=rule.valid_from,
+                valid_until=rule.valid_until,
+                mode=rule.mode,
+                capacity=rule.capacity,
+                on_date=on_date,
+            )
+            row.save()
+        else:
+            current = links.get(row.pk, {})
+            had = frozenset(_kinds_of_rule(row, current))
+            same_mode = row.mode == rule.mode
+            if had == kinds and same_mode and row.capacity == rule.capacity:
+                continue
+            # While the mode stays only what comes in is checked: a kind the window already had
+            # may have left the schedule since.
+            refuse_unknown(kinds - had if same_mode else kinds, rule.mode)
+            # The single kind of an older row moves to the link rows with the others.
+            common.apply_changes(row, {"mode": rule.mode, "capacity": rule.capacity, "appointment_type_id": None})
+        for type_id, link in current.items():
+            if type_id not in kinds:
+                link.delete()
+        for type_id in sorted(kinds - set(current), key=str):
+            AvailabilityRuleType(organization_id=schedule.organization_id, rule=row, appointment_type_id=type_id).save()
+    for row in (*existing.values(), *leaving):
+        # The links first: the way from a link to the schedule goes through a live window.
+        for link in links.get(row.pk, {}).values():
+            link.delete()
+        row.delete()
+
+
+MAX_DAY_WINDOWS = 20
+
+
+def _exception_windows(actor: Any, schedule: Schedule, day: date) -> list[AvailabilityRuleInfo]:
+    """The periods of the exception of a day, by start."""
+    from skeleton.access.policies import authorized_queryset
+
+    rows = list(
+        authorized_queryset(AvailabilityRule, user=actor, action="read")
+        .filter(schedule=schedule, on_date=day)
+        .order_by("start_minute", "sysid")
+    )
+    kinds = _rule_kinds(actor, rows)
+    return [rule_info(row, kinds.get(row.pk, ())) for row in rows]
+
+
+# The moves a change of plan makes once the owner confirms them (``plan.TO_WALK_IN``, ``plan.TO_SESSION``).
+MOVES = ("to_walk_in", "to_session")
+
+
+def _check_day(schedule: Schedule, day: object, *, past: bool = False) -> date:
+    """A local day of the practice; one already over is refused unless ``past`` takes it."""
+    from django.utils import timezone as dj_timezone
+
+    from . import plan
+
+    if type(day) is not date:
+        raise InvalidInput({"date": [gettext("Informe uma data.")]})
+    if not past and day < plan.local_day(dj_timezone.now(), schedule.practice.timezone):
+        raise InvalidInput({"date": [gettext("Este dia já passou.")]})
+    return day
+
+
+def _check_day_windows(windows: object, day: date) -> list[tuple[AvailabilityRuleInput, frozenset[UUID]]]:
+    """The periods asked for a day, as windows of that day only: at least one, well formed, not overlapping."""
+    if (
+        not isinstance(windows, tuple)
+        or not 1 <= len(windows) <= MAX_DAY_WINDOWS
+        or not all(isinstance(window, DayWindowInput) for window in windows)
+    ):
+        raise InvalidInput(
+            {"windows": [gettext("Informe de 1 a 20 períodos (DayWindowInput). Para fechar o dia, use um bloqueio.")]}
+        )
+    asked = tuple(
+        AvailabilityRuleInput(
+            day.weekday(),
+            window.start_minute,
+            window.end_minute,
+            day,
+            day,
+            None,
+            window.appointment_type_ids,
+            window.mode,
+            window.capacity,
+        )
+        for window in windows
+    )
+    try:
+        return _check_rules(asked)
+    except InvalidInput as error:
+        if "rules" in error.errors:
+            raise InvalidInput({"windows": [gettext("Dois períodos do dia se sobrepõem.")]}) from None
+        raise
+
+
+def _day_windows(wanted: list[tuple[AvailabilityRuleInput, frozenset[UUID]]], day: date | None) -> list[Any]:
+    """The windows asked for as the pure functions take them; of the exception of ``day`` when given."""
+    from .slots import Window
+
+    return [
+        Window(
+            rule.weekday,
+            rule.start_minute,
+            rule.end_minute,
+            rule.valid_from,
+            rule.valid_until,
+            None,
+            kinds,
+            rule.mode,
+            rule.capacity,
+            day,
+        )
+        for rule, kinds in wanted
+    ]
+
+
+def _plan_rows(queryset: Any, schedule: Schedule, since: datetime, until: datetime | None = None) -> list[Appointment]:
+    """The appointments a change of plan looks at, among those that start from ``since`` (before ``until``).
+
+    They are the ones that still follow the grid (scheduled, confirmed or arrived) and whoever
+    holds an arrival number, whose session must stay as it is. A fit-in with a time never
+    followed the grid, and an appointment with a time being attended or over is not touched.
+    """
+    from django.db.models import Q
+
+    from .transitions import ARRIVED, CANCELLED, CONFIRMED, SCHEDULED
+
+    rows = queryset.filter(schedule=schedule, starts_at__gte=since)
+    if until is not None:
+        rows = rows.filter(starts_at__lt=until)
+    rows = (
+        rows.filter(Q(status__in=(SCHEDULED, CONFIRMED, ARRIVED)) | Q(mode=WALK_IN, arrival_number__isnull=False))
+        .exclude(status=CANCELLED)
+        .exclude(mode=BOOKED, is_fit_in=True)
+    )
+    return list(rows.order_by("starts_at", "code", "sysid"))
+
+
+def _plan_changes(
+    schedule: Schedule, rows: list[Appointment], current: list[Any], wanted: list[Any]
+) -> list[tuple[Appointment, str, Any]]:
+    """What the windows ``wanted`` do to ``rows`` that the ``current`` ones do not: ``(row, reason, period)``.
+
+    An appointment the current plan already fails to hold for the same reason is not a change.
+    """
+    from . import plan
+    from .transitions import ARRIVED
+
+    timezone = schedule.practice.timezone
+    by_day: dict[date, list[Appointment]] = {}
+    for row in rows:
+        by_day.setdefault(plan.local_day(row.starts_at, timezone), []).append(row)
+    found = []
+    for day in sorted(by_day):
+        known = {row.pk: row for row in by_day[day]}
+        bookings = [
+            plan.Booking(
+                row.pk,
+                str(row.mode),
+                row.starts_at,
+                row.ends_at,
+                row.status == ARRIVED or row.arrival_number is not None,
+            )
+            for row in by_day[day]
+        ]
+        already = {
+            (booking.key, reason)
+            for booking, reason, _period in plan.conflicts(plan.periods_on(current, day, timezone), bookings)
+        }
+        for booking, reason, period in plan.conflicts(plan.periods_on(wanted, day, timezone), bookings):
+            if (booking.key, reason) not in already:
+                found.append((known[booking.key], reason, period))
+    return found
+
+
+def _plan_conflicts(
+    actor: Any, schedule: Schedule, changes: list[tuple[Appointment, str, Any]], rows: list[Appointment]
+) -> tuple[PlanConflict, ...]:
+    """The changes as the confirmation shows them, with what a move ignores: the room of the session and its kinds."""
+    from . import plan
+
+    moving = {row.pk for row, reason, _period in changes if reason in MOVES}
+    over: dict[datetime, bool] = {}
+    result = []
+    for row, reason, period in changes:
+        crowded = unlisted = False
+        if reason in MOVES:
+            unlisted = bool(period.kinds) and row.appointment_type_id not in period.kinds
+            if period.starts_at not in over:
+                planned = [
+                    _planned(other)
+                    for other in rows
+                    if other.mode == WALK_IN
+                    and other.pk not in moving
+                    and not other.is_fit_in
+                    and (other.starts_at, other.ends_at) == (period.starts_at, period.ends_at)
+                ]
+                planned += [
+                    _planned(other)
+                    for other, why, target in changes
+                    if why in MOVES and target.starts_at == period.starts_at and not other.is_fit_in
+                ]
+                if period.capacity is not None:
+                    over[period.starts_at] = len(planned) > period.capacity
+                else:
+                    blocked = _blocked(actor, schedule, period.starts_at, period.ends_at)
+                    over[period.starts_at] = sum(planned) > plan.open_minutes(period, blocked)
+            crowded = over[period.starts_at] and not row.is_fit_in
+        result.append(
+            PlanConflict(
+                appointment_info(row),
+                reason,
+                reason in plan.BLOCKING,
+                as_utc(period.starts_at) if period is not None else None,
+                as_utc(period.ends_at) if period is not None else None,
+                crowded,
+                unlisted,
+            )
+        )
+    return tuple(result)
+
+
+def _replan_day(
+    actor: Any,
+    schedule: Schedule,
+    day: date,
+    wanted: list[Any],
+    convert_existing: object,
+    expected_affected: object,
+) -> list[tuple[Appointment, Any]]:
+    """Check what the windows ``wanted`` for ``day`` do to its appointments; the moves to make come back.
+
+    The schedule is locked, so nobody books meanwhile; the rows are locked after it. The list the
+    owner confirmed (``expected_affected``) has to be the one found now: booking an appointment
+    does not change the revision of the schedule, so the CAS alone does not protect it.
+    """
+    from . import plan
+
+    convert = _check_flag(convert_existing, "convert_existing")
+    start, end = _day_window(day, day, schedule.practice.timezone)
+    rows = _plan_rows(Appointment.objects.select_for_update(), schedule, start, end)
+    changes = _plan_changes(schedule, rows, _schedule_windows(actor, schedule), wanted)
+    if any(reason in plan.BLOCKING for _row, reason, _period in changes):
+        raise Conflict(
+            "plan_conflicts",
+            gettext("Há consultas neste dia que a mudança não comporta. Remarque-as ou ajuste os períodos."),
+        )
+    moves = [(row, period) for row, _reason, period in changes]
+    if not convert:
+        if moves:
+            raise Conflict(
+                "plan_conflicts",
+                gettext("A mudança leva consultas já marcadas para a ordem de chegada. Confira a lista e confirme."),
+            )
+        return []
+    if not isinstance(expected_affected, tuple):
+        raise InvalidInput({"expected_affected": [gettext("Informe as consultas conferidas numa tupla.")]})
+    expected = {as_uuid(value, field="expected_affected") for value in expected_affected}
+    if expected != {row.pk for row, _period in moves}:
+        raise Conflict(
+            "plan_changed",
+            gettext("As consultas deste dia mudaram desde a conferência. Confira a lista de novo."),
+        )
+    return moves
+
+
+def _move_to_sessions(actor: Any, schedule: Schedule, moves: list[tuple[Appointment, Any]]) -> None:
+    """Take each appointment to the walk-in session of its new period: the same code, no time of its own.
+
+    A confirmed one goes back to scheduled, as in a reschedule. The limits of the session (its
+    capacity, the kinds of its period) are not checked: the owner saw them in the confirmation.
+    """
+    from . import calendar_bridge
+    from .transitions import CONFIRMED, SCHEDULED
+
+    touched: set[datetime] = set()
+    for row, period in moves:
+        left = (str(row.mode), row.starts_at)
+        values: dict[str, Any] = {
+            "starts_at": period.starts_at,
+            "ends_at": period.ends_at,
+            "mode": WALK_IN,
+            "duration_minutes": _planned(row),
+            "arrival_number": None,
+        }
+        if row.status == CONFIRMED:
+            values["status"] = SCHEDULED
+        common.apply_changes(row, values)
+        if left[0] == WALK_IN:
+            touched.add(left[1])
+        else:
+            calendar_bridge.remove_event(actor, source_key=str(row.pk))
+        touched.add(period.starts_at)
+        _publish(actor, "rescheduled", row)
+    for starts_at in sorted(touched):
+        _project_session(actor, schedule, starts_at)
+
+
+def _grid_changes(
+    actor: Any, schedule: Schedule, wanted: list[tuple[AvailabilityRuleInput, frozenset[UUID]]], queryset: Any
+) -> list[tuple[Appointment, str, Any]]:
+    """The appointments from today on that a new weekly grid would leave in a period of the other mode.
+
+    The days with an exception keep following it, so nothing changes on them.
+    """
+    from django.utils import timezone as dj_timezone
+
+    from . import plan
+
+    timezone = schedule.practice.timezone
+    today = plan.local_day(dj_timezone.now(), timezone)
+    rows = _plan_rows(queryset, schedule, _day_window(today, today, timezone)[0])
+    if not rows:
+        return []
+    current = _schedule_windows(actor, schedule)
+    grid = _day_windows(wanted, None) + [window for window in current if window.on_date is not None]
+    return [
+        (row, reason, period)
+        for row, reason, period in _plan_changes(schedule, rows, current, grid)
+        if reason in (plan.TO_WALK_IN, plan.TO_BOOKED) or (reason == plan.ARRIVED and row.mode == BOOKED)
+    ]
+
+
+def _refuse_mode_conflicts(
+    actor: Any, schedule: Schedule, wanted: list[tuple[AvailabilityRuleInput, frozenset[UUID]]]
+) -> None:
+    """Refuse a weekly grid that changes the mode of a period under appointments already booked."""
+    from . import plan
+
+    clash = _grid_changes(actor, schedule, wanted, Appointment.objects)
+    if clash:
+        last = max(plan.local_day(row.starts_at, schedule.practice.timezone) for row, _reason, _period in clash)
+        raise Conflict(
+            "plan_conflicts",
+            gettext(
+                "A grade nova troca o modo de períodos que têm consultas marcadas até %(day)s. Faça a mudança"
+                " valer depois desse dia, ou altere um dia de cada vez."
+            )
+            % {"day": f"{last:%d/%m/%Y}"},
+        )
 
 
 def _fits_period(period: str, starts_at: datetime, timezone: str) -> bool:
@@ -2007,11 +2460,16 @@ class SchedulingService(ServiceAPI):
         validity) keeps its row, and only what changed in it is written (kinds, mode, capacity). A
         window lists the kinds its period takes (none: every kind the schedule takes) and says its
         mode: booked time, or walk-in with an optional capacity.
+        The exceptions of single days are not part of the grid: they stay as they are. The grid
+        converts no appointment: a change that would leave an appointment from today on in a
+        period of the other mode is refused (``availability_conflicts`` lists them), and passes
+        once it holds from after the last of them, or once those days are changed one by one.
         Autorização: alteração na agenda.
         Erros: NotFound; Forbidden; InvalidInput para faixa inválida ou sobreposta, mais de 100
         faixas, modo desconhecido, vagas fora de 1 a 500 ou num período de hora marcada, ou tipo
         novo num período que seja desconhecido, inativo, de outra organização ou que a agenda não
-        atende naquele modo; Conflict("stale_revision").
+        atende naquele modo; Conflict("stale_revision"); Conflict("plan_conflicts") quando a
+        grade nova troca o modo de um período com consulta marcada de hoje em diante.
         Efeitos: grava as faixas novas, exclui logicamente as que saíram (os tipos delas antes) e
         acerta os tipos, o modo e as vagas das que ficaram; a agenda ganha uma revisão nova. As
         consultas já marcadas não mudam.
@@ -2021,80 +2479,173 @@ class SchedulingService(ServiceAPI):
         schedule = _schedule(actor, schedule_id, write=True, lock=True)
         common.check_revision(schedule, expected_revision)
         wanted = _check_rules(rules)
-        existing: dict[Any, AvailabilityRule] = {}
-        leaving: list[AvailabilityRule] = []
-        for row in authorized_queryset(AvailabilityRule, user=actor, action="delete").filter(schedule=schedule):
-            # Two live rows of the same window should not exist; if they do, one stays.
-            if _shape(row) in existing:
-                leaving.append(row)
-            else:
-                existing[_shape(row)] = row
-        links: dict[UUID, dict[UUID, AvailabilityRuleType]] = {}
-        for link in authorized_queryset(AvailabilityRuleType, user=actor, action="delete").filter(
-            rule_id__in=[row.pk for row in (*existing.values(), *leaving)]
-        ):
-            links.setdefault(link.rule_id, {})[link.appointment_type_id] = link
-        types = _schedule_types(actor, schedule)
-        taken = {
-            BOOKED: {item.appointment_type_id for item in types if item.allow_booked},
-            WALK_IN: {item.appointment_type_id for item in types if item.allow_walk_in},
-        }
-
-        def refuse_unknown(kinds: frozenset[UUID], mode: str) -> None:
-            if kinds - taken[mode]:
-                raise InvalidInput(
-                    {
-                        "appointment_type_ids": [
-                            gettext(
-                                "O período lista um tipo de atendimento desconhecido, inativo ou que a agenda"
-                                " não atende neste modo."
-                            )
-                        ]
-                    }
-                )
-
-        for rule, kinds in wanted:
-            row = existing.pop(_shape(rule), None)
-            current: dict[UUID, AvailabilityRuleType] = {}
-            if row is None:
-                refuse_unknown(kinds, rule.mode)
-                row = AvailabilityRule(
-                    organization_id=schedule.organization_id,
-                    schedule=schedule,
-                    weekday=rule.weekday,
-                    start_minute=rule.start_minute,
-                    end_minute=rule.end_minute,
-                    valid_from=rule.valid_from,
-                    valid_until=rule.valid_until,
-                    mode=rule.mode,
-                    capacity=rule.capacity,
-                )
-                row.save()
-            else:
-                current = links.get(row.pk, {})
-                had = frozenset(_kinds_of_rule(row, current))
-                same_mode = row.mode == rule.mode
-                if had == kinds and same_mode and row.capacity == rule.capacity:
-                    continue
-                # While the mode stays only what comes in is checked: a kind the window already had
-                # may have left the schedule since.
-                refuse_unknown(kinds - had if same_mode else kinds, rule.mode)
-                # The single kind of an older row moves to the link rows with the others.
-                common.apply_changes(row, {"mode": rule.mode, "capacity": rule.capacity, "appointment_type_id": None})
-            for type_id, link in current.items():
-                if type_id not in kinds:
-                    link.delete()
-            for type_id in sorted(kinds - set(current), key=str):
-                AvailabilityRuleType(
-                    organization_id=schedule.organization_id, rule=row, appointment_type_id=type_id
-                ).save()
-        for row in (*existing.values(), *leaving):
-            # The links first: the way from a link to the schedule goes through a live window.
-            for link in links.get(row.pk, {}).values():
-                link.delete()
-            row.delete()
+        _refuse_mode_conflicts(actor, schedule, wanted)
+        rows = authorized_queryset(AvailabilityRule, user=actor, action="delete").filter(
+            schedule=schedule, on_date__isnull=True
+        )
+        _put_rules(actor, schedule, wanted, rows)
         _bump(schedule)
         return _availability(actor, schedule)
+
+    @service_method(read_only=True, since="0.1.0")
+    def day_exceptions(
+        self, *, actor: Any, schedule_id: UUID, start_date: date | None = None, end_date: date | None = None
+    ) -> tuple[DayException, ...]:
+        """The days on which a schedule follows periods of their own in place of the weekly grid, by day.
+
+        From ``start_date`` (today at the practice, when not given) to ``end_date`` (no end, when
+        not given); at most 400 days come back.
+        Autorização: leitura da agenda.
+        Erros: NotFound para agenda ilegível; InvalidInput para data inválida ou intervalo invertido.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        schedule = _schedule(actor, schedule_id)
+        first = _check_day(schedule, start_date, past=True) if start_date is not None else None
+        if first is None:
+            from django.utils import timezone as dj_timezone
+
+            from . import plan
+
+            first = plan.local_day(dj_timezone.now(), schedule.practice.timezone)
+        rows = authorized_queryset(AvailabilityRule, user=actor, action="read").filter(
+            schedule=schedule, on_date__gte=first
+        )
+        if end_date is not None:
+            if _check_day(schedule, end_date, past=True) < first:
+                raise InvalidInput({"end_date": [gettext("O fim precisa ser depois do início.")]})
+            rows = rows.filter(on_date__lte=end_date)
+        rows = list(rows.order_by("on_date", "start_minute", "sysid")[: 400 * MAX_DAY_WINDOWS])
+        kinds = _rule_kinds(actor, rows)
+        days: dict[Any, list[AvailabilityRuleInfo]] = {}
+        for row in rows:
+            days.setdefault(row.on_date, []).append(rule_info(row, kinds.get(row.pk, ())))
+        return tuple(DayException(schedule.pk, day, tuple(found)) for day, found in list(days.items())[:400])
+
+    @service_method(read_only=True, since="0.1.0")
+    def plan_conflicts(
+        self, *, actor: Any, schedule_id: UUID, date: date, windows: tuple[DayWindowInput, ...] | None = None
+    ) -> tuple[PlanConflict, ...]:
+        """What changing the periods of one day would do to the appointments already booked on it.
+
+        ``windows`` are the periods the day would follow; ``None`` asks about going back to the
+        weekly grid. Each appointment the new periods do not hold as it is comes with the reason:
+        a move the owner confirms (``set_day_exception`` with ``convert_existing``), or a refusal.
+        An appointment being attended and a fit-in with a time are never touched.
+        Autorização: leitura da agenda.
+        Erros: NotFound para agenda ilegível; InvalidInput para data ou períodos inválidos.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        schedule = _schedule(actor, schedule_id)
+        day = _check_day(schedule, date, past=True)
+        current = _schedule_windows(actor, schedule)
+        wanted = [window for window in current if window.on_date != day]
+        if windows is not None:
+            wanted += _day_windows(_check_day_windows(windows, day), day)
+        start, end = _day_window(day, day, schedule.practice.timezone)
+        rows = _plan_rows(authorized_queryset(Appointment, user=actor, action="read"), schedule, start, end)
+        return _plan_conflicts(actor, schedule, _plan_changes(schedule, rows, current, wanted), rows)
+
+    @service_method(read_only=True, since="0.1.0")
+    def availability_conflicts(
+        self, *, actor: Any, schedule_id: UUID, rules: tuple[AvailabilityRuleInput, ...]
+    ) -> tuple[PlanConflict, ...]:
+        """The appointments from today on that a new weekly grid would leave in a period of the other mode.
+
+        They are what makes ``set_availability`` answer ``plan_conflicts``: the grid has no mass
+        conversion. The last of them says from when the change may hold.
+        Autorização: leitura da agenda.
+        Erros: NotFound para agenda ilegível; InvalidInput para faixa inválida ou sobreposta.
+        Efeitos: nenhum.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        schedule = _schedule(actor, schedule_id)
+        readable = authorized_queryset(Appointment, user=actor, action="read")
+        changes = _grid_changes(actor, schedule, _check_rules(rules), readable)
+        return _plan_conflicts(actor, schedule, changes, [row for row, _reason, _period in changes])
+
+    @service_method(read_only=False, since="0.1.0")
+    def set_day_exception(
+        self,
+        *,
+        actor: Any,
+        schedule_id: UUID,
+        date: date,
+        windows: tuple[DayWindowInput, ...],
+        expected_revision: int,
+        convert_existing: bool = False,
+        expected_affected: tuple[UUID, ...] | None = None,
+    ) -> DayException:
+        """Make one day of a schedule follow ``windows`` in place of the weekly grid, with the schedule's revision as CAS.
+
+        The day keeps at least one period (to close a day, block it). An appointment with a time
+        whose period becomes walk-in, and a walk-in one whose period changes its bounds, are moved
+        to the session of the new period only with ``convert_existing`` and the exact list the
+        owner saw (``expected_affected``, from ``plan_conflicts``): each keeps its code, loses its
+        time and goes back to "agendada" when it was confirmed. The room of the session and the
+        kinds of its period are not checked in the move.
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; InvalidInput para dia que já passou, nenhum período, períodos
+        sobrepostos ou inválidos, ou tipo que a agenda não atende no modo do período;
+        Conflict("stale_revision"); Conflict("plan_conflicts") quando há consulta que a mudança
+        não comporta (fora dos períodos novos, de ordem de chegada num período que vira hora
+        marcada, ou com chegada registrada) ou que ela moveria sem ``convert_existing``;
+        Conflict("plan_changed") quando as consultas a mover não são as de ``expected_affected``.
+        Efeitos: grava os períodos do dia (os que ficam mantêm a linha), move as consultas
+        confirmadas na lista, troca o evento de cada uma no calendário pelo da sessão, publica
+        ``appointment_rescheduled`` de cada uma e dá revisão nova à agenda.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        schedule = _schedule(actor, schedule_id, write=True, lock=True)
+        common.check_revision(schedule, expected_revision)
+        day = _check_day(schedule, date)
+        wanted = _check_day_windows(windows, day)
+        kept = [window for window in _schedule_windows(actor, schedule) if window.on_date != day]
+        moves = _replan_day(actor, schedule, day, kept + _day_windows(wanted, day), convert_existing, expected_affected)
+        rows = authorized_queryset(AvailabilityRule, user=actor, action="delete").filter(schedule=schedule, on_date=day)
+        _put_rules(actor, schedule, wanted, rows, on_date=day)
+        _move_to_sessions(actor, schedule, moves)
+        _bump(schedule)
+        return DayException(schedule.pk, day, tuple(_exception_windows(actor, schedule, day)))
+
+    @service_method(read_only=False, since="0.1.0")
+    def clear_day_exception(
+        self,
+        *,
+        actor: Any,
+        schedule_id: UUID,
+        date: date,
+        expected_revision: int,
+        convert_existing: bool = False,
+        expected_affected: tuple[UUID, ...] | None = None,
+    ) -> None:
+        """Make one day of a schedule follow the weekly grid again, with the schedule's revision as CAS.
+
+        The appointments of the day are treated as in ``set_day_exception``: what the weekly grid
+        does not hold refuses the change, and what it would move asks for ``convert_existing``
+        with the list the owner saw. A day without an exception stays as it is.
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; InvalidInput para dia que já passou; Conflict("stale_revision",
+        "plan_conflicts", "plan_changed").
+        Efeitos: exclui logicamente os períodos do dia (os tipos deles antes), move as consultas
+        confirmadas na lista como em ``set_day_exception`` e dá revisão nova à agenda.
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        schedule = _schedule(actor, schedule_id, write=True, lock=True)
+        common.check_revision(schedule, expected_revision)
+        day = _check_day(schedule, date)
+        kept = [window for window in _schedule_windows(actor, schedule) if window.on_date != day]
+        moves = _replan_day(actor, schedule, day, kept, convert_existing, expected_affected)
+        rows = authorized_queryset(AvailabilityRule, user=actor, action="delete").filter(schedule=schedule, on_date=day)
+        _put_rules(actor, schedule, [], rows, on_date=day)
+        _move_to_sessions(actor, schedule, moves)
+        _bump(schedule)
 
     @service_method(read_only=True, since="0.1.0")
     def blocks(self, *, actor: Any, schedule_id: UUID, start: datetime, end: datetime) -> tuple[BlockInfo, ...]:
@@ -2675,6 +3226,7 @@ class SchedulingService(ServiceAPI):
                         sum(planned),
                         plan.open_minutes(period, blocked),
                         period.mode == WALK_IN and plan.is_full(period, planned, MIN_DURATION, blocked=blocked),
+                        period.is_exception,
                     )
                 )
             day += timedelta(days=1)

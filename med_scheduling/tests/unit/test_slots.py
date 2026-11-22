@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from ...slots import Window, collide, compute_slots, fits_grid, localize, typed_slots, windows_of
+from ...slots import Window, collide, compute_slots, fits_grid, localize, typed_slots, windows_of, windows_on
 
 SP = "America/Sao_Paulo"
 MONDAY = date(2026, 6, 1)  # A Monday.
@@ -215,3 +215,49 @@ def test_two_windows_collide_when_weekday_minutes_and_validity_cross(subtests):
     with subtests.test("an ended window and one that starts after it"):
         ended = window(480, 720, valid_until=date(2026, 6, 30))
         assert not collide(ended, window(480, 720, valid_from=date(2026, 7, 1)))
+
+
+def test_the_exception_of_a_day_replaces_the_weekly_grid_on_that_day_only(subtests):
+    weekly = Window(0, 480, 720, date(2026, 1, 1))
+    own = Window(0, 840, 960, MONDAY, MONDAY, on_date=MONDAY)
+    windows = [weekly, own]
+    following = MONDAY + timedelta(days=7)
+
+    def hours(found):
+        return [int(label[:2]) for label in found]
+
+    with subtests.test("the day follows its exception; the Monday after, the grid"):
+        assert windows_on(windows, MONDAY) == [own] and windows_on(windows, following) == [weekly]
+        assert windows_on(windows, MONDAY + timedelta(days=1)) == []
+    with subtests.test("the free slots of the two Mondays"):
+        assert hours(slots(windows, slot=60, duration=60)) == [14, 15]
+        assert hours(slots(windows, start=following, end=following, slot=60, duration=60)) == [8, 9, 10, 11]
+    with subtests.test("a time of the weekly grid is out of the grid on the day of the exception"):
+        assert not fits_grid(windows, local(MONDAY, 9), local(MONDAY, 10), timezone=SP)
+        assert fits_grid(windows, local(MONDAY, 14), local(MONDAY, 15), timezone=SP)
+        assert fits_grid(windows, local(following, 9), local(following, 10), timezone=SP)
+    with subtests.test("the exception may list kinds and be of the other mode"):
+        kind = uuid4()
+        typed = [weekly, Window(0, 840, 960, MONDAY, MONDAY, appointment_type_ids=frozenset({kind}), on_date=MONDAY)]
+        assert hours(slots(typed, slot=60, duration=60)) == []
+        assert hours(slots(typed, slot=60, duration=60, kind=kind)) == [14, 15]
+        walk_in = [weekly, Window(0, 480, 720, MONDAY, MONDAY, mode="walk_in", on_date=MONDAY)]
+        assert slots(walk_in) == [] and len(slots(walk_in, start=following, end=following)) == 8
+    with subtests.test("a window of an exception collides only with another of the same day"):
+        assert not collide(weekly, Window(0, 480, 720, MONDAY, MONDAY, on_date=MONDAY))
+        assert collide(own, Window(0, 900, 1020, MONDAY, MONDAY, on_date=MONDAY))
+        assert not collide(own, Window(0, 840, 960, following, following, on_date=following))
+    with subtests.test("the rows of the exception carry their day into the windows"):
+        row = SimpleNamespace(
+            pk=uuid4(),
+            weekday=0,
+            start_minute=840,
+            end_minute=960,
+            valid_from=MONDAY,
+            valid_until=MONDAY,
+            appointment_type_id=None,
+            mode="booked",
+            capacity=None,
+            on_date=MONDAY,
+        )
+        assert windows_of([row]) == [own]

@@ -333,7 +333,24 @@ class Boxes(forms.CheckboxSelectMultiple):
         return super().id_for_label(id_, "0" if index is None else index)
 
 
-class PeriodBase(forms.Form):
+class HourLines:
+    """Reads a start and end pair of a form as the minutes of a period."""
+
+    def _line(self, data: dict[str, Any], start: str, end: str) -> tuple[int, int] | None:
+        """The minutes of a start and end pair; ``None`` (with the error on the field) when it is not a period."""
+        first, last = data.get(start), data.get(end)
+        if first is None or last is None:
+            if (first is None) != (last is None) and not (self.errors.get(start) or self.errors.get(end)):
+                self.add_error(start if first is None else end, _("Informe o início e o fim do período."))
+            return None
+        minutes = (_minute(first), _minute(last, end=True))
+        if minutes[0] >= minutes[1]:
+            self.add_error(end, _("O fim precisa ser depois do início, no mesmo dia."))
+            return None
+        return minutes
+
+
+class PeriodBase(HourLines, forms.Form):
     """What every period of the weekly grid has: its mode, the kinds it takes and when it is valid.
 
     ``kinds`` are the kinds the schedule takes; ``existing`` the periods the grid already has (but
@@ -407,19 +424,6 @@ class PeriodBase(forms.Form):
             self.add_error("kinds", texts[mode] % {"names": ", ".join(refused)})
             return None
         return mode, capacity
-
-    def _line(self, data: dict[str, Any], start: str, end: str) -> tuple[int, int] | None:
-        """The minutes of a start and end pair; ``None`` (with the error on the field) when it is not a period."""
-        first, last = data.get(start), data.get(end)
-        if first is None or last is None:
-            if (first is None) != (last is None) and not (self.errors.get(start) or self.errors.get(end)):
-                self.add_error(start if first is None else end, _("Informe o início e o fim do período."))
-            return None
-        minutes = (_minute(first), _minute(last, end=True))
-        if minutes[0] >= minutes[1]:
-            self.add_error(end, _("O fim precisa ser depois do início, no mesmo dia."))
-            return None
-        return minutes
 
     def _validity(self, data: dict[str, Any]) -> bool:
         first, last = data.get("valid_from"), data.get("valid_until")
@@ -557,6 +561,154 @@ class PeriodForm(PeriodBase):
         if self.errors:
             self.period = None
         return data
+
+
+@dataclass(frozen=True)
+class DayPeriod:
+    """A period of one day as ``DayForm`` read it."""
+
+    start_minute: int
+    end_minute: int
+    mode: str = Mode.BOOKED.value
+    capacity: int | None = None
+    kinds: tuple[UUID, ...] = ()
+
+
+class DayForm(HourLines, forms.Form):
+    """The periods of one day, in place of the weekly grid: each line with hours is a period of that day.
+
+    ``lines`` is how many lines the page offers; ``kinds`` and the kinds of each mode mean what
+    they mean in ``PeriodBase``. A line without hours is not a period.
+    """
+
+    FIELDS = ("start", "end", "mode", "capacity", "kinds")
+
+    def __init__(self, *args, lines=4, kinds=(), booked_kinds=None, walk_in_kinds=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.numbers = tuple(range(1, lines + 1))
+        choices = [(str(kind.sysid), kind.name) for kind in kinds]
+        self._names = {kind.sysid: kind.name for kind in kinds}
+        every = set(self._names)
+        self._taken = {
+            Mode.BOOKED.value: every if booked_kinds is None else set(booked_kinds),
+            Mode.WALK_IN.value: every if walk_in_kinds is None else set(walk_in_kinds),
+        }
+        for line in self.numbers:
+            names = {"line": line}
+            self.fields[f"start_{line}"] = forms.TimeField(
+                label=_("Início do período %(line)s") % names, required=False, widget=_time()
+            )
+            self.fields[f"end_{line}"] = forms.TimeField(
+                label=_("Fim do período %(line)s") % names, required=False, widget=_time()
+            )
+            self.fields[f"mode_{line}"] = forms.ChoiceField(
+                label=_("Modo de atendimento do período %(line)s") % names,
+                choices=Mode.choices,
+                initial=Mode.BOOKED,
+                required=False,
+                widget=forms.Select(attrs={"data-period-mode": ""}),
+            )
+            self.fields[f"capacity_{line}"] = forms.IntegerField(
+                label=_("Vagas do período %(line)s") % names,
+                min_value=1,
+                max_value=500,
+                required=False,
+                help_text=_("Só na ordem de chegada. Em branco, o período comporta o que couber no tempo dele."),
+            )
+            self.fields[f"kinds_{line}"] = forms.MultipleChoiceField(
+                label=_("Tipos de atendimento do período %(line)s") % names,
+                choices=choices,
+                required=False,
+                widget=Boxes,
+                help_text=_("Sem nenhum marcado, o período atende todos os tipos que a agenda atende."),
+            )
+
+    def lines(self) -> list[dict[str, Any]]:
+        """The lines for the page: the number, the five fields and whether the line came without hours."""
+        return [
+            {
+                "number": line,
+                **{name: self[f"{name}_{line}"] for name in self.FIELDS},
+                "empty": not (self[f"start_{line}"].value() or self[f"end_{line}"].value()),
+            }
+            for line in self.numbers
+        ]
+
+    def _period(self, data: dict[str, Any], line: int) -> DayPeriod | None:
+        """The period of a line; ``None`` when the line has no hours, or has a mistake (told on its field)."""
+        minutes = self._line(data, f"start_{line}", f"end_{line}")
+        mode = data.get(f"mode_{line}") or Mode.BOOKED.value
+        capacity = data.get(f"capacity_{line}")
+        kinds = tuple(UUID(value) for value in data.get(f"kinds_{line}", ()))
+        if minutes is None:
+            typed = capacity is not None or kinds or mode != Mode.BOOKED
+            if typed and not (self.errors.get(f"start_{line}") or self.errors.get(f"end_{line}")):
+                self.add_error(f"start_{line}", _("Informe o início e o fim do período."))
+            return None
+        if f"mode_{line}" in self.errors or f"capacity_{line}" in self.errors:
+            return None
+        if mode != Mode.WALK_IN and capacity is not None:
+            self.add_error(
+                f"capacity_{line}",
+                _("Vagas valem só na ordem de chegada. Apague as vagas, ou troque o modo de atendimento do período."),
+            )
+            return None
+        refused = [self._names[kind] for kind in kinds if kind not in self._taken[mode]]
+        if refused:
+            texts = {
+                Mode.WALK_IN.value: gettext("A agenda não atende por ordem de chegada: %(names)s."),
+                Mode.BOOKED.value: gettext("A agenda não atende com hora marcada: %(names)s."),
+            }
+            self.add_error(f"kinds_{line}", texts[mode] % {"names": ", ".join(refused)})
+            return None
+        return DayPeriod(minutes[0], minutes[1], mode, capacity, kinds)
+
+    def clean(self):
+        data = super().clean()
+        found = [(line, self._period(data, line)) for line in self.numbers]
+        self.periods: list[DayPeriod] = []
+        accepted: list[DayPeriod] = []
+        for line, period in found:
+            if period is None:
+                continue
+            other = next(
+                (
+                    item
+                    for item in accepted
+                    if item.start_minute < period.end_minute and period.start_minute < item.end_minute
+                ),
+                None,
+            )
+            if other is None:
+                accepted.append(period)
+                continue
+            self.add_error(
+                f"start_{line}",
+                gettext(
+                    "%(start)s–%(end)s se sobrepõe ao período %(other_start)s–%(other_end)s. "
+                    "Ajuste o horário de um dos dois."
+                )
+                % {
+                    "start": clock(period.start_minute),
+                    "end": clock(period.end_minute),
+                    "other_start": clock(other.start_minute),
+                    "other_end": clock(other.end_minute),
+                },
+            )
+        if not self.errors and not accepted:
+            self.add_error(
+                "start_1",
+                _("Informe ao menos um período. Para fechar o dia inteiro, inclua um bloqueio na página da agenda."),
+            )
+        if not self.errors:
+            self.periods = sorted(accepted, key=lambda item: item.start_minute)
+        return data
+
+
+class DayPickForm(forms.Form):
+    """The day whose periods somebody wants to change."""
+
+    date = forms.DateField(label=_("Dia"), widget=_date())
 
 
 class BlockForm(forms.Form):

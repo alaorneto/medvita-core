@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from functools import wraps
 from typing import Any
@@ -32,7 +33,7 @@ from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
 from skeleton.web.views import tenant_page
 
 from . import forms as scheduling_forms
-from .service_api import AvailabilityRuleInput, ScheduleTypeInput, SchedulingService
+from .service_api import AvailabilityRuleInput, DayWindowInput, ScheduleTypeInput, SchedulingService
 from .transitions import actions_from
 
 TRANSITION_LABELS = {
@@ -61,6 +62,8 @@ def conflict_text(error: Conflict, *, stale: str | None = None) -> str:
     """The message of a conflict; ``stale`` names what changed when it was not an appointment."""
     if error.code == "stale_revision" and stale:
         return stale
+    if error.code in ("plan_conflicts", "plan_changed"):
+        return str(error.detail)  # The service says which appointments, or which day, hold the change.
     texts = {
         "stale_revision": gettext("A consulta mudou desde que a página abriu. Atualize a página e tente de novo."),
         "slot_unavailable": gettext("O horário não está livre."),
@@ -331,6 +334,16 @@ def _after(request: HttpRequest, organization_id: UUID, appointment_id: UUID) ->
     return redirect("med_scheduling:appointment", organization_id, appointment_id)
 
 
+def _day_change_url(organization_id: UUID, schedule: Any, day: date) -> str:
+    """Where the periods of a day are changed; empty for who does not write the schedule, or for a day that is over."""
+    if not schedule.writable or day < dj_timezone.localdate():
+        return ""
+    return "{}?{}".format(
+        reverse("med_scheduling:day-exception", args=(organization_id, schedule.sysid)),
+        urlencode({"date": day.isoformat()}),
+    )
+
+
 def _arrival_text(appointment: Any) -> str:
     if appointment.arrival_number is not None:
         return gettext("Chegada registrada: chegada nº %(number)d.") % {"number": appointment.arrival_number}
@@ -368,6 +381,7 @@ def day_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                 agenda.sessions, agenda.schedule, organization_id, zone, names, kind_names, colors
             ),
             "free": [slot.starts_at.astimezone(zone) for slot in agenda.free],
+            "change_url": _day_change_url(organization_id, agenda.schedule, day),
         }
         for agenda in agendas
     ]
@@ -398,6 +412,12 @@ def week_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) ->
     start = start - timedelta(days=start.weekday())
     zone = ZoneInfo(practice.timezone)
     kind_names, colors = _kind_maps(request)
+    changed = {
+        item.date
+        for item in _service().day_exceptions(
+            actor=request.user, schedule_id=schedule_id, start_date=start, end_date=start + timedelta(days=6)
+        )
+    }
     rows = []
     for offset in range(7):
         day = start + timedelta(days=offset)
@@ -413,6 +433,8 @@ def week_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) ->
                     agenda.sessions if agenda else (), schedule, organization_id, zone, names, kind_names, colors
                 ),
                 "free": [slot.starts_at.astimezone(zone) for slot in (agenda.free if agenda else ())],
+                "changed": day in changed,
+                "change_url": _day_change_url(organization_id, schedule, day),
             }
         )
     return render(
@@ -1266,8 +1288,33 @@ def _mode_kinds(taken: list[dict[str, Any]]) -> dict[str, set[UUID]]:
     }
 
 
+def _split(rule: Any, period: Any, asked: str) -> tuple[AvailabilityRuleInput, ...]:
+    """The period typed over ``rule``; with a day ``asked``, the rule stays as it is until the eve and the typed one holds from it."""
+    try:
+        day = date.fromisoformat(asked)
+    except ValueError:
+        return (_typed(period),)
+    changed = _typed(replace(period, valid_from=day))
+    if rule.valid_from >= day:
+        return (changed,)
+    return (replace(_kept(rule), valid_until=day - timedelta(days=1)), changed)
+
+
+def _period_text(period: Any, names: dict[UUID, str]) -> dict[str, Any]:
+    """A period for a list: its hours, its mode, its places and the names of the kinds it takes."""
+    return {
+        "hours": f"{scheduling_forms.clock(period.start_minute)}–{scheduling_forms.clock(period.end_minute)}",
+        "mode": period.mode,
+        "walk_in": period.mode == WALK_IN,
+        "capacity": period.capacity,
+        "kinds": [names.get(type_id, gettext("Tipo não disponível")) for type_id in period.appointment_type_ids],
+    }
+
+
 # The field of a period form each key of the service's refusal is about.
 PERIOD_FIELDS = {"appointment_type_ids": "kinds"}
+# The lines the page of a day offers, at least; a day with more periods gets two beyond them.
+DAY_LINES = 4
 
 
 def _grid_or_404(request: HttpRequest, schedule_id: UUID) -> tuple[Any, tuple[Any, ...]]:
@@ -1343,6 +1390,15 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
         "types": types_form_class(initial=types_initial, prefix="types", kinds=kinds),
         "block": scheduling_forms.BlockForm(prefix="block"),
     }
+    names = {kind.sysid: kind.name for kind in every}
+    changed_days = [
+        {
+            "date": item.date,
+            "periods": [_period_text(window, names) for window in item.windows],
+            "url": _day_change_url(organization_id, schedule, item.date),
+        }
+        for item in _service().day_exceptions(actor=request.user, schedule_id=schedule_id)
+    ]
     status = 200
     if request.method == "POST":
         if not schedule.writable:
@@ -1423,6 +1479,8 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
             block_form=page_forms["block"],
             taken=taken,
             every_kind=not configured,
+            changed_days=changed_days,
+            day_form=scheduling_forms.DayPickForm(initial={"date": today}),
             blocks=[
                 {"block": block, "start": block.starts_at.astimezone(zone), "end": block.ends_at.astimezone(zone)}
                 for block in blocks
@@ -1466,16 +1524,16 @@ def period_edit_view(request: HttpRequest, organization_id: UUID, schedule_id: U
         request.POST or None, initial=initial, kinds=offered, existing=others, **_mode_kinds(taken)
     )
     status = 200
+    split_from: date | None = None
     if request.method == "POST":
         status = 400
         if form.is_valid():
+            wanted = _split(rule, form.period, request.POST.get("split_from", ""))
+            sent = (*map(_kept, others), *wanted)
             try:
                 with transaction.atomic():
                     _service().set_availability(
-                        actor=request.user,
-                        schedule_id=schedule_id,
-                        rules=(*map(_kept, others), _typed(form.period)),
-                        expected_revision=_revision(request),
+                        actor=request.user, schedule_id=schedule_id, rules=sent, expected_revision=_revision(request)
                     )
             except (NotFound, Forbidden):
                 raise Http404 from None
@@ -1487,6 +1545,12 @@ def period_edit_view(request: HttpRequest, organization_id: UUID, schedule_id: U
                     messages.error(request, _schedule_changed())
                     return redirect("med_scheduling:schedule", organization_id, schedule_id)
                 form.add_error(None, conflict_text(error))
+                if error.code == "plan_conflicts":
+                    # The change may hold from the day after the last appointment it does not fit.
+                    held = _service().availability_conflicts(actor=request.user, schedule_id=schedule_id, rules=sent)
+                    zone = ZoneInfo(_practice_or_none(request).timezone)
+                    days = [item.appointment.starts_at.astimezone(zone).date() for item in held]
+                    split_from = max(days) + timedelta(days=1) if days else None
             else:
                 messages.success(request, gettext("Período salvo."))
                 return redirect("med_scheduling:schedule", organization_id, schedule_id)
@@ -1500,6 +1564,7 @@ def period_edit_view(request: HttpRequest, organization_id: UUID, schedule_id: U
             schedule=schedule,
             form=form,
             leaving=leaving,
+            split_from=split_from,
             period={
                 "weekday": dict(scheduling_forms.WEEKDAYS)[rule.weekday],
                 "start": scheduling_forms.clock(rule.start_minute),
@@ -1538,6 +1603,206 @@ def period_remove(request: HttpRequest, organization_id: UUID, schedule_id: UUID
     else:
         messages.success(request, gettext("Período removido da grade semanal."))
     return redirect("med_scheduling:schedule", organization_id, schedule_id)
+
+
+def _day_initial(periods: Any, modes: dict[str, set[UUID]], to_walk_in: bool) -> dict[str, Any]:
+    """The lines of the day form filled with the periods the day follows; ``to_walk_in`` turns them all walk-in."""
+    initial: dict[str, Any] = {}
+    for line, period in enumerate(periods, start=1):
+        mode = WALK_IN if to_walk_in else period.mode
+        taken = modes["walk_in_kinds" if mode == WALK_IN else "booked_kinds"]
+        initial.update(
+            {
+                f"start_{line}": time(period.start_minute // 60, period.start_minute % 60),
+                f"end_{line}": time((period.end_minute // 60) % 24, period.end_minute % 60),
+                f"mode_{line}": mode,
+                f"capacity_{line}": period.capacity,
+                f"kinds_{line}": [str(type_id) for type_id in period.appointment_type_ids if type_id in taken],
+            }
+        )
+    return initial
+
+
+def _plan_effect(item: Any, zone: ZoneInfo) -> str:
+    """What a change of the periods of a day does to one appointment, in the words of the confirmation."""
+    hours = _span(item.starts_at, item.ends_at, zone) if item.starts_at and item.ends_at else ""
+    texts = {
+        "to_walk_in": gettext("Passa para a ordem de chegada das %(hours)s."),
+        "to_session": gettext("Continua na ordem de chegada, no período que passa a ser %(hours)s."),
+        "to_booked": gettext("É de ordem de chegada, e o período passaria a ter hora marcada."),
+        "outside": gettext("Fica fora dos períodos do dia."),
+        "arrived": gettext("O paciente já chegou: o período dele não muda mais."),
+    }
+    return texts.get(item.reason, gettext("A mudança não comporta esta consulta.")) % {"hours": hours}
+
+
+def _plan_review(request: HttpRequest, schedule_id: UUID, day: date, windows: Any, zone: ZoneInfo) -> dict[str, Any]:
+    """The appointments a change of the periods of a day moves, and the ones that refuse it, for the confirmation."""
+    found = _service().plan_conflicts(actor=request.user, schedule_id=schedule_id, date=day, windows=windows)
+    names = _patient_names(request, [item.appointment.patient_id for item in found])
+    items = [
+        {
+            "row": item.appointment,
+            "patient": names.get(item.appointment.patient_id),
+            "local": item.appointment.starts_at.astimezone(zone),
+            "hours": _span(item.appointment.starts_at, item.appointment.ends_at, zone),
+            "effect": _plan_effect(item, zone),
+            "blocking": item.blocking,
+            "over_capacity": item.over_capacity,
+            "kind_not_listed": item.kind_not_listed,
+        }
+        for item in found
+    ]
+    return {
+        "moves": [item for item in items if not item["blocking"]],
+        "blocking": [item for item in items if item["blocking"]],
+    }
+
+
+@practice_page
+def day_exception_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
+    """Change the periods of one day of a schedule, or take the day back to the weekly grid.
+
+    A change that moves appointments already booked is shown first (which ones, and which refuse
+    it) and is made only when confirmed with that list. Only who writes the schedule opens the page.
+    """
+    practice = _practice_or_none(request)
+    try:
+        schedule = _service().schedule(actor=request.user, schedule_id=schedule_id)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    if practice is None or not schedule.writable:
+        raise Http404
+    day = _day_param(request)
+    zone = ZoneInfo(practice.timezone)
+    past = day < dj_timezone.localdate()
+    here = "{}?{}".format(request.path, urlencode({"date": day.isoformat()}))
+    try:
+        periods = _service().day_plan(actor=request.user, schedule_id=schedule_id, start_date=day, end_date=day)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    every = _all_kinds(request)
+    taken = _kinds_of(request, schedule_id, tuple(kind for kind in every if kind.is_active))
+    modes = _mode_kinds(taken)
+    options: dict[str, Any] = {
+        "lines": max(DAY_LINES, len(periods) + 2),
+        "kinds": [item["kind"] for item in taken],
+        **modes,
+    }
+    prefilled = request.method == "GET" and request.GET.get("mode") == WALK_IN
+    form = scheduling_forms.DayForm(initial=_day_initial(periods, modes, prefilled), **options)
+    review: dict[str, Any] | None = None
+    action, carried, status = "", [], 200
+    if request.method == "POST":
+        action = request.POST.get("form", "")
+        if past or action not in ("change", "clear"):
+            raise Http404
+        confirmed = request.POST.get("step") == "confirm"
+        seen = tuple(_uuid_or_404(value) for value in request.POST.getlist("affected"))
+        windows: tuple[DayWindowInput, ...] | None = None
+        status = 400
+        if action == "change":
+            form = scheduling_forms.DayForm(request.POST, **options)
+            if form.is_valid():
+                windows = tuple(
+                    DayWindowInput(item.start_minute, item.end_minute, item.mode, item.capacity, item.kinds)
+                    for item in form.periods
+                )
+        if action == "clear" or windows is not None:
+            call: dict[str, Any] = {
+                "actor": request.user,
+                "schedule_id": schedule_id,
+                "date": day,
+                "expected_revision": _revision(request),
+                "convert_existing": confirmed,
+                "expected_affected": seen if confirmed else None,
+            }
+            try:
+                with transaction.atomic():
+                    if action == "change":
+                        _service().set_day_exception(windows=windows, **call)
+                    else:
+                        _service().clear_day_exception(**call)
+            except (NotFound, Forbidden):
+                raise Http404 from None
+            except InvalidInput as error:
+                if action == "clear":
+                    messages.error(request, _messages_of(error))
+                    return redirect(here)
+                scheduling_forms.apply_service_errors(form, error)
+            except Conflict as error:
+                if error.code == "stale_revision":
+                    # The day is shown as it is now, so nobody saves over what they did not see.
+                    messages.error(request, _schedule_changed())
+                    return redirect(here)
+                if error.code not in ("plan_conflicts", "plan_changed"):
+                    messages.error(request, conflict_text(error))
+                    return redirect(here)
+                review = _plan_review(request, schedule_id, day, windows, zone)
+                if not (review["moves"] or review["blocking"]):
+                    # What held the change is gone meanwhile: the same form goes through now.
+                    messages.error(request, gettext("As consultas deste dia mudaram. Salve de novo."))
+                    review = None
+                else:
+                    review["again"] = confirmed
+                    status = 400 if review["blocking"] else 200
+                    # The periods typed go along with the confirmation, as they were sent.
+                    carried = [
+                        (name, value) for name in form.fields for value in request.POST.getlist(name) if value != ""
+                    ]
+            else:
+                if action == "clear":
+                    messages.success(request, gettext("O dia voltou a seguir a grade semanal."))
+                else:
+                    messages.success(request, gettext("Períodos do dia salvos."))
+                if confirmed and seen:
+                    messages.info(
+                        request,
+                        ngettext(
+                            "%(count)d consulta passou para a ordem de chegada do período.",
+                            "%(count)d consultas passaram para a ordem de chegada do período.",
+                            len(seen),
+                        )
+                        % {"count": len(seen)},
+                    )
+                return redirect(
+                    "{}?{}".format(reverse("med_scheduling:day", args=(organization_id,)), urlencode({"date": day}))
+                )
+    names = {kind.sysid: kind.name for kind in every}
+    current = [
+        {
+            **_period_text(period, names),
+            "taken": period.taken,
+            "occupancy": _occupancy(period.capacity, period.taken, period.planned_minutes, period.open_minutes),
+        }
+        for period in periods
+    ]
+    walk_in_url = ""
+    if request.method == "GET" and not past and not prefilled and any(period.mode != WALK_IN for period in periods):
+        walk_in_url = f"{here}&{urlencode({'mode': WALK_IN})}"
+    return render(
+        request,
+        "med_scheduling/day_exception.html",
+        _context(
+            request,
+            organization_id,
+            "schedules",
+            schedule=schedule,
+            day=day,
+            past=past,
+            changed=any(period.is_exception for period in periods),
+            current=current,
+            form=form,
+            lines=form.lines(),
+            prefilled=prefilled,
+            walk_in_url=walk_in_url,
+            here=here,
+            review=review,
+            action=action,
+            carried=carried,
+        ),
+        status=status,
+    )
 
 
 @require_POST

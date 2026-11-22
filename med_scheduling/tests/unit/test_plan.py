@@ -4,7 +4,24 @@ from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from ...plan import BOOKED, WALK_IN, instant, is_full, local_day, open_minutes, period_at, periods_on
+from ...plan import (
+    ARRIVED,
+    BLOCKING,
+    BOOKED,
+    OUTSIDE,
+    TO_BOOKED,
+    TO_SESSION,
+    TO_WALK_IN,
+    WALK_IN,
+    Booking,
+    conflicts,
+    instant,
+    is_full,
+    local_day,
+    open_minutes,
+    period_at,
+    periods_on,
+)
 from ...slots import Window, compute_slots, fits_grid
 
 SP = "America/Sao_Paulo"
@@ -136,3 +153,59 @@ def test_a_walk_in_window_gives_no_slot_and_is_out_of_the_booked_grid():
     assert [start.astimezone(ZoneInfo(SP)).hour for start, _end in found] == [14, 15, 16, 17]
     assert not fits_grid(windows, local(MONDAY, 9), local(MONDAY, 10), timezone=SP)
     assert fits_grid(windows, local(MONDAY, 14), local(MONDAY, 15), timezone=SP)
+
+
+def test_the_periods_of_a_day_with_an_exception_are_the_ones_of_the_exception():
+    own = Window(0, 14 * 60, 16 * 60, MONDAY, MONDAY, mode=WALK_IN, capacity=5, on_date=MONDAY)
+    windows = [walk_in(), booked(), own]
+    (period,) = periods_on(windows, MONDAY, SP)
+    assert (period.start_minute, period.mode, period.capacity, period.is_exception) == (840, WALK_IN, 5, True)
+    weekly = periods_on(windows, MONDAY + timedelta(days=7), SP)
+    assert [(item.mode, item.is_exception) for item in weekly] == [(WALK_IN, False), (BOOKED, False)]
+
+
+def test_a_new_plan_says_what_it_does_to_each_appointment(subtests):
+    """The day had booked time from 08:00 to 12:00 and a walk-in session from 14:00 to 18:00."""
+
+    def plan(*windows):
+        return periods_on(list(windows), MONDAY, SP)
+
+    def timed(key, hour, minutes=30, **extra):
+        return Booking(key, BOOKED, local(MONDAY, hour), local(MONDAY, hour) + timedelta(minutes=minutes), **extra)
+
+    def in_session(key, start=14, end=18, **extra):
+        return Booking(key, WALK_IN, local(MONDAY, start), local(MONDAY, end), **extra)
+
+    def reasons(periods, *bookings):
+        return {booking.key: reason for booking, reason, _period in conflicts(periods, bookings)}
+
+    same = plan(booked(8, 12), walk_in(14, 18))
+    with subtests.test("the plan that holds everything changes nothing"):
+        assert (
+            conflicts(same, [timed("a", 9), timed("b", 11, 60), in_session("c"), in_session("d", arrived=True)]) == []
+        )
+    with subtests.test("a time inside a period that becomes walk-in goes to its session"):
+        morning = plan(walk_in(8, 12), walk_in(14, 18))
+        ((booking, reason, period),) = conflicts(morning, [timed("a", 9), in_session("c")])
+        assert (booking.key, reason) == ("a", TO_WALK_IN)
+        assert (period.starts_at, period.ends_at) == (local(MONDAY, 8), local(MONDAY, 12))
+    with subtests.test("who already arrived is not taken to a session"):
+        assert reasons(plan(walk_in(8, 12)), timed("a", 9, arrived=True)) == {"a": ARRIVED}
+    with subtests.test("a session whose period changes its bounds follows it, unless somebody arrived"):
+        longer = plan(booked(8, 12), walk_in(14, 19))
+        found = conflicts(longer, [in_session("c"), in_session("d", arrived=True)])
+        assert [(booking.key, reason) for booking, reason, _period in found] == [("c", TO_SESSION), ("d", ARRIVED)]
+        assert found[0][2].ends_at == local(MONDAY, 19)
+        earlier = plan(walk_in(13, 18))
+        assert reasons(earlier, in_session("c")) == {"c": TO_SESSION}
+    with subtests.test("a session whose period becomes booked time has no time to take"):
+        assert reasons(plan(booked(8, 12), booked(14, 18)), in_session("c")) == {"c": TO_BOOKED}
+    with subtests.test("no period of the new plan holds it"):
+        only_morning = plan(booked(8, 10))
+        assert reasons(only_morning, timed("a", 9), timed("b", 10), timed("e", 9, 90), in_session("c")) == {
+            "b": OUTSIDE,
+            "e": OUTSIDE,
+            "c": OUTSIDE,
+        }
+    with subtests.test("only the moves pass with a confirmation"):
+        assert BLOCKING == {TO_BOOKED, OUTSIDE, ARRIVED} and not BLOCKING & {TO_WALK_IN, TO_SESSION}

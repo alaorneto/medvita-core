@@ -72,6 +72,7 @@ def test_every_page_renders_safe_html(ready, subtests):
         "schedules": url(ready, "schedules"),
         "schedule": url(ready, "schedule", ready.schedule.sysid),
         "period-edit": url(ready, "period-edit", ready.schedule.sysid, grid(ready)[0].sysid),
+        "day-exception": url(ready, "day-exception", ready.schedule.sysid) + f"?date={ready.monday:%Y-%m-%d}",
         "setup": url(ready, "setup"),
         "patient_section": url(ready, "patient_section", ready.patient.sysid),
     }
@@ -851,7 +852,12 @@ def test_the_script_is_an_optional_static_file_bound_by_data_attributes(ready):
     schedule = assert_safe(client.get(url(ready, "schedule", ready.schedule.sysid)))
     assert script.search(schedule) and "data-period-lines" in schedule and 'data-add-label="' in schedule
     assert len(re.findall(r"<div class=\"period-line\" data-period-line data-empty>", schedule)) == 3
+    day = assert_safe(client.get(url(ready, "day-exception", ready.schedule.sysid), {"date": ready.monday}))
+    # Each period of the day is a scope of its own for the script: its mode folds its own "Vagas".
+    assert script.search(day) and day.count("data-period-mode") == day.count("data-walk-in-only") == 4
+    assert len(re.findall(r"<fieldset[^>]*data-period data-period-line", day)) == 4
     source = (APP_DIR / "static" / "med_scheduling" / "med_scheduling.js").read_text(encoding="utf-8")
+    assert 'select.closest("[data-period]")' in source
     assert source.startswith('"use strict";')
     assert not re.search(
         r"innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|fetch\(|XMLHttpRequest", source

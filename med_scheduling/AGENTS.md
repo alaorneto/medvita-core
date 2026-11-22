@@ -42,6 +42,8 @@ Configuração do consultório (profissionais, salas, tipos de atendimento), gra
 16. A consulta de ordem de chegada não tem evento próprio no calendário: a sessão tem um, "Ordem de chegada · N pacientes", refeito a cada marcação, remarcação e cancelamento.
 17. O único JavaScript da app é `static/med_scheduling/med_scheduling.js`, opcional e ligado por `data-*`: nenhuma página depende dele.
 18. Toda página é `@practice_page` (nunca `@tenant_page()` direto): ela ativa o fuso do consultório, e hora exibida, dia corrente e hora digitada usam esse relógio, não o da preferência de quem lê.
+19. O dia alterado são linhas de `AvailabilityRule` com `on_date`; o dia que as tem segue só elas (`slots.windows_on`). A grade semanal é lida e gravada com `on_date` vazio e nunca toca nelas.
+20. Trocar os períodos de um dia só move consultas confirmado (`convert_existing`) e com a lista vista (`expected_affected`), conferida com a agenda travada; só se move para a ordem de chegada, e a grade semanal nunca converte: recusa a troca de modo sob consultas vivas (`plan_conflicts`).
 
 ## Testes e especificação
 

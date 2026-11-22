@@ -251,6 +251,9 @@ class AvailabilityRule(OrganizationRecord):
 
     ``mode`` says how the period sees its patients. A walk-in period may have a ``capacity`` (how
     many appointments one day of it takes); without one, the planned durations fill its minutes.
+
+    A row with ``on_date`` is a period of the exception of that day: the day follows its exception
+    in place of the weekly grid. Its weekday and validity are the ones of the day.
     """
 
     schedule = models.ForeignKey(Schedule, on_delete=models.PROTECT, related_name="+")
@@ -264,11 +267,16 @@ class AvailabilityRule(OrganizationRecord):
     )
     mode = models.CharField(max_length=8, choices=Mode.choices, default=Mode.BOOKED)
     capacity = models.PositiveSmallIntegerField(null=True, blank=True)
-    immutable_fields = ("schedule_id",)
+    on_date = models.DateField(null=True, blank=True)
+    immutable_fields = ("schedule_id", "on_date")
 
     class Meta(OrganizationRecord.Meta):
         constraints = OrganizationRecord.Meta.constraints + [
             models.CheckConstraint(condition=Q(mode__in=("booked", "walk_in")), name="med_scheduling_rule_mode"),
+            models.CheckConstraint(
+                condition=Q(on_date__isnull=True) | Q(valid_from=models.F("on_date"), valid_until=models.F("on_date")),
+                name="med_scheduling_rule_on_date",
+            ),
             models.CheckConstraint(
                 condition=Q(capacity__isnull=True) | Q(mode="walk_in", capacity__gte=1, capacity__lte=500),
                 name="med_scheduling_rule_capacity",

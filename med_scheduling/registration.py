@@ -158,7 +158,7 @@ def register_schedule_tables() -> None:
     register(
         TableSpec(
             model=AvailabilityRule,
-            description=_("Grade semanal de cada agenda."),
+            description=_("Grade semanal de cada agenda e os períodos dos dias alterados."),
             label=_("Grade de horários"),
             scope="organization",
             read_fields=(
@@ -171,6 +171,7 @@ def register_schedule_tables() -> None:
                 "appointment_type",
                 "mode",
                 "capacity",
+                "on_date",
             ),
             write_fields=(),
             sensitive_fields=(),

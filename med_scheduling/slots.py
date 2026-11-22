@@ -11,6 +11,9 @@ takes its first occurrence.
 
 Only the windows of booked time give slots. A walk-in window (``mode`` "walk_in") is a period in
 which patients are seen in the order they arrive: it has no slots, and ``plan.py`` deals with it.
+
+A window with ``on_date`` belongs to the exception of that day. A day with an exception follows
+only its windows: the weekly grid does not count on it (``windows_on``).
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ class Window:
     appointment_type_ids: frozenset[UUID] = frozenset()
     mode: str = BOOKED
     capacity: int | None = None
+    on_date: date | None = None
 
     @property
     def types(self) -> frozenset[UUID]:
@@ -59,11 +63,28 @@ def overlaps(start: datetime, end: datetime, intervals: Iterable[tuple[datetime,
     return any(other_start < end and start < other_end for other_start, other_end in intervals)
 
 
-def applies(window: Window, day: date, appointment_type_id: UUID | None, *, any_type: bool = False) -> bool:
-    """Whether the window is valid on ``day`` for the type; ``any_type`` takes the restricted windows too."""
+def holds_on(window: Window, day: date) -> bool:
+    """Whether the window is of ``day``: the day of its exception, or its weekday inside its validity."""
+    if window.on_date is not None:
+        return window.on_date == day
     if window.weekday != day.weekday() or day < window.valid_from:
         return False
-    if window.valid_until is not None and day > window.valid_until:
+    return window.valid_until is None or day <= window.valid_until
+
+
+def windows_on(windows: Iterable[Window], day: date) -> list[Window]:
+    """The windows a day follows: those of its exception when it has one, otherwise the weekly ones."""
+    found = [window for window in windows if holds_on(window, day)]
+    own = [window for window in found if window.on_date is not None]
+    return own or found
+
+
+def applies(window: Window, day: date, appointment_type_id: UUID | None, *, any_type: bool = False) -> bool:
+    """Whether the window is valid on ``day`` for the type; ``any_type`` takes the restricted windows too.
+
+    It looks at one window: whether the day has an exception that replaces it is ``windows_on``.
+    """
+    if not holds_on(window, day):
         return False
     types = window.types
     if types and not any_type:
@@ -84,7 +105,7 @@ def candidates(
     """Aware starts of the slots of one day with the window of each, before removing what is taken."""
     found: list[tuple[datetime, Window]] = []
     midnight = datetime.combine(day, time())
-    for window in windows:
+    for window in windows_on(windows, day):
         if window.mode != BOOKED or not applies(window, day, appointment_type_id, any_type=any_type):
             continue
         minute = window.start_minute
@@ -195,12 +216,18 @@ def fits_grid(
         and applies(window, day, appointment_type_id)
         and window.start_minute <= start_minute
         and end_minute <= window.end_minute
-        for window in windows
+        for window in windows_on(windows, day)
     )
 
 
 def collide(first: Any, second: Any) -> bool:
-    """Whether two weekly windows cover the same minute of some day: weekday, minutes and validity cross."""
+    """Whether two windows cover the same minute of some day: weekday, minutes and validity cross.
+
+    A window of the exception of a day only collides with another of the same day: over the weekly
+    grid it wins, it does not collide.
+    """
+    if getattr(first, "on_date", None) != getattr(second, "on_date", None):
+        return False
     if first.weekday != second.weekday:
         return False
     if first.start_minute >= second.end_minute or second.start_minute >= first.end_minute:
@@ -224,6 +251,7 @@ def windows_of(rules: Iterable[Any], kinds: Mapping[Any, Iterable[UUID]] | None 
             frozenset(kinds.get(getattr(rule, "pk", None), ())),
             getattr(rule, "mode", BOOKED),
             getattr(rule, "capacity", None),
+            getattr(rule, "on_date", None),
         )
         for rule in rules
     ]

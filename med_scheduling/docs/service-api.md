@@ -88,6 +88,14 @@ The weekly grid of a schedule, by weekday and start.
 - **Erros:** NotFound para agenda ilegível.
 - **Efeitos:** nenhum.
 
+#### `availability_conflicts(*, actor, schedule_id, rules) -> tuple[PlanConflict, ...]`
+
+The appointments from today on that a new weekly grid would leave in a period of the other mode.
+
+- **Autorização:** leitura da agenda.
+- **Erros:** NotFound para agenda ilegível; InvalidInput para faixa inválida ou sobreposta.
+- **Efeitos:** nenhum.
+
 #### `available_slots(*, actor, schedule_id, start_date, end_date, appointment_type_id=None, duration_minutes=None) -> tuple[Slot, ...]`
 
 Free slots of a schedule between two dates (inclusive, at most 62 days).
@@ -144,6 +152,14 @@ Register that the patient arrived, with CAS, and tell the professional.
 - **Erros:** NotFound; Forbidden; InvalidInput para prioridade que não seja verdadeiro ou falso; Conflict("stale_revision", "invalid_transition"), sem dar número.
 - **Efeitos:** grava a situação, a hora, o número de chegada e a prioridade, publica ``med_scheduling.appointment_arrived`` e notifica o profissional da agenda (uma vez por consulta; a notificação leva o código, nunca o paciente nem a prioridade).
 
+#### `clear_day_exception(*, actor, schedule_id, date, expected_revision, convert_existing=False, expected_affected=None) -> None`
+
+Make one day of a schedule follow the weekly grid again, with the schedule's revision as CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput para dia que já passou; Conflict("stale_revision", "plan_conflicts", "plan_changed").
+- **Efeitos:** exclui logicamente os períodos do dia (os tipos deles antes), move as consultas confirmadas na lista como em ``set_day_exception`` e dá revisão nova à agenda.
+
 #### `complete(*, actor, appointment_id, expected_revision) -> AppointmentInfo`
 
 Finish an appointment (arrived or in progress), with CAS.
@@ -176,6 +192,14 @@ The appointments and free slots of one local day, for every schedule the actor r
 - **Erros:** InvalidInput para data inválida ou mais de 20 agendas.
 - **Efeitos:** nenhum.
 
+#### `day_exceptions(*, actor, schedule_id, start_date=None, end_date=None) -> tuple[DayException, ...]`
+
+The days on which a schedule follows periods of their own in place of the weekly grid, by day.
+
+- **Autorização:** leitura da agenda.
+- **Erros:** NotFound para agenda ilegível; InvalidInput para data inválida ou intervalo invertido.
+- **Efeitos:** nenhum.
+
 #### `day_plan(*, actor, schedule_id, start_date, end_date) -> tuple[PeriodPlan, ...]`
 
 The periods a schedule works between two local dates (inclusive, at most 62 days), with what is taken.
@@ -198,6 +222,14 @@ The active professional record linked to the actor, or ``None``.
 
 - **Autorização:** leitura do consultório.
 - **Erros:** nenhum além do contrato; sem consultório legível, ``None``.
+- **Efeitos:** nenhum.
+
+#### `plan_conflicts(*, actor, schedule_id, date, windows=None) -> tuple[PlanConflict, ...]`
+
+What changing the periods of one day would do to the appointments already booked on it.
+
+- **Autorização:** leitura da agenda.
+- **Erros:** NotFound para agenda ilegível; InvalidInput para data ou períodos inválidos.
 - **Efeitos:** nenhum.
 
 #### `practice(*, actor) -> PracticeInfo`
@@ -293,8 +325,16 @@ Schedules the actor reads, by name.
 Make the weekly grid of a schedule be ``rules``, with the schedule's revision as CAS.
 
 - **Autorização:** alteração na agenda.
-- **Erros:** NotFound; Forbidden; InvalidInput para faixa inválida ou sobreposta, mais de 100 faixas, modo desconhecido, vagas fora de 1 a 500 ou num período de hora marcada, ou tipo novo num período que seja desconhecido, inativo, de outra organização ou que a agenda não atende naquele modo; Conflict("stale_revision").
+- **Erros:** NotFound; Forbidden; InvalidInput para faixa inválida ou sobreposta, mais de 100 faixas, modo desconhecido, vagas fora de 1 a 500 ou num período de hora marcada, ou tipo novo num período que seja desconhecido, inativo, de outra organização ou que a agenda não atende naquele modo; Conflict("stale_revision"); Conflict("plan_conflicts") quando a grade nova troca o modo de um período com consulta marcada de hoje em diante.
 - **Efeitos:** grava as faixas novas, exclui logicamente as que saíram (os tipos delas antes) e acerta os tipos, o modo e as vagas das que ficaram; a agenda ganha uma revisão nova. As consultas já marcadas não mudam.
+
+#### `set_day_exception(*, actor, schedule_id, date, windows, expected_revision, convert_existing=False, expected_affected=None) -> DayException`
+
+Make one day of a schedule follow ``windows`` in place of the weekly grid, with the schedule's revision as CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput para dia que já passou, nenhum período, períodos sobrepostos ou inválidos, ou tipo que a agenda não atende no modo do período; Conflict("stale_revision"); Conflict("plan_conflicts") quando há consulta que a mudança não comporta (fora dos períodos novos, de ordem de chegada num período que vira hora marcada, ou com chegada registrada) ou que ela moveria sem ``convert_existing``; Conflict("plan_changed") quando as consultas a mover não são as de ``expected_affected``.
+- **Efeitos:** grava os períodos do dia (os que ficam mantêm a linha), move as consultas confirmadas na lista, troca o evento de cada uma no calendário pelo da sessão, publica ``appointment_rescheduled`` de cada uma e dá revisão nova à agenda.
 
 #### `set_priority(*, actor, appointment_id, priority, expected_revision) -> AppointmentInfo`
 
@@ -497,6 +537,7 @@ An appointment as lists show it: never the notes of the reception nor the priori
 | `appointment_type_ids` | `tuple[UUID, ...]` |
 | `mode` | `str` |
 | `capacity` | `int | None` |
+| `on_date` | `date | None` |
 
 ### `AvailabilityRuleInput`
 
@@ -537,6 +578,28 @@ A schedule on one day; ``sessions`` are its walk-in sessions, whose appointments
 | `free` | `tuple[Slot, ...]` |
 | `sessions` | `tuple[QueueSession, ...]` |
 
+### `DayException`
+
+The periods a schedule follows on one day in place of its weekly grid, by start.
+
+| Campo | Tipo |
+|---|---|
+| `schedule_id` | `UUID` |
+| `date` | `date` |
+| `windows` | `tuple[AvailabilityRuleInfo, ...]` |
+
+### `DayWindowInput`
+
+A period of the exception of a day: minutes of that day on the practice's clock.
+
+| Campo | Tipo |
+|---|---|
+| `start_minute` | `int` |
+| `end_minute` | `int` |
+| `mode` | `str` |
+| `capacity` | `int | None` |
+| `appointment_type_ids` | `tuple[UUID, ...]` |
+
 ### `PeriodPlan`
 
 A period a schedule works on one day, with how much of it is taken.
@@ -557,6 +620,20 @@ A period a schedule works on one day, with how much of it is taken.
 | `open_minutes` | `int` |
 | `is_full` | `bool` |
 | `is_exception` | `bool` |
+
+### `PlanConflict`
+
+An appointment that a change of the periods of its day does not hold as it is.
+
+| Campo | Tipo |
+|---|---|
+| `appointment` | `AppointmentInfo` |
+| `reason` | `str` |
+| `blocking` | `bool` |
+| `starts_at` | `datetime | None` |
+| `ends_at` | `datetime | None` |
+| `over_capacity` | `bool` |
+| `kind_not_listed` | `bool` |
 
 ### `PracticeInfo`
 
