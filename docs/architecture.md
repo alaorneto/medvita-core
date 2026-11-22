@@ -64,11 +64,13 @@ A seta aponta para a app de que se depende. No sentido da seta, uma app chama o 
 | Mecanismo | Sentido | Exemplos |
 |---|---|---|
 | API de serviços | da app que depende para a dependência | a agenda lê o paciente com `PatientService().summary(...)` |
-| Eventos de domínio do núcleo | da dependência para quem depende | o financeiro cria a conta ao receber `med_scheduling.appointment_completed` |
-| Registries exportados pelo `service_api` | quem depende se registra na dependência | a agenda põe a aba "Consultas" na página do paciente |
+| Eventos de domínio do núcleo | da dependência para quem depende | uma app que depende registra um consumidor de `med_scheduling.appointment_completed` no `ready()`; nenhuma app da suíte consome evento hoje, e o exemplo que roda nos testes é `tests/apps/med_example` |
+| Registries exportados pelo `service_api` | quem depende se registra na dependência | a agenda põe a aba "Consultas" na página do paciente; o financeiro põe a ação "Receber" na consulta |
 | FK `PROTECT` por texto | integridade no banco | `Appointment.patient` aponta para `"med_patients.Patient"`; o banco impede excluir paciente com consulta |
 
 Uma FK entre apps nunca é caminho de leitura: o dado da outra app vem do serviço dela, que autoriza.
+
+A conta de uma consulta não nasce de evento: ela é criada sob demanda, quando a recepção usa a ação "Receber" e o financeiro chama `FinanceService.charge_for_appointment`, que lê a consulta pelo serviço da agenda e devolve sempre a mesma conta para a mesma consulta.
 
 ## Regras comuns de implementação
 
