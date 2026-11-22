@@ -1,16 +1,50 @@
-{% extends "skeleton/web/base.html" %}{% load i18n med_scheduling_labels %}{% block title %}{{ schedule.name }} · {% translate "Agendas" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static med_scheduling_labels %}{% block title %}{{ schedule.name }} · {% translate "Agendas" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}"><script src="{% static 'med_scheduling/med_scheduling.js' %}" defer></script>{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_scheduling:schedules' organization_id %}">{% translate "Agendas" %}</a></p><h1>{{ schedule.name }}</h1><p class="page-description">{% blocktranslate with minutes=schedule.slot_minutes %}Horários de {{ minutes }} minutos.{% endblocktranslate %}</p></div>
 <nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_scheduling:week' organization_id schedule.sysid %}">{% translate "Ver a semana" %}</a></nav></div>
 {% include "med_scheduling/_nav.html" %}
+<h2 class="section-heading">{% translate "Grade semanal" %}</h2>
+<p class="helptext mb-4">{% translate "Os períodos de atendimento de cada dia da semana, no horário do consultório. Cada período diz os tipos de atendimento que recebe." %}</p>
+<div class="week-grid mb-6">{% for day in week %}
+<section class="week-day" aria-labelledby="weekday-{{ day.number }}"><h3 id="weekday-{{ day.number }}">{{ day.label }}</h3>
+{% for item in day.periods %}<div class="period-card{% if item.ended %} period-ended{% endif %}">
+<p class="period-hours">{{ item.start }}–{{ item.end }}</p>
+<p>{% for kind in item.kinds %}{{ kind.name }}{% if not kind.taken %} <span class="badge badge-neutral">{% translate "a agenda não atende mais" %}</span>{% endif %}{% if not forloop.last %}, {% endif %}{% empty %}{% translate "Todos os tipos da agenda" %}{% endfor %}</p>
+{% if item.starts %}<p class="helptext">{% blocktranslate with day=item.starts|date:"SHORT_DATE_FORMAT" %}A partir de {{ day }}{% endblocktranslate %}</p>{% endif %}
+{% if item.until %}<p class="helptext">{% if item.ended %}{% blocktranslate with day=item.until|date:"SHORT_DATE_FORMAT" %}Encerrado em {{ day }}{% endblocktranslate %}{% else %}{% blocktranslate with day=item.until|date:"SHORT_DATE_FORMAT" %}Até {{ day }}{% endblocktranslate %}{% endif %}</p>{% endif %}
+{% if schedule.writable %}<div class="period-actions"><a class="btn btn-secondary" href="{% url 'med_scheduling:period-edit' organization_id schedule.sysid item.rule.sysid %}">{% translate "Editar" %}<span class="sr-only"> {% blocktranslate with day=day.label start=item.start end=item.end %}o período de {{ day }}, {{ start }}–{{ end }}{% endblocktranslate %}</span></a>
+<form method="post" class="inline" action="{% url 'med_scheduling:period-remove' organization_id schedule.sysid item.rule.sysid %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ schedule.revision }}"><button type="submit" class="btn btn-secondary">{% translate "Remover" %}<span class="sr-only"> {% blocktranslate with day=day.label start=item.start end=item.end %}o período de {{ day }}, {{ start }}–{{ end }}{% endblocktranslate %}</span></button></form></div>{% endif %}
+</div>{% empty %}<p class="helptext">{% translate "Sem atendimento" %}</p>{% endfor %}
+</section>{% endfor %}</div>
+<h2 class="section-heading">{% translate "Tipos atendidos nesta agenda" %}</h2>
+{% if every_kind %}<p class="helptext">{% translate "Esta agenda atende todos os tipos de atendimento ativos do consultório." %}</p>{% endif %}
+<ul class="mb-6">{% for item in taken %}<li>{{ item.kind.name }} · {{ item.kind.payment_kind|scheduling_label:"payment_kind" }} · {% blocktranslate with minutes=item.minutes %}{{ minutes }} min{% endblocktranslate %}{% if item.taken.own_duration %} <span class="badge badge-neutral">{% translate "Duração desta agenda" %}</span>{% endif %}</li>{% empty %}<li>{% translate "Nenhum tipo de atendimento ativo." %}</li>{% endfor %}</ul>
 <h2 class="section-heading">{% translate "Bloqueios" %}</h2>
 <ul class="mb-6">{% for item in blocks %}<li>{{ item.start|date:"SHORT_DATETIME_FORMAT" }}–{{ item.end|time:"H:i" }} · {{ item.block.reason|scheduling_label:"block_reason" }}{% if item.block.note %} · {{ item.block.note }}{% endif %}{% if schedule.writable %} <form method="post" class="inline" action="{% url 'med_scheduling:block-remove' organization_id schedule.sysid item.block.sysid %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ item.block.revision }}"><button type="submit" class="btn btn-secondary">{% translate "Remover" %}</button></form>{% endif %}</li>{% empty %}<li>—</li>{% endfor %}</ul>
 {% if schedule.writable %}
-<section class="card max-w-3xl mb-6" aria-labelledby="grid-heading"><h2 id="grid-heading">{% translate "Grade semanal" %}</h2>
-<p class="helptext">{% translate "Até duas faixas por dia, no horário do consultório. Salvar troca a grade inteira." %}</p>
-<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="form" value="grid"><input type="hidden" name="revision" value="{{ schedule.revision }}">
-{% include "skeleton/web/components/form-errors.html" with form=grid_form %}{% include "skeleton/web/components/form-fields.html" with form=grid_form hide_marks=True %}
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Salvar grade" %}</button></div></form></section>
+<section class="card max-w-3xl mb-6" aria-labelledby="periods-heading"><h2 id="periods-heading">{% translate "Adicionar períodos" %}</h2>
+<p class="helptext">{% translate "Marque os dias da semana e informe os horários: cada horário vira um período em cada dia marcado. Os períodos que já existem continuam como estão." %}</p>
+<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="form" value="periods"><input type="hidden" name="revision" value="{{ schedule.revision }}">
+{% include "skeleton/web/components/form-errors.html" with form=periods_form %}
+{% include "med_scheduling/_boxes.html" with field=periods_form.weekdays %}
+<fieldset class="mb-4" data-period-lines data-add-label="{% translate "Adicionar outro horário" %}"><legend>{% translate "Horários" %}</legend>
+{% for line in periods_form.lines %}<div class="period-line" data-period-line{% if line.empty %} data-empty{% endif %}>{% include "skeleton/web/components/form-field.html" with field=line.start hide_marks=True %}{% include "skeleton/web/components/form-field.html" with field=line.end hide_marks=True %}</div>{% endfor %}
+<p class="helptext">{% translate "O primeiro horário é obrigatório; os outros são para o dia que tem mais de um período, como manhã e tarde. Fim às 00:00 vale o fim do dia." %}</p></fieldset>
+{% if periods_form.kinds.field.choices %}{% include "med_scheduling/_boxes.html" with field=periods_form.kinds %}{% endif %}
+<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=periods_form.valid_from %}{% include "skeleton/web/components/form-field.html" with field=periods_form.valid_until %}</div>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Adicionar à grade" %}</button></div></form></section>
+<section class="card max-w-3xl mb-6" aria-labelledby="types-heading"><h2 id="types-heading">{% translate "Escolher os tipos desta agenda" %}</h2>
+<p class="helptext">{% translate "Ao marcar uma consulta, só os tipos que a agenda atende aparecem. A duração nesta agenda é opcional: em branco, vale a duração do tipo." %}</p>
+{% if types_form.kinds %}
+<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="form" value="types"><input type="hidden" name="revision" value="{{ schedule.revision }}">
+{% include "skeleton/web/components/form-errors.html" with form=types_form %}
+<fieldset class="mb-4"><legend>{{ types_form.scope.label }}</legend>{% for radio in types_form.scope %}<div class="form-field form-field-check">{{ radio.tag }}<label for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label></div>{% endfor %}{{ types_form.scope.errors }}</fieldset>
+<div class="table-scroll mb-4"><table><caption class="sr-only">{% translate "Tipos de atendimento desta agenda" %}</caption>
+<thead><tr><th scope="col">{% translate "Atende" %}</th><th scope="col">{% translate "Tipo de atendimento" %}</th><th scope="col">{% translate "Forma de pagamento" %}</th><th scope="col" class="col-num">{% translate "Duração do tipo" %}</th><th scope="col">{% translate "Duração nesta agenda (minutos)" %}</th></tr></thead>
+<tbody>{% for row in types_form.rows %}<tr><td>{{ row.on }}<label class="sr-only" for="{{ row.on.id_for_label }}">{{ row.on.label }}</label></td><td>{{ row.kind.name }}</td><td>{{ row.kind.payment_kind|scheduling_label:"payment_kind" }}</td><td class="col-num">{% blocktranslate with minutes=row.kind.duration_minutes %}{{ minutes }} min{% endblocktranslate %}</td><td><label class="sr-only" for="{{ row.minutes.id_for_label }}">{{ row.minutes.label }}</label>{{ row.minutes }}{{ row.minutes.errors }}</td></tr>{% endfor %}</tbody></table></div>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Salvar tipos" %}</button></div></form>
+{% else %}<p class="mt-3">{% translate "O consultório ainda não tem tipos de atendimento ativos." %} <a href="{% url 'med_scheduling:settings' organization_id %}">{% translate "Cadastrar em Configuração" %}</a></p>{% endif %}</section>
 <section class="card max-w-3xl" aria-labelledby="block-heading"><h2 id="block-heading">{% translate "Novo bloqueio" %}</h2>
 <form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="form" value="block"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 {% include "skeleton/web/components/form-errors.html" with form=block_form %}{% include "skeleton/web/components/form-fields.html" with form=block_form %}

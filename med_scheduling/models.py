@@ -17,6 +17,14 @@ from skeleton.common.models import OrganizationRecord, SecuredRecord
 COLORS = ("blue", "green", "amber", "red", "purple", "teal", "gray", "pink")
 
 
+class PaymentKind(models.TextChoices):
+    """How an appointment is paid for: the kind of appointment says it, the appointment keeps its copy."""
+
+    PRIVATE = "private", gettext_lazy("Particular")
+    INSURANCE = "insurance", gettext_lazy("Convênio")
+    COURTESY = "courtesy", gettext_lazy("Cortesia")
+
+
 def validate_timezone(value: str) -> None:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -122,12 +130,16 @@ class Room(OrganizationRecord):
 
 
 class AppointmentType(OrganizationRecord):
-    """A kind of appointment: duration, color and the opaque billing code finance resolves."""
+    """A kind of appointment: duration, payment, color and the opaque billing code finance resolves.
+
+    "Particular", "Convênio X" and "Retorno Convênio X" are kinds: each one carries how it is paid for.
+    """
 
     practice = models.ForeignKey(Practice, on_delete=models.PROTECT, related_name="+")
     code = models.SlugField(max_length=40)
     name = models.CharField(max_length=120)
     duration_minutes = models.PositiveSmallIntegerField(default=30)
+    payment_kind = models.CharField(max_length=12, choices=PaymentKind.choices, default=PaymentKind.PRIVATE)
     color = models.CharField(max_length=10, default="blue")
     billing_code = models.CharField(max_length=40, blank=True)
     requires_room = models.BooleanField(default=False)
@@ -146,6 +158,10 @@ class AppointmentType(OrganizationRecord):
                 condition=Q(duration_minutes__gte=5, duration_minutes__lte=480), name="med_scheduling_type_duration"
             ),
             models.CheckConstraint(condition=Q(color__in=COLORS), name="med_scheduling_type_color"),
+            models.CheckConstraint(
+                condition=Q(payment_kind__in=("private", "insurance", "courtesy")),
+                name="med_scheduling_type_payment_kind",
+            ),
         ]
         ordering = ("name", "sysid")
 
@@ -189,6 +205,40 @@ class Schedule(SecuredRecord):
         return self.name
 
 
+class ScheduleAppointmentType(OrganizationRecord):
+    """A kind of appointment one schedule takes: its own duration there and the modes it is taken in.
+
+    A schedule with no live row takes every active kind of the practice, with the duration of the kind.
+    """
+
+    schedule = models.ForeignKey(Schedule, on_delete=models.PROTECT, related_name="+")
+    appointment_type = models.ForeignKey(AppointmentType, on_delete=models.PROTECT, related_name="+")
+    duration_minutes = models.PositiveSmallIntegerField(null=True, blank=True)  # None: the duration of the kind
+    allow_booked = models.BooleanField(default=True)
+    allow_walk_in = models.BooleanField(default=True)
+    immutable_fields = ("schedule_id", "appointment_type_id")
+
+    class Meta(OrganizationRecord.Meta):
+        # A short table name: the names the core derives from it must fit PostgreSQL's 63 bytes.
+        db_table = "med_scheduling_schedule_type"
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("schedule", "appointment_type"),
+                condition=Q(deleted_at__isnull=True),
+                name="med_scheduling_schedule_type_live",
+                violation_error_code="unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(duration_minutes__isnull=True) | Q(duration_minutes__gte=5, duration_minutes__lte=480),
+                name="med_scheduling_schedule_type_duration",
+            ),
+            models.CheckConstraint(
+                condition=Q(allow_booked=True) | Q(allow_walk_in=True), name="med_scheduling_schedule_type_mode"
+            ),
+        ]
+        ordering = ("schedule", "appointment_type", "sysid")
+
+
 class AvailabilityRule(OrganizationRecord):
     """A weekly working window of a schedule, in minutes of the day of the practice's time zone."""
 
@@ -216,6 +266,31 @@ class AvailabilityRule(OrganizationRecord):
             ),
         ]
         ordering = ("weekday", "start_minute", "sysid")
+
+
+class AvailabilityRuleType(OrganizationRecord):
+    """A kind of appointment a weekly window takes.
+
+    A window with no live row (and no ``appointment_type`` of its own, the older way of naming a
+    single kind) takes every kind the schedule takes.
+    """
+
+    rule = models.ForeignKey(AvailabilityRule, on_delete=models.PROTECT, related_name="+")
+    appointment_type = models.ForeignKey(AppointmentType, on_delete=models.PROTECT, related_name="+")
+    immutable_fields = ("rule_id", "appointment_type_id")
+
+    class Meta(OrganizationRecord.Meta):
+        # A short table name: the names the core derives from it must fit PostgreSQL's 63 bytes.
+        db_table = "med_scheduling_rule_type"
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.UniqueConstraint(
+                fields=("rule", "appointment_type"),
+                condition=Q(deleted_at__isnull=True),
+                name="med_scheduling_rule_type_live",
+                violation_error_code="unique",
+            ),
+        ]
+        ordering = ("rule", "appointment_type", "sysid")
 
 
 class ScheduleBlock(OrganizationRecord):
@@ -254,10 +329,7 @@ class Appointment(OrganizationRecord):
         NO_SHOW = "no_show", gettext_lazy("Falta")
         CANCELLED = "cancelled", gettext_lazy("Cancelada")
 
-    class PaymentKind(models.TextChoices):
-        PRIVATE = "private", gettext_lazy("Particular")
-        INSURANCE = "insurance", gettext_lazy("Convênio")
-        COURTESY = "courtesy", gettext_lazy("Cortesia")
+    PaymentKind = PaymentKind  # Kept under its first name: the choices now belong to the module.
 
     class CancelReason(models.TextChoices):
         PATIENT = "patient", gettext_lazy("Pedido do paciente")

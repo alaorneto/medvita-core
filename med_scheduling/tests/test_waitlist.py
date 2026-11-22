@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from applications.med_patients.service_api import PatientInput, PatientService
-from skeleton.service_api import Conflict
+from skeleton.service_api import Conflict, InvalidInput
 from skeleton.service_api.jobs import JobService
 from skeleton.testing.applications import open_app
 from skeleton.testing.derived import assert_derived_access_contract
@@ -121,3 +121,37 @@ def test_waitlist_follows_the_practice(skeleton_db):
     assert_derived_access_contract(
         child_model=WaitlistEntry, make_anchor=make_practice, make_child=make_entry, scenario=scenario
     )
+
+
+def test_book_from_waitlist_takes_the_payment_of_the_kind_and_the_duration_given(ready):
+    with ready.as_user(ready.a.admin) as admin:
+        insured = service().add_appointment_type(
+            actor=admin,
+            code="unimed",
+            name="Unimed",
+            duration_minutes=20,
+            payment_kind="insurance",
+            idempotency_key="unimed",
+        )
+    other = new_patient(ready, full_name="Outra Pessoa")
+    first = wait(ready, ready.patient, "a", appointment_type_id=insured.sysid)
+    second = wait(ready, other, "b", appointment_type_id=insured.sysid)
+
+    def book_entry(entry, hour, **extra):
+        with ready.as_user(ready.a.reception) as actor:
+            return service().book_from_waitlist(
+                actor=actor,
+                entry_id=entry.sysid,
+                schedule_id=ready.schedule.sysid,
+                starts_at=at(ready, hour),
+                expected_revision=entry.revision,
+                idempotency_key=f"entry-{hour}",
+                **extra,
+            )
+
+    plain = book_entry(first, 9)
+    assert (plain.payment_kind, plain.ends_at) == ("insurance", at(ready, 9, 20))
+    with pytest.raises(InvalidInput):
+        book_entry(second, 10, duration_minutes=481)
+    longer = book_entry(second, 10, duration_minutes=45)
+    assert (longer.payment_kind, longer.ends_at) == ("insurance", at(ready, 10, 45))

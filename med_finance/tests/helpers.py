@@ -67,9 +67,19 @@ def add_price(clinic: Any, code: str = "C1", amount: int = 25000, side: Any = No
 
 
 def book(
-    clinic: Any, patient: Any, *, payment_kind: str = "private", billing_code: str = "C1", side: Any = None
+    clinic: Any,
+    patient: Any,
+    *,
+    payment_kind: str | None = "private",
+    billing_code: str = "C1",
+    side: Any = None,
+    kind_payment: str = "private",
 ) -> Any:
-    """A Monday 09:00 appointment of the patient with the doctor, checked in by the reception."""
+    """A Monday 09:00 appointment of the patient with the doctor, checked in by the reception.
+
+    ``kind_payment`` is how the kind of appointment is paid for; ``payment_kind=None`` books without
+    saying it, so the appointment takes the one of the kind.
+    """
     from datetime import date, datetime, timedelta
     from zoneinfo import ZoneInfo
 
@@ -88,7 +98,12 @@ def book(
             idempotency_key="doctor",
         )
         kind = scheduling.add_appointment_type(
-            actor=admin, code="consulta", name="Consulta", billing_code=billing_code, idempotency_key="kind"
+            actor=admin,
+            code="consulta",
+            name="Consulta",
+            billing_code=billing_code,
+            payment_kind=kind_payment,
+            idempotency_key="kind",
         )
         schedule = scheduling.create_schedule(
             actor=admin,

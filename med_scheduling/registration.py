@@ -87,7 +87,7 @@ def register_practice_tables() -> None:
     register(
         TableSpec(
             model=AppointmentType,
-            description=_("Tipos de atendimento do consultório: duração, cor e código de cobrança."),
+            description=_("Tipos de atendimento do consultório: duração, forma de pagamento, cor e cobrança."),
             label=_("Tipos de atendimento"),
             scope="organization",
             read_fields=(
@@ -95,6 +95,7 @@ def register_practice_tables() -> None:
                 "code",
                 "name",
                 "duration_minutes",
+                "payment_kind",
                 "color",
                 "billing_code",
                 "requires_room",
@@ -112,7 +113,7 @@ def register_schedule_tables() -> None:
     from skeleton.system.record_operations import RecordOperations, register_record_operations
     from skeleton.system.registry import TableSpec, register
 
-    from .models import AvailabilityRule, Schedule, ScheduleBlock
+    from .models import AvailabilityRule, AvailabilityRuleType, Schedule, ScheduleAppointmentType, ScheduleBlock
 
     register(
         TableSpec(
@@ -143,6 +144,19 @@ def register_schedule_tables() -> None:
     register_record_operations("med_scheduling.schedule", RecordOperations())
     register(
         TableSpec(
+            model=ScheduleAppointmentType,
+            description=_("Tipos de atendimento que cada agenda atende, com a duração própria da agenda."),
+            label=_("Tipos da agenda"),
+            scope="organization",
+            read_fields=("schedule", "appointment_type", "duration_minutes", "allow_booked", "allow_walk_in"),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="schedule",
+        )
+    )
+    register(
+        TableSpec(
             model=AvailabilityRule,
             description=_("Grade semanal de cada agenda."),
             label=_("Grade de horários"),
@@ -160,6 +174,19 @@ def register_schedule_tables() -> None:
             sensitive_fields=(),
             expose_api=False,
             access_parent="schedule",
+        )
+    )
+    register(
+        TableSpec(
+            model=AvailabilityRuleType,
+            description=_("Tipos de atendimento que cada período da grade semanal atende."),
+            label=_("Tipos do período"),
+            scope="organization",
+            read_fields=("rule", "appointment_type"),
+            write_fields=(),
+            sensitive_fields=(),
+            expose_api=False,
+            access_parent="rule",
         )
     )
     register(

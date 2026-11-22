@@ -16,7 +16,7 @@ Referência de `SchedulingService` (`applications.med_scheduling.service_api`). 
 
 ### `SchedulingService`
 
-#### `add_appointment_type(*, actor, code, name, duration_minutes=30, color='blue', billing_code='', requires_room=False, idempotency_key=None) -> AppointmentTypeInfo`
+#### `add_appointment_type(*, actor, code, name, duration_minutes=30, color='blue', billing_code='', requires_room=False, idempotency_key=None, payment_kind='private') -> AppointmentTypeInfo`
 
 Add a kind of appointment; the code is unique in the practice.
 
@@ -88,12 +88,12 @@ The weekly grid of a schedule, by weekday and start.
 - **Erros:** NotFound para agenda ilegível.
 - **Efeitos:** nenhum.
 
-#### `available_slots(*, actor, schedule_id, start_date, end_date, appointment_type_id=None) -> tuple[Slot, ...]`
+#### `available_slots(*, actor, schedule_id, start_date, end_date, appointment_type_id=None, duration_minutes=None) -> tuple[Slot, ...]`
 
 Free slots of a schedule between two dates (inclusive, at most 62 days).
 
 - **Autorização:** leitura da agenda.
-- **Erros:** NotFound para agenda ou tipo ilegível; InvalidInput para intervalo invertido ou acima de 62 dias.
+- **Erros:** NotFound para agenda ou tipo ilegível; InvalidInput para intervalo invertido ou acima de 62 dias, ou duração fora de 5 a 480 minutos.
 - **Efeitos:** nenhum.
 
 #### `blocks(*, actor, schedule_id, start, end) -> tuple[BlockInfo, ...]`
@@ -104,20 +104,20 @@ Blocks of a schedule that overlap a window.
 - **Erros:** NotFound; InvalidInput para janela sem fuso, invertida ou acima de 400 dias.
 - **Efeitos:** nenhum.
 
-#### `book(*, actor, schedule_id, patient_id, appointment_type_id, starts_at, duration_minutes=None, fit_in=False, notes='', payment_kind='private', room_id=None, idempotency_key) -> AppointmentInfo`
+#### `book(*, actor, schedule_id, patient_id, appointment_type_id, starts_at, duration_minutes=None, fit_in=False, notes='', payment_kind=None, room_id=None, idempotency_key) -> AppointmentInfo`
 
 Book an appointment; a fit-in skips the grid and the overlap check, never a block.
 
 - **Autorização:** alteração na agenda e leitura do paciente.
-- **Erros:** NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda; InvalidInput (horário sem fuso, duração fora de 5 a 480, forma de pagamento, observação longa, sala exigida pelo tipo); Conflict("slot_unavailable", "room_unavailable", "patient_inactive", "processing_restricted").
+- **Erros:** NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda; InvalidInput (horário sem fuso, duração fora de 5 a 480, forma de pagamento, observação longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable", "room_unavailable", "patient_inactive", "processing_restricted").
 - **Efeitos:** código da sequência sem lacunas, consulta gravada, evento no calendário e ``med_scheduling.appointment_booked`` publicados; a mesma chave devolve a já marcada.
 
-#### `book_from_waitlist(*, actor, entry_id, schedule_id, starts_at, expected_revision, idempotency_key) -> AppointmentInfo`
+#### `book_from_waitlist(*, actor, entry_id, schedule_id, starts_at, expected_revision, idempotency_key, duration_minutes=None) -> AppointmentInfo`
 
 Book the appointment of a waiting patient and mark the entry booked, in one transaction.
 
 - **Autorização:** alteração no consultório e na agenda.
-- **Erros:** NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada; Conflict("stale_revision", "invalid_transition", "slot_unavailable"): com o horário ocupado a entrada continua aguardando.
+- **Erros:** NotFound; Forbidden; InvalidInput sem tipo de atendimento na entrada ou com duração fora de 5 a 480 minutos; Conflict("stale_revision", "invalid_transition", "type_not_allowed", "slot_unavailable"): com o horário ocupado, ou o tipo não atendido pela agenda, a entrada continua aguardando.
 - **Efeitos:** os de ``book`` e a entrada em "agendado" com a consulta.
 
 #### `cancel(*, actor, appointment_id, reason, expected_revision, note='') -> AppointmentInfo`
@@ -232,12 +232,12 @@ Remove a block of a schedule, with CAS, and its calendar event.
 - **Erros:** NotFound; Forbidden; Conflict("stale_revision").
 - **Efeitos:** exclusão lógica do bloqueio e do evento projetado.
 
-#### `reschedule(*, actor, appointment_id, starts_at, expected_revision, schedule_id=None, idempotency_key=None) -> AppointmentInfo`
+#### `reschedule(*, actor, appointment_id, starts_at, expected_revision, schedule_id=None, idempotency_key=None, fit_in=None) -> AppointmentInfo`
 
 Move an appointment to another time (same duration), with CAS; to another schedule, a new one.
 
 - **Autorização:** alteração na agenda atual (e na nova, quando outra).
-- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "invalid_transition", "slot_unavailable", "room_unavailable").
+- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision", "invalid_transition", "slot_unavailable", "room_unavailable"; "type_not_allowed" quando a outra agenda não atende o tipo).
 - **Efeitos:** atualiza (ou cancela e cria) a consulta e o evento do calendário e publica ``appointment_rescheduled`` (ou ``appointment_cancelled`` e ``appointment_booked``).
 
 #### `rooms(*, actor, active_only=True) -> tuple[RoomInfo, ...]`
@@ -256,6 +256,14 @@ One schedule.
 - **Erros:** NotFound para agenda inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
+#### `schedule_types(*, actor, schedule_id) -> tuple[ScheduleTypeInfo, ...]`
+
+The kinds of appointment a schedule takes, by name, each with the duration it has there.
+
+- **Autorização:** leitura da agenda.
+- **Erros:** NotFound para agenda inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
 #### `schedules(*, actor, active_only=True) -> tuple[ScheduleInfo, ...]`
 
 Schedules the actor reads, by name.
@@ -266,11 +274,11 @@ Schedules the actor reads, by name.
 
 #### `set_availability(*, actor, schedule_id, rules, expected_revision) -> tuple[AvailabilityRuleInfo, ...]`
 
-Replace the whole weekly grid of a schedule, with the schedule's revision as CAS.
+Make the weekly grid of a schedule be ``rules``, with the schedule's revision as CAS.
 
 - **Autorização:** alteração na agenda.
-- **Erros:** NotFound; Forbidden; InvalidInput para faixa inválida, sobreposta ou com tipo de outro consultório; Conflict("stale_revision").
-- **Efeitos:** exclusão lógica das faixas antigas, as novas gravadas e uma revisão nova da agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput para faixa inválida ou sobreposta, mais de 100 faixas, ou tipo novo num período que seja desconhecido, inativo, de outra organização ou que a agenda não atende; Conflict("stale_revision").
+- **Efeitos:** grava as faixas novas, exclui logicamente as que saíram (os tipos delas antes) e acerta os tipos das que ficaram; a agenda ganha uma revisão nova.
 
 #### `set_professional_active(*, actor, professional_id, active, expected_revision) -> ProfessionalInfo`
 
@@ -287,6 +295,14 @@ Share a schedule and its calendar, together, with exactly these groups and peopl
 - **Autorização:** a capacidade ``access.manage``.
 - **Erros:** Forbidden; NotFound; InvalidInput; Conflict("stale_revision").
 - **Efeitos:** revoga nas duas o que saiu e concede o que entrou; vale na requisição seguinte.
+
+#### `set_schedule_types(*, actor, schedule_id, types, expected_revision) -> tuple[ScheduleTypeInfo, ...]`
+
+Replace the kinds of appointment a schedule takes, with the schedule's revision as CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput para tipo desconhecido, inativo ou repetido, duração fora de 5 a 480 minutos ou tipo sem nenhum modo; Conflict("stale_revision").
+- **Efeitos:** grava as linhas novas, altera as que mudaram, exclui logicamente as que saíram e dá uma revisão nova à agenda. As consultas já marcadas não mudam.
 
 #### `setup(*, actor, practice_name, timezone='America/Sao_Paulo', reader_group_ids=(), manager_group_ids=(), idempotency_key) -> PracticeInfo`
 
@@ -310,7 +326,7 @@ Change a kind of appointment, with CAS; the code never changes.
 
 - **Autorização:** alteração no consultório.
 - **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
-- **Efeitos:** grava só os campos que mudaram; consultas já marcadas guardam a cópia do código de cobrança.
+- **Efeitos:** grava só os campos que mudaram; consultas já marcadas guardam a cópia do código de cobrança e da forma de pagamento.
 
 #### `update_practice(*, actor, changes, expected_revision) -> PracticeInfo`
 
@@ -436,6 +452,7 @@ An appointment as lists show it: never the notes of the reception.
 | `requires_room` | `bool` |
 | `is_active` | `bool` |
 | `revision` | `int` |
+| `payment_kind` | `str` |
 
 ### `AvailabilityRuleInfo`
 
@@ -449,6 +466,7 @@ An appointment as lists show it: never the notes of the reception.
 | `valid_from` | `date` |
 | `valid_until` | `date | None` |
 | `appointment_type_id` | `UUID | None` |
+| `appointment_type_ids` | `tuple[UUID, ...]` |
 
 ### `AvailabilityRuleInput`
 
@@ -462,6 +480,7 @@ A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice
 | `valid_from` | `date` |
 | `valid_until` | `date | None` |
 | `appointment_type_id` | `UUID | None` |
+| `appointment_type_ids` | `tuple[UUID, ...]` |
 
 ### `BlockInfo`
 
@@ -545,13 +564,40 @@ A weekly window: ``weekday`` 0 (Monday) to 6, minutes of the day in the practice
 | `revision` | `int` |
 | `writable` | `bool` |
 
+### `ScheduleTypeInfo`
+
+A kind of appointment as one schedule takes it.
+
+| Campo | Tipo |
+|---|---|
+| `appointment_type_id` | `UUID` |
+| `duration_minutes` | `int` |
+| `own_duration` | `int | None` |
+| `allow_booked` | `bool` |
+| `allow_walk_in` | `bool` |
+| `configured` | `bool` |
+
+### `ScheduleTypeInput`
+
+A kind of appointment a schedule takes: its own duration there (``None``: the one of the kind) and the modes.
+
+| Campo | Tipo |
+|---|---|
+| `appointment_type_id` | `UUID` |
+| `duration_minutes` | `int | None` |
+| `allow_booked` | `bool` |
+| `allow_walk_in` | `bool` |
+
 ### `Slot`
+
+A free time; ``appointment_type_ids`` are the kinds its period takes (none: every kind of the schedule).
 
 | Campo | Tipo |
 |---|---|
 | `starts_at` | `datetime` |
 | `ends_at` | `datetime` |
 | `schedule_id` | `UUID` |
+| `appointment_type_ids` | `tuple[UUID, ...]` |
 
 ### `WaitlistInfo`
 

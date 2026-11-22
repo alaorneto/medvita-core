@@ -99,18 +99,42 @@ def test_professionals_rooms_and_types(ready, subtests):
             service().add_appointment_type(actor=admin, code="consulta", name="Repetido")
         with pytest.raises(InvalidInput):
             service().add_appointment_type(actor=admin, code="Bad Code", name="X")
+    with subtests.test("the kind says how it is paid for"), as_admin(ready) as admin:
+        assert consult.payment_kind == "private"
+        insured = service().add_appointment_type(actor=admin, code="unimed", name="Unimed", payment_kind="insurance")
+        assert insured.payment_kind == "insurance"
+        changed = service().update_appointment_type(
+            actor=admin,
+            type_id=insured.sysid,
+            changes=(("payment_kind", "courtesy"), ("duration_minutes", 20)),
+            expected_revision=insured.revision,
+        )
+        assert (changed.payment_kind, changed.duration_minutes) == ("courtesy", 20)
+        with pytest.raises(InvalidInput) as error:
+            service().add_appointment_type(actor=admin, code="vale", name="Vale", payment_kind="voucher")
+        assert set(error.value.errors) == {"payment_kind"}
+        with pytest.raises(InvalidInput) as error:
+            service().update_appointment_type(
+                actor=admin, type_id=insured.sysid, changes=(("payment_kind", ""),), expected_revision=changed.revision
+            )
+        assert set(error.value.errors) == {"payment_kind"}
+        assert [row.payment_kind for row in service().appointment_types(actor=admin)] == ["private", "courtesy"]
     with subtests.test("my professional"), ready.as_user(ready.a.doctor) as actor:
         assert service().my_professional(actor=actor).sysid == doctor.sysid
     with subtests.test("reception reads and does not change"), ready.as_user(ready.a.reception) as actor:
         assert [row.sysid for row in service().professionals(actor=actor)] == [doctor.sysid]
         assert [row.sysid for row in service().rooms(actor=actor)] == [room.sysid]
-        assert [row.code for row in service().appointment_types(actor=actor)] == ["consulta"]
+        assert [row.code for row in service().appointment_types(actor=actor)] == ["consulta", "unimed"]
         assert service().my_professional(actor=actor) is None
         with pytest.raises(Forbidden):
             service().add_room(actor=actor, name="Sala 2")
         with pytest.raises(Forbidden):
             service().update_appointment_type(
                 actor=actor, type_id=consult.sysid, changes=(("name", "X"),), expected_revision=1
+            )
+        with pytest.raises(Forbidden):
+            service().update_appointment_type(
+                actor=actor, type_id=consult.sysid, changes=(("payment_kind", "insurance"),), expected_revision=1
             )
     with subtests.test("CAS"):
 

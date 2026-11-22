@@ -2,13 +2,13 @@
 
 from django import template
 
-from ..models import Appointment, Room, ScheduleBlock, WaitlistEntry
+from ..models import Appointment, PaymentKind, Room, ScheduleBlock, WaitlistEntry
 
 register = template.Library()
 
 CHOICES = {
     "status": Appointment.Status,
-    "payment_kind": Appointment.PaymentKind,
+    "payment_kind": PaymentKind,
     "cancel_reason": Appointment.CancelReason,
     "room_kind": Room.Kind,
     "block_reason": ScheduleBlock.Reason,

@@ -78,7 +78,7 @@ Valores sempre em inteiros de centavos.
 
 ### Agenda e página do paciente
 
-- "Receber" (`med_finance.collect`) aparece nas consultas em "chegou", "em atendimento" e "concluída". `charge_for_appointment` cria (ou devolve) a conta da consulta particular com o código de cobrança do tipo de atendimento e o preço da tabela do caixa padrão, origem `med_scheduling`; convênio, cortesia, consulta cancelada ou falta não geram conta.
+- "Receber" (`med_finance.collect`) aparece nas consultas em "chegou", "em atendimento" e "concluída". `charge_for_appointment` cria (ou devolve) a conta da consulta particular com o código de cobrança do tipo de atendimento e o preço da tabela do caixa padrão, origem `med_scheduling`; convênio, cortesia, consulta cancelada ou falta não geram conta. A forma de pagamento da consulta vem do tipo de atendimento (a agenda copia a do tipo na marcação, salvo valor explícito): uma consulta de um tipo de convênio não gera conta mesmo marcada sem dizer a forma de pagamento.
 - **Sem conta automática por evento.** A conta não nasce sozinha na chegada ou na conclusão: o consumidor de eventos do núcleo roda em contexto de sistema, sem ator, e nesse contexto não há como numerar a conta (`SequenceService`) nem ler o título do livro. A recepção usa "Receber"; a lacuna está registrada no núcleo.
 - Aba "Financeiro" (`med_finance.account`, ordem 40), visível só para quem lê algum caixa; linha do tempo "Conta emitida" e "Pagamento recebido", sem valores; relatório do titular com contas (código, vencimento, total, situação) e recibos (número, valor).
 - Guarda de retenção `med_finance.retention`: veta excluir ou anonimizar o paciente com conta dos últimos 5 anos (guarda fiscal; confirme o prazo com o contador).

@@ -6,6 +6,7 @@ Hours are shown on the practice's clock. A schedule or appointment the actor can
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -26,7 +27,7 @@ from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
 from skeleton.web.views import tenant_page
 
 from . import forms as scheduling_forms
-from .service_api import AvailabilityRuleInput, SchedulingService
+from .service_api import AvailabilityRuleInput, ScheduleTypeInput, SchedulingService
 from .transitions import actions_from
 
 TRANSITION_LABELS = {
@@ -42,10 +43,14 @@ def _service() -> SchedulingService:
     return SchedulingService()
 
 
-def conflict_text(error: Conflict) -> str:
+def conflict_text(error: Conflict, *, stale: str | None = None) -> str:
+    """The message of a conflict; ``stale`` names what changed when it was not an appointment."""
+    if error.code == "stale_revision" and stale:
+        return stale
     texts = {
         "stale_revision": gettext("A consulta mudou desde que a página abriu. Atualize a página e tente de novo."),
         "slot_unavailable": gettext("O horário não está livre."),
+        "type_not_allowed": gettext("Esta agenda não atende este tipo de atendimento."),
         "room_unavailable": gettext("A sala já está ocupada neste horário."),
         "invalid_transition": gettext("Esta mudança não é permitida na situação atual."),
         "patient_inactive": gettext("O paciente não está ativo."),
@@ -54,6 +59,10 @@ def conflict_text(error: Conflict) -> str:
         "integrity_conflict": gettext("Já existe um registro com esses dados."),
     }
     return texts.get(error.code, gettext("A operação conflita com o estado atual."))
+
+
+def _schedule_changed() -> str:
+    return gettext("A agenda mudou desde que a página abriu. Confira como ela ficou e salve de novo.")
 
 
 def _messages_of(error: InvalidInput) -> str:
@@ -109,10 +118,57 @@ def _context(request: HttpRequest, organization_id: UUID, section: str, **values
     return {"organization_id": organization_id, "section": section, **values}
 
 
-def _with_patients(request: HttpRequest, rows: Any, zone: ZoneInfo) -> list[dict[str, Any]]:
+def _type_colors(request: HttpRequest) -> dict[UUID, str]:
+    """The colour of each kind of appointment, read once per page (inactive kinds keep theirs)."""
+    try:
+        kinds = _service().appointment_types(actor=request.user, active_only=False)
+    except (Forbidden, NotFound):
+        return {}
+    return {kind.sysid: kind.color for kind in kinds}
+
+
+def _active_kinds(request: HttpRequest) -> tuple[Any, ...]:
+    try:
+        return _service().appointment_types(actor=request.user)
+    except (Forbidden, NotFound):
+        return ()
+
+
+def _all_kinds(request: HttpRequest) -> tuple[Any, ...]:
+    """Every kind of the practice, the inactive ones too: a period may still list one."""
+    try:
+        return _service().appointment_types(actor=request.user, active_only=False)
+    except (Forbidden, NotFound):
+        return ()
+
+
+def _kinds_of(request: HttpRequest, schedule_id: UUID, kinds: tuple[Any, ...]) -> list[dict[str, Any]]:
+    """The kinds a schedule takes, by name: the kind, how the schedule takes it and the duration there."""
+    by_id = {kind.sysid: kind for kind in kinds}
+    taken = _service().schedule_types(actor=request.user, schedule_id=schedule_id)
+    return [
+        {"kind": by_id[item.appointment_type_id], "taken": item, "minutes": item.duration_minutes}
+        for item in taken
+        if item.appointment_type_id in by_id
+    ]
+
+
+def _with_patients(
+    request: HttpRequest, rows: Any, zone: ZoneInfo, colors: dict[UUID, str] | None = None
+) -> list[dict[str, Any]]:
+    """The items of a list of appointments; a kind without a known colour falls back to the template's gray."""
     rows = list(rows)
     names = _patient_names(request, [row.patient_id for row in rows])
-    return [{"row": row, "patient": names.get(row.patient_id), "local": row.starts_at.astimezone(zone)} for row in rows]
+    colors = colors or {}
+    return [
+        {
+            "row": row,
+            "patient": names.get(row.patient_id),
+            "local": row.starts_at.astimezone(zone),
+            "color": colors.get(row.appointment_type_id, ""),
+        }
+        for row in rows
+    ]
 
 
 # ------------------------------------------------------------------------------------- agenda
@@ -136,10 +192,11 @@ def day_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     except (Forbidden, NotFound):
         agendas = ()
     zone = ZoneInfo(practice.timezone)
+    colors = _type_colors(request)
     columns = [
         {
             "schedule": agenda.schedule,
-            "appointments": _with_patients(request, agenda.appointments, zone),
+            "appointments": _with_patients(request, agenda.appointments, zone, colors),
             "free": [slot.starts_at.astimezone(zone) for slot in agenda.free],
         }
         for agenda in agendas
@@ -170,6 +227,7 @@ def week_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) ->
     start = _day_param(request, "start")
     start = start - timedelta(days=start.weekday())
     zone = ZoneInfo(practice.timezone)
+    colors = _type_colors(request)
     rows = []
     for offset in range(7):
         day = start + timedelta(days=offset)
@@ -178,7 +236,7 @@ def week_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) ->
         rows.append(
             {
                 "day": day,
-                "appointments": _with_patients(request, agenda.appointments if agenda else (), zone),
+                "appointments": _with_patients(request, agenda.appointments if agenda else (), zone, colors),
                 "free": [slot.starts_at.astimezone(zone) for slot in (agenda.free if agenda else ())],
             }
         )
@@ -215,15 +273,57 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         except (NotFound, InvalidInput, ValueError):
             raise Http404 from None
     schedules = _service().schedules(actor=request.user)
-    types = _service().appointment_types(actor=request.user)
     data = request.POST or (request.GET if request.GET.get("schedule") else None)
-    form = scheduling_forms.BookForm(data, schedules=schedules, types=types, initial={"day": dj_timezone.localdate()})
+    asked = data if data is not None else request.GET
+    # The kinds offered are the ones of the schedule in the form: the one asked for, or the first of the list.
+    writable = [item for item in schedules if item.writable]
+    schedule = next((item for item in writable if str(item.sysid) == asked.get("schedule")), None)
+    schedule = schedule or (writable[0] if writable else None)
+    offered = _kinds_of(request, schedule.sysid, _active_kinds(request)) if schedule else []
+    offered = [item for item in offered if item["taken"].allow_booked]
+    wanted = asked.get("appointment_type", "")
+    if entry_id and wanted:
+        # From the waitlist the kind is the one of the entry.
+        offered = [item for item in offered if str(item["kind"].sysid) == wanted]
+    selected = next((item for item in offered if str(item["kind"].sysid) == wanted), offered[0] if offered else None)
+    suggested = selected["minutes"] if selected else None
+    if data is not None:
+        # A duration nobody typed follows the kind: empty, or still the one the page had suggested.
+        data = data.copy()
+        typed, before = (data.get(name, "").strip() for name in ("duration", "suggested_duration"))
+        if not typed or (request.method != "POST" and typed == before):
+            data["duration"] = "" if suggested is None else str(suggested)
+        data["suggested_duration"] = "" if suggested is None else str(suggested)
+    form = scheduling_forms.BookForm(
+        data,
+        schedules=schedules,
+        type_choices=[
+            (
+                str(item["kind"].sysid),
+                gettext("%(name)s · %(minutes)s min") % {"name": item["kind"].name, "minutes": item["minutes"]},
+            )
+            for item in offered
+        ],
+        initial={
+            "day": dj_timezone.localdate(),
+            "appointment_type": wanted,
+            "duration": suggested,
+            "suggested_duration": suggested,
+        },
+    )
+    # For the optional script: the duration of each kind offered, so it follows the kind as it is picked.
+    form.fields["appointment_type"].widget.attrs["data-kind-durations"] = json.dumps(
+        {str(item["kind"].sysid): item["minutes"] for item in offered}
+    )
     slots: list[datetime] = []
+    chosen: dict[str, Any] | None = None
     status = 200
     zone = ZoneInfo(practice.timezone)
     if data is not None and form.is_valid() and patient is not None:
         values = form.cleaned_data
         schedule_id, type_id = UUID(values["schedule"]), UUID(values["appointment_type"])
+        duration = values["duration"] or suggested
+        chosen = {"kind": selected["kind"], "suggested": suggested, "minutes": duration}
         if request.method == "POST":
             starts_at: datetime | None = None
             if values["fit_in"] and values["fit_in_time"]:
@@ -247,6 +347,7 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                                 starts_at=starts_at,
                                 expected_revision=_revision(request),
                                 idempotency_key=_key(request),
+                                duration_minutes=duration,
                             )
                         else:
                             appointment = _service().book(
@@ -255,9 +356,10 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                                 patient_id=patient.sysid,
                                 appointment_type_id=type_id,
                                 starts_at=starts_at,
+                                duration_minutes=duration,
                                 fit_in=values["fit_in"],
                                 notes=values["notes"],
-                                payment_kind=values["payment_kind"] or "private",
+                                payment_kind=values["payment_kind"] or None,
                                 idempotency_key=_key(request),
                             )
                 except (Forbidden, NotFound):
@@ -277,6 +379,7 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             start_date=values["day"],
             end_date=values["day"],
             appointment_type_id=type_id,
+            duration_minutes=duration,
         )
         slots = [slot.starts_at for slot in found]
     elif request.method == "POST":
@@ -292,6 +395,8 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             patients=patients,
             patient=patient,
             form=form,
+            chosen=chosen,
+            no_kinds=schedule is not None and not offered,
             slots=[{"value": slot.isoformat(), "local": slot.astimezone(zone)} for slot in slots],
             idempotency_key=_key(request),
             entry_id=entry_id,
@@ -435,7 +540,7 @@ def reception_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     agendas = _service().day(actor=request.user, date=today)
     zone = ZoneInfo(practice.timezone)
     rows = [row for agenda in agendas for row in agenda.appointments]
-    items = _with_patients(request, rows, zone)
+    items = _with_patients(request, rows, zone, _type_colors(request))
     schedules = {agenda.schedule.sysid: agenda.schedule for agenda in agendas}
     for item in items:
         item["schedule"] = schedules.get(item["row"].schedule_id)
@@ -605,6 +710,56 @@ def settings_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
 
 
 @tenant_page()
+def type_edit_view(request: HttpRequest, organization_id: UUID, type_id: UUID) -> HttpResponse:
+    """Change a kind of appointment; only who updates the practice opens it."""
+    practice = _practice_or_none(request)
+    if practice is None or not practice.writable:
+        raise Http404
+    kinds = _service().appointment_types(actor=request.user, active_only=False)
+    kind = next((item for item in kinds if item.sysid == type_id), None)
+    if kind is None:
+        raise Http404
+    initial = {name: getattr(kind, name) for name in scheduling_forms.TypeEditForm.base_fields}
+    form = scheduling_forms.TypeEditForm(request.POST or None, initial=initial)
+    status = 200
+    if request.method == "POST":
+        status = 400
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    _service().update_appointment_type(
+                        actor=request.user,
+                        type_id=type_id,
+                        changes=tuple(form.cleaned_data.items()),
+                        expected_revision=_revision(request),
+                    )
+            except (NotFound, Forbidden):
+                raise Http404 from None
+            except InvalidInput as error:
+                scheduling_forms.apply_service_errors(form, error)
+            except Conflict as error:
+                if error.code == "stale_revision":
+                    # The page reopens with what the kind is now, so nobody saves over what they did not see.
+                    messages.error(
+                        request,
+                        gettext(
+                            "O tipo de atendimento mudou desde que a página abriu. Confira como ele ficou e salve de novo."
+                        ),
+                    )
+                    return redirect("med_scheduling:type-edit", organization_id, type_id)
+                form.add_error(None, conflict_text(error))
+            else:
+                messages.success(request, gettext("Tipo de atendimento salvo."))
+                return redirect("med_scheduling:settings", organization_id)
+    return render(
+        request,
+        "med_scheduling/type_edit.html",
+        _context(request, organization_id, "settings", kind=kind, form=form),
+        status=status,
+    )
+
+
+@tenant_page()
 def schedules_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     from skeleton.service_api.access import AccessService
     from skeleton.service_api.organizations import OrganizationService
@@ -664,67 +819,137 @@ def schedules_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     )
 
 
-def _grid_rules(form: Any) -> tuple[AvailabilityRuleInput, ...]:
-    rules = []
-    for weekday, _label in scheduling_forms.WEEKDAYS:
-        for slot in (1, 2):
-            start = form.cleaned_data.get(f"d{weekday}_{slot}_start")
-            end = form.cleaned_data.get(f"d{weekday}_{slot}_end")
-            if start and end:
-                rules.append(
-                    AvailabilityRuleInput(
-                        weekday=weekday,
-                        start_minute=start.hour * 60 + start.minute,
-                        end_minute=end.hour * 60 + end.minute if end != time(0) else 1440,
-                        valid_from=form.cleaned_data["valid_from"],
-                    )
-                )
-    return tuple(rules)
+def _kept(rule: Any) -> AvailabilityRuleInput:
+    """A period of the grid as it is, so the grid is saved again with it untouched."""
+    return AvailabilityRuleInput(
+        rule.weekday,
+        rule.start_minute,
+        rule.end_minute,
+        rule.valid_from,
+        rule.valid_until,
+        None,
+        rule.appointment_type_ids,
+    )
+
+
+def _typed(period: Any) -> AvailabilityRuleInput:
+    """A period a form read (``forms.Period``)."""
+    return AvailabilityRuleInput(
+        period.weekday,
+        period.start_minute,
+        period.end_minute,
+        period.valid_from,
+        period.valid_until,
+        None,
+        period.kinds,
+    )
+
+
+def _grid_or_404(request: HttpRequest, schedule_id: UUID) -> tuple[Any, tuple[Any, ...]]:
+    try:
+        schedule = _service().schedule(actor=request.user, schedule_id=schedule_id)
+        return schedule, _service().availability(actor=request.user, schedule_id=schedule_id)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+
+
+def _week(rules: Any, every: tuple[Any, ...], offered: set[UUID], today: date) -> list[dict[str, Any]]:
+    """The weekly grid for the page: the seven weekdays, each with its periods and the names of their kinds.
+
+    A period with no kinds takes every kind of the schedule. A kind the schedule no longer takes
+    stays listed, marked, until somebody changes the period.
+    """
+    names = {kind.sysid: kind.name for kind in every}
+    days: dict[int, list[dict[str, Any]]] = {weekday: [] for weekday, _label in scheduling_forms.WEEKDAYS}
+    for rule in rules:
+        days[rule.weekday].append(
+            {
+                "rule": rule,
+                "start": scheduling_forms.clock(rule.start_minute),
+                "end": scheduling_forms.clock(rule.end_minute),
+                "kinds": [
+                    {"name": names.get(type_id, gettext("Tipo não disponível")), "taken": type_id in offered}
+                    for type_id in rule.appointment_type_ids
+                ],
+                "starts": rule.valid_from if rule.valid_from > today else None,
+                "until": rule.valid_until,
+                "ended": rule.valid_until is not None and rule.valid_until < today,
+            }
+        )
+    return [
+        {"number": weekday, "label": label, "periods": days[weekday]} for weekday, label in scheduling_forms.WEEKDAYS
+    ]
 
 
 @tenant_page()
 def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
     practice = _practice_or_none(request)
-    try:
-        schedule = _service().schedule(actor=request.user, schedule_id=schedule_id)
-        rules = _service().availability(actor=request.user, schedule_id=schedule_id)
-    except (NotFound, Forbidden):
-        raise Http404 from None
+    schedule, rules = _grid_or_404(request, schedule_id)
     zone = ZoneInfo(practice.timezone)
-    initial: dict[str, Any] = {"valid_from": dj_timezone.localdate()}
-    counters: dict[int, int] = {}
-    for rule in rules:
-        slot = counters.get(rule.weekday, 0) + 1
-        counters[rule.weekday] = slot
-        if slot <= 2:
-            initial[f"d{rule.weekday}_{slot}_start"] = time(rule.start_minute // 60, rule.start_minute % 60)
-            initial[f"d{rule.weekday}_{slot}_end"] = time((rule.end_minute // 60) % 24, rule.end_minute % 60)
-        initial["valid_from"] = rule.valid_from
-    grid_form = scheduling_forms.AvailabilityForm(initial=initial, prefix="grid")
-    block_form = scheduling_forms.BlockForm(prefix="block")
+    today = dj_timezone.localdate()
+    every = _all_kinds(request)
+    kinds = tuple(kind for kind in every if kind.is_active)
+    taken = _kinds_of(request, schedule_id, kinds)
+    offered = [item["kind"] for item in taken]
+    configured = {item["kind"].sysid: item["taken"] for item in taken if item["taken"].configured}
+    types_form_class = scheduling_forms.ScheduleTypesForm
+    types_initial: dict[str, Any] = {
+        "scope": types_form_class.CHOSEN if configured else types_form_class.ALL,
+        **{types_form_class.on(item): item.sysid in configured for item in kinds},
+        **{
+            types_form_class.minutes(item): configured[item.sysid].own_duration
+            for item in kinds
+            if item.sysid in configured
+        },
+    }
+    page_forms: dict[str, Any] = {
+        "periods": scheduling_forms.PeriodsForm(
+            initial={"valid_from": today}, prefix="periods", kinds=offered, existing=rules
+        ),
+        "types": types_form_class(initial=types_initial, prefix="types", kinds=kinds),
+        "block": scheduling_forms.BlockForm(prefix="block"),
+    }
     status = 200
     if request.method == "POST":
         if not schedule.writable:
             raise Http404
-        kind = request.POST.get("form")
-        if kind not in ("grid", "block"):
+        kind = request.POST.get("form", "")
+        if kind not in page_forms:
             raise Http404
         status = 400
-        target = scheduling_forms.AvailabilityForm(request.POST, prefix="grid") if kind == "grid" else None
-        if kind == "block":
-            target = scheduling_forms.BlockForm(request.POST, prefix="block")
-            block_form = target
-        else:
-            grid_form = target
+        extra: dict[str, Any] = {}
+        if kind == "types":
+            extra = {"kinds": kinds}
+        elif kind == "periods":
+            extra = {"kinds": offered, "existing": rules}
+        target = type(page_forms[kind])(request.POST, prefix=kind, **extra)
+        page_forms[kind] = target
         if target.is_valid():
             values = target.cleaned_data
             try:
                 with transaction.atomic():
-                    if kind == "grid":
+                    if kind == "periods":
+                        # The grid as it is plus the periods typed: the ones that stay keep their rows.
                         _service().set_availability(
                             actor=request.user,
                             schedule_id=schedule_id,
-                            rules=_grid_rules(target),
+                            rules=(*map(_kept, rules), *map(_typed, target.periods)),
+                            expected_revision=_revision(request),
+                        )
+                    elif kind == "types":
+                        # The modes of a kind are not on this page: a kind that stays keeps the ones it has.
+                        _service().set_schedule_types(
+                            actor=request.user,
+                            schedule_id=schedule_id,
+                            types=tuple(
+                                ScheduleTypeInput(
+                                    type_id,
+                                    minutes,
+                                    configured[type_id].allow_booked if type_id in configured else True,
+                                    configured[type_id].allow_walk_in if type_id in configured else True,
+                                )
+                                for type_id, minutes in target.chosen()
+                            ),
                             expected_revision=_revision(request),
                         )
                     else:
@@ -742,9 +967,18 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
             except InvalidInput as error:
                 scheduling_forms.apply_service_errors(target, error)
             except Conflict as error:
-                target.add_error(None, conflict_text(error))
+                if kind in ("types", "periods") and error.code == "stale_revision":
+                    # The page reopens with the schedule as it is now, so nobody saves over what they did not see.
+                    messages.error(request, _schedule_changed())
+                    return redirect("med_scheduling:schedule", organization_id, schedule_id)
+                target.add_error(None, conflict_text(error, stale=_schedule_changed()))
             else:
-                messages.success(request, gettext("Grade salva.") if kind == "grid" else gettext("Bloqueio incluído."))
+                saved = {
+                    "periods": gettext("Períodos incluídos na grade semanal."),
+                    "types": gettext("Tipos de atendimento da agenda salvos."),
+                    "block": gettext("Bloqueio incluído."),
+                }
+                messages.success(request, saved[kind])
                 return redirect("med_scheduling:schedule", organization_id, schedule_id)
     now = dj_timezone.now()
     blocks = _service().blocks(
@@ -758,8 +992,12 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
             organization_id,
             "schedules",
             schedule=schedule,
-            grid_form=grid_form,
-            block_form=block_form,
+            week=_week(rules, every, {kind.sysid for kind in offered}, today),
+            periods_form=page_forms["periods"],
+            types_form=page_forms["types"],
+            block_form=page_forms["block"],
+            taken=taken,
+            every_kind=not configured,
             blocks=[
                 {"block": block, "start": block.starts_at.astimezone(zone), "end": block.ends_at.astimezone(zone)}
                 for block in blocks
@@ -768,6 +1006,108 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
         ),
         status=status,
     )
+
+
+@tenant_page()
+def period_edit_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID, rule_id: UUID) -> HttpResponse:
+    """Change one period of the weekly grid; only who writes the schedule opens it."""
+    schedule, rules = _grid_or_404(request, schedule_id)
+    rule = next((item for item in rules if item.sysid == rule_id), None)
+    if not schedule.writable or rule is None:
+        raise Http404
+    others = tuple(item for item in rules if item.sysid != rule_id)
+    every = _all_kinds(request)
+    offered = [item["kind"] for item in _kinds_of(request, schedule_id, tuple(k for k in every if k.is_active))]
+    offered_ids = {kind.sysid for kind in offered}
+    names = {kind.sysid: kind.name for kind in every}
+    # Kinds the period lists and the schedule no longer takes: they are not offered, so they leave on saving.
+    leaving = [
+        names.get(type_id, gettext("Tipo não disponível"))
+        for type_id in rule.appointment_type_ids
+        if type_id not in offered_ids
+    ]
+    initial = {
+        "weekday": rule.weekday,
+        "start": time(rule.start_minute // 60, rule.start_minute % 60),
+        "end": time((rule.end_minute // 60) % 24, rule.end_minute % 60),
+        "kinds": [str(type_id) for type_id in rule.appointment_type_ids if type_id in offered_ids],
+        "valid_from": rule.valid_from,
+        "valid_until": rule.valid_until,
+    }
+    form = scheduling_forms.PeriodForm(request.POST or None, initial=initial, kinds=offered, existing=others)
+    status = 200
+    if request.method == "POST":
+        status = 400
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    _service().set_availability(
+                        actor=request.user,
+                        schedule_id=schedule_id,
+                        rules=(*map(_kept, others), _typed(form.period)),
+                        expected_revision=_revision(request),
+                    )
+            except (NotFound, Forbidden):
+                raise Http404 from None
+            except InvalidInput as error:
+                scheduling_forms.apply_service_errors(form, error)
+            except Conflict as error:
+                if error.code == "stale_revision":
+                    # The grid is shown as it is now: the period may have changed, or left it.
+                    messages.error(request, _schedule_changed())
+                    return redirect("med_scheduling:schedule", organization_id, schedule_id)
+                form.add_error(None, conflict_text(error))
+            else:
+                messages.success(request, gettext("Período salvo."))
+                return redirect("med_scheduling:schedule", organization_id, schedule_id)
+    return render(
+        request,
+        "med_scheduling/period_edit.html",
+        _context(
+            request,
+            organization_id,
+            "schedules",
+            schedule=schedule,
+            form=form,
+            leaving=leaving,
+            period={
+                "weekday": dict(scheduling_forms.WEEKDAYS)[rule.weekday],
+                "start": scheduling_forms.clock(rule.start_minute),
+                "end": scheduling_forms.clock(rule.end_minute),
+            },
+        ),
+        status=status,
+    )
+
+
+@require_POST
+@tenant_page()
+def period_remove(request: HttpRequest, organization_id: UUID, schedule_id: UUID, rule_id: UUID) -> HttpResponse:
+    """Take one period out of the weekly grid; the appointments already booked in it do not change."""
+    schedule, rules = _grid_or_404(request, schedule_id)
+    if not schedule.writable:
+        raise Http404
+    kept = tuple(item for item in rules if item.sysid != rule_id)
+    if len(kept) == len(rules):
+        messages.error(request, gettext("Este período já não está na grade."))
+        return redirect("med_scheduling:schedule", organization_id, schedule_id)
+    try:
+        with transaction.atomic():
+            _service().set_availability(
+                actor=request.user,
+                schedule_id=schedule_id,
+                rules=tuple(map(_kept, kept)),
+                expected_revision=_revision(request),
+            )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except InvalidInput as error:
+        messages.error(request, _messages_of(error))
+    except Conflict as error:
+        messages.error(request, conflict_text(error, stale=_schedule_changed()))
+    else:
+        messages.success(request, gettext("Período removido da grade semanal."))
+    return redirect("med_scheduling:schedule", organization_id, schedule_id)
 
 
 @require_POST

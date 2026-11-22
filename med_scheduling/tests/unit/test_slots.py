@@ -1,10 +1,11 @@
-"""Free slots: windows, durations, blocks, appointments, validity, daylight saving, horizon and past."""
+"""Free slots: windows, durations, blocks, appointments, kinds, validity, daylight saving, horizon and past."""
 
 from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from ...slots import Window, compute_slots, fits_grid, localize
+from ...slots import Window, collide, compute_slots, fits_grid, localize, typed_slots, windows_of
 
 SP = "America/Sao_Paulo"
 MONDAY = date(2026, 6, 1)  # A Monday.
@@ -16,7 +17,18 @@ def local(day, hour, minute=0, zone=SP):
 
 
 def slots(
-    windows, taken=(), *, start=MONDAY, end=MONDAY, slot=30, duration=30, zone=SP, now=NOW, horizon=365, kind=None
+    windows,
+    taken=(),
+    *,
+    start=MONDAY,
+    end=MONDAY,
+    slot=30,
+    duration=30,
+    zone=SP,
+    now=NOW,
+    horizon=365,
+    kind=None,
+    any_type=False,
 ):
     found = compute_slots(
         windows=windows,
@@ -29,6 +41,7 @@ def slots(
         now=now,
         horizon_days=horizon,
         appointment_type_id=kind,
+        any_type=any_type,
     )
     return [start.astimezone(ZoneInfo(zone)).strftime("%H:%M") for start, _end in found]
 
@@ -68,6 +81,13 @@ def test_window_restricted_to_a_type():
     assert slots([window], kind=uuid4()) == [] and slots([window]) == []
 
 
+def test_any_type_includes_the_restricted_windows():
+    restricted = morning(appointment_type_id=uuid4())
+    afternoon = Window(0, 14 * 60, 15 * 60, date(2026, 1, 1), appointment_type_id=uuid4())
+    assert slots([restricted, afternoon], any_type=True) == ["08:00", "08:30", "09:00", "09:30", "14:00", "14:30"]
+    assert slots([restricted, morning()], any_type=True) == ["08:00", "08:30", "09:00", "09:30"]
+
+
 def test_daylight_saving_in_new_york():
     zone = "America/New_York"
     spring = date(2026, 3, 8)  # Clocks jump from 02:00 to 03:00.
@@ -98,3 +118,100 @@ def test_fits_grid():
     assert not fits_grid(
         windows, local(MONDAY + timedelta(days=1), 8), local(MONDAY + timedelta(days=1), 9), timezone=SP
     )
+
+
+def test_a_window_takes_the_kinds_of_its_set(subtests):
+    first, second, other = uuid4(), uuid4(), uuid4()
+    window = morning(appointment_type_ids=frozenset({first, second}))
+    hours = ["08:00", "08:30", "09:00", "09:30"]
+    with subtests.test("a kind of the set"):
+        assert slots([window], kind=first) == slots([window], kind=second) == hours
+    with subtests.test("a kind out of the set, and no kind at all"):
+        assert slots([window], kind=other) == [] and slots([window]) == []
+    with subtests.test("any type asks for every window"):
+        assert slots([window], any_type=True) == hours
+    with subtests.test("the single kind of an older window joins the set"):
+        joined = morning(appointment_type_id=other, appointment_type_ids=frozenset({first}))
+        assert joined.types == {first, other}
+        assert slots([joined], kind=other) == slots([joined], kind=first) == hours
+        assert slots([joined], kind=second) == []
+    with subtests.test("a window built as before takes every kind"):
+        plain = Window(0, 8 * 60, 10 * 60, date(2026, 1, 1))
+        assert plain.types == frozenset() and plain.appointment_type_ids == frozenset()
+        assert slots([plain], kind=other) == slots([plain]) == hours
+    with subtests.test("booking inside the grid asks the same question"):
+        assert fits_grid([window], local(MONDAY, 8), local(MONDAY, 9), timezone=SP, appointment_type_id=first)
+        assert not fits_grid([window], local(MONDAY, 8), local(MONDAY, 9), timezone=SP, appointment_type_id=other)
+        assert not fits_grid([window], local(MONDAY, 8), local(MONDAY, 9), timezone=SP)
+
+
+def test_each_free_slot_says_the_kinds_of_its_window():
+    first, second = uuid4(), uuid4()
+    restricted = morning(appointment_type_ids=frozenset({first, second}))
+    open_window = Window(0, 14 * 60, 15 * 60, date(2026, 1, 1))
+    arguments = {
+        "windows": [restricted, open_window],
+        "taken": [],
+        "start_date": MONDAY,
+        "end_date": MONDAY,
+        "slot_minutes": 60,
+        "duration_minutes": 60,
+        "timezone": SP,
+        "now": NOW,
+        "horizon_days": 365,
+    }
+    found = typed_slots(**arguments, any_type=True)
+    assert [kinds for _start, _end, kinds in found] == [{first, second}, {first, second}, frozenset()]
+    assert compute_slots(**arguments, any_type=True) == [(start, end) for start, end, _kinds in found]
+    assert [kinds for _start, _end, kinds in typed_slots(**arguments, appointment_type_id=first)] == [
+        {first, second},
+        {first, second},
+        frozenset(),
+    ]
+
+
+def test_windows_take_the_kinds_listed_for_their_rules():
+    first, second, legacy = uuid4(), uuid4(), uuid4()
+
+    def rule(pk, appointment_type_id=None):
+        return SimpleNamespace(
+            pk=pk,
+            weekday=0,
+            start_minute=480,
+            end_minute=600,
+            valid_from=date(2026, 1, 1),
+            valid_until=None,
+            appointment_type_id=appointment_type_id,
+        )
+
+    listed, plain, older = rule(uuid4()), rule(uuid4()), rule(uuid4(), legacy)
+    windows = windows_of([listed, plain, older], {listed.pk: [first, second], older.pk: [first]})
+    assert [window.types for window in windows] == [{first, second}, frozenset(), {first, legacy}]
+    assert [window.types for window in windows_of([listed, older])] == [frozenset(), {legacy}]
+
+
+def test_two_windows_collide_when_weekday_minutes_and_validity_cross(subtests):
+    def window(start, end, weekday=0, valid_from=date(2026, 1, 1), valid_until=None):
+        return Window(weekday, start, end, valid_from, valid_until)
+
+    base = window(480, 720)
+    cases = {
+        "the same minutes": (window(480, 720), True),
+        "one inside the other": (window(540, 600), True),
+        "crossing the end": (window(660, 780), True),
+        "touching ends": (window(720, 780), False),
+        "before": (window(420, 480), False),
+        "another weekday": (window(480, 720, weekday=1), False),
+        "valid only before": (window(480, 720, valid_from=date(2025, 1, 1), valid_until=date(2025, 12, 31)), False),
+        "valid until the first day of the other": (
+            window(480, 720, valid_from=date(2025, 1, 1), valid_until=date(2026, 1, 1)),
+            True,
+        ),
+        "valid later, without an end": (window(480, 720, valid_from=date(2030, 1, 1)), True),
+    }
+    for name, (other, expected) in cases.items():
+        with subtests.test(name):
+            assert collide(base, other) is expected and collide(other, base) is expected
+    with subtests.test("an ended window and one that starts after it"):
+        ended = window(480, 720, valid_until=date(2026, 6, 30))
+        assert not collide(ended, window(480, 720, valid_from=date(2026, 7, 1)))

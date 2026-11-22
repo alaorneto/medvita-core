@@ -48,6 +48,16 @@ def test_insurance_appointment_has_no_charge(ready):
         service().charge_for_appointment(actor=actor, appointment_id=appointment.sysid, idempotency_key="a")
 
 
+def test_an_appointment_of_an_insurance_kind_has_no_charge(ready):
+    """Booked without saying the payment, the appointment is paid for as its kind says."""
+    patient = new_patient(ready)
+    appointment = book(ready, patient, payment_kind=None, kind_payment="insurance")
+    assert appointment.payment_kind == "insurance"
+    with ready.as_user(ready.a.reception) as actor, pytest.raises(InvalidInput) as error:
+        service().charge_for_appointment(actor=actor, appointment_id=appointment.sysid, idempotency_key="a")
+    assert set(error.value.errors) == {"appointment_id"}
+
+
 def test_patient_page_and_retention(ready):
     patient = new_patient(ready)
     appointment = book(ready, patient)

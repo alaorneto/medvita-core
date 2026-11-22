@@ -11,7 +11,7 @@ Configuração do consultório (profissionais, salas, tipos de atendimento), gra
 ## Tabelas
 
 - Contêineres `Practice` (o consultório e a configuração) e `Schedule` (a agenda de um profissional, sala ou equipamento).
-- Derivadas do consultório: `Professional`, `Room`, `AppointmentType`, `WaitlistEntry`. Da agenda: `AvailabilityRule`, `ScheduleBlock`, `Appointment`.
+- Derivadas do consultório: `Professional`, `Room`, `AppointmentType`, `WaitlistEntry`. Da agenda: `AvailabilityRule`, `ScheduleBlock`, `ScheduleAppointmentType`, `Appointment`. De `AvailabilityRule`, a dois saltos da agenda: `AvailabilityRuleType`.
 - Nome, conselho e CPF do profissional são `personal_fields`; observações da consulta e da lista de espera são `sensitive_fields`.
 
 ## Serviços e pontos de extensão
@@ -30,6 +30,12 @@ Configuração do consultório (profissionais, salas, tipos de atendimento), gra
 4. O acesso de uma agenda e o do calendário dela mudam juntos, só por `set_schedule_access`.
 5. A observação da recepção só sai no detalhe de uma consulta; nunca em lista, evento, notificação, linha do tempo ou log.
 6. A lista de espera é do grupo de gestão do consultório; ninguém é marcado a partir dela sem decisão da recepção.
+7. A agenda sem linha em `ScheduleAppointmentType` atende todos os tipos ativos; com linhas, só os listados. Toda marcação passa por essa conferência (`_type_duration`), inclusive encaixe, lista de espera e remarcação para outra agenda.
+8. A duração de uma marcação é a informada, depois a da agenda para o tipo, depois a do tipo. A consulta guarda a cópia da forma de pagamento e do código de cobrança do tipo: mudar o tipo não muda consulta marcada.
+9. Grade e tipos da agenda usam a revisão da agenda como CAS; quem troca um deles dá revisão nova à agenda.
+10. O período sem linha em `AvailabilityRuleType` (e sem o `appointment_type` antigo, que só é lido) atende todos os tipos da agenda; com linhas, só os listados. O encaixe dispensa a lista do período, nunca a da agenda.
+11. `set_availability` compara a grade com a existente: o período que continua mantém a linha, e os tipos de um período são excluídos antes dele (a rota de acesso passa pelo período vivo). Os tipos dos períodos são lidos em lote.
+12. O único JavaScript da app é `static/med_scheduling/med_scheduling.js`, opcional e ligado por `data-*`: nenhuma página depende dele.
 
 ## Testes e especificação
 
