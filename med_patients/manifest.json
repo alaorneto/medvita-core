@@ -1,6 +1,6 @@
 {
   "app_config": "applications.med_patients.apps.MedPatientsConfig",
-  "app_id": "io.katua.sk.med.patients",
+  "app_id": "io.medvita.patients",
   "app_label": "med_patients",
   "compatibility": {
     "django": ">=6.1,<6.2",

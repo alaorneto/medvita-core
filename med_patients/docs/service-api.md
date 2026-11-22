@@ -10,7 +10,7 @@ Para listar pacientes de outra app, use `PatientSummary` (`summary`, `summaries`
 
 ## Dependência
 
-`app_id`: `io.katua.sk.med.patients`. Faixa no manifesto do consumidor: a versão corrente da suíte, `>=0.1.0,<0.2.0` na primeira linha. Importe só o módulo `service_api` desta app.
+`app_id`: `io.medvita.patients`. Faixa no manifesto do consumidor: a versão corrente da suíte, `>=0.1.0,<0.2.0` na primeira linha. Importe só o módulo `service_api` desta app.
 
 <!-- BEGIN GENERATED: tools/service_reference.py -->
 

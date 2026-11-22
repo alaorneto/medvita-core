@@ -5,7 +5,7 @@ A suíte é um repositório com quatro apps do Skeleton. Cada app é um pacote p
 ## Árvore do repositório
 
 ```text
-sk_med_core/                      <- raiz do repositório git; não é pacote Python
+medvita-core/                     <- raiz do repositório git; não é pacote Python
   AGENTS.md  LICENSE  README.md  pyproject.toml  conftest.py
   .github/                        <- dev-workflow, CI, modelos de issue e PR
   .claude/skills/dev-workflow/    <- cópia instalada pelo bootstrap
@@ -33,10 +33,10 @@ sk_med_core/                      <- raiz do repositório git; não é pacote Py
 
 | Pacote e label | `app_id` | Nome exibido | `dependencies` |
 |---|---|---|---|
-| `med_patients` | `io.katua.sk.med.patients` | Pacientes | — |
-| `med_scheduling` | `io.katua.sk.med.scheduling` | Agenda médica | `io.katua.sk.med.patients`, `org.skeleton.calendar` |
-| `med_records` | `io.katua.sk.med.records` | Prontuário | `io.katua.sk.med.patients`, `io.katua.sk.med.scheduling` |
-| `med_finance` | `io.katua.sk.med.finance` | Financeiro | `io.katua.sk.med.patients`, `io.katua.sk.med.scheduling`, `org.skeleton.ledger` |
+| `med_patients` | `io.medvita.patients` | Pacientes | — |
+| `med_scheduling` | `io.medvita.scheduling` | Agenda médica | `io.medvita.patients`, `org.skeleton.calendar` |
+| `med_records` | `io.medvita.records` | Prontuário | `io.medvita.patients`, `io.medvita.scheduling` |
+| `med_finance` | `io.medvita.finance` | Financeiro | `io.medvita.patients`, `io.medvita.scheduling`, `org.skeleton.ledger` |
 
 Comum aos quatro manifestos: `manifest_version: 2`, `kind: "app"`, `publisher: "katua-tech"` (exibido como Katuá Tech), `app_config: "applications.<pacote>.apps.<Classe>Config"`, a mesma `version`, a mesma faixa `compatibility.skeleton`, `lifecycle` com retenção dos dados, manutenção e backup, `runtime.default_enabled: false` e `runtime.documentation_root: "docs"`. As faixas entre as apps da suíte usam a própria versão (`>=0.1.0,<0.2.0` na primeira linha), escritas pela automação.
 

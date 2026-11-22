@@ -8,7 +8,7 @@ Referência de `FinanceService` (`applications.med_finance.service_api`). O cont
 
 ## Dependência
 
-`app_id`: `io.katua.sk.med.finance`. Faixa no manifesto do consumidor: a versão corrente da suíte, `>=0.1.0,<0.2.0` na primeira linha. Importe só o módulo `service_api` desta app.
+`app_id`: `io.medvita.finance`. Faixa no manifesto do consumidor: a versão corrente da suíte, `>=0.1.0,<0.2.0` na primeira linha. Importe só o módulo `service_api` desta app.
 
 <!-- BEGIN GENERATED: tools/service_reference.py -->
 

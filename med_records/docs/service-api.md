@@ -8,7 +8,7 @@ Referência de `RecordsService` (`applications.med_records.service_api`). O cont
 
 ## Dependência
 
-`app_id`: `io.katua.sk.med.records`. Faixa no manifesto do consumidor: a versão corrente da suíte, `>=0.1.0,<0.2.0` na primeira linha. Importe só o módulo `service_api` desta app.
+`app_id`: `io.medvita.records`. Faixa no manifesto do consumidor: a versão corrente da suíte, `>=0.1.0,<0.2.0` na primeira linha. Importe só o módulo `service_api` desta app.
 
 <!-- BEGIN GENERATED: tools/service_reference.py -->
 

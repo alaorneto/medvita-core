@@ -6,7 +6,7 @@ O registro clínico do consultório: arquivos clínicos, o prontuário de cada p
 
 ### Ativação e dependências
 
-Depende de `io.katua.sk.med.patients` (o paciente de cada prontuário) e de `io.katua.sk.med.scheduling` (a ficha do profissional que assina e a consulta atendida). Instalada globalmente e ativada por organização, depois das dependências.
+Depende de `io.medvita.patients` (o paciente de cada prontuário) e de `io.medvita.scheduling` (a ficha do profissional que assina e a consulta atendida). Instalada globalmente e ativada por organização, depois das dependências.
 
 ### Acesso
 
