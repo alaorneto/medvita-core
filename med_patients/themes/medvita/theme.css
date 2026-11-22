@@ -1,0 +1,188 @@
+/*
+ * Tema Medvita da instância (pacote de tema trazido pelo med_patients).
+ *
+ * O núcleo serve este arquivo em /brand/theme.css, depois do site.css e antes da marca da
+ * organização, que vence pela ordem. Por isso nada aqui fixa a cor de marca: a escala cobalt e
+ * os tokens brand, fg-brand e focus saem de tokens.brand_color (#1273c4, o azul do logo) e a
+ * clínica com marca própria os troca. Este arquivo cuida do resto do sistema de design Medvita:
+ * superfícies, texto, linhas, estados, sombras e a tipografia de título.
+ *
+ * Só usa o contrato estável do núcleo: tokens --color-*, --font-*, --shadow-* e as classes de
+ * componente listadas em docs/ui-design.md do Skeleton. Claro e escuro por prefers-color-scheme.
+ * Valores de medvita-design/tokens.css.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Claro                                                               */
+/* ------------------------------------------------------------------ */
+:root {
+  --mv-font-display: "Poppins", var(--font-sans);
+
+  /* Superfícies: surface-page, surface, surface-sunken. */
+  --color-canvas: #f3f6f7;
+  --color-neutral-primary-soft: #ffffff;
+  --color-neutral-primary: #ffffff;
+  --color-neutral-primary-medium: #ffffff;
+  --color-neutral-primary-strong: #ffffff;
+  --color-neutral-secondary-soft: #e9eef0;
+  --color-neutral-secondary: #e9eef0;
+  --color-neutral-secondary-medium: #ffffff;
+  --color-neutral-secondary-strong: #e9eef0;
+  --color-neutral-secondary-strongest: #d3dcdf;
+  --color-neutral-tertiary-soft: #f3f6f7;
+  --color-neutral-tertiary: #e9eef0;
+  --color-neutral-tertiary-medium: #e9eef0;
+  --color-neutral-quaternary: #d3dcdf;
+  --color-neutral-quaternary-medium: #d3dcdf;
+  --color-muted: #f3f6f7;
+  --color-light-subtle: #e9eef0;
+  --color-light: #e9eef0;
+  --color-light-medium: #e9eef0;
+  --color-disabled: #e9eef0;
+  --color-dark-backdrop: #061e21;
+
+  /* Texto: ink, ink-muted, ink-disabled. */
+  --color-heading: #0d2b2f;
+  --color-body: #0d2b2f;
+  --color-body-subtle: #4b6166;
+  --color-fg-disabled: #8a9a9e;
+
+  /* Linhas: line (estrutura) e line-strong (contorno de controle, 3:1). */
+  --color-default-subtle: #e9eef0;
+  --color-default: #d3dcdf;
+  --color-default-medium: #73878c;
+  --color-default-strong: #4b6166;
+
+  /* Confirmado: success (verde do logo, só preenchimento) e ink-success. */
+  --color-success: #2bb673;
+  --color-success-strong: #146c43;
+  --color-success-soft: #e1f5ea;
+  --color-success-medium: #c8ecd8;
+  --color-success-subtle: #a9dfc2;
+  --color-fg-success: #146c43;
+  --color-fg-success-strong: #105a37;
+
+  /* Atenção: warning e ink-warning. */
+  --color-warning: #f2b33d;
+  --color-warning-strong: #c98a12;
+  --color-warning-soft: #fcf1d9;
+  --color-warning-medium: #f9e4b5;
+  --color-warning-subtle: #ecc979;
+  --color-fg-warning: #855400;
+  --color-fg-warning-subtle: #855400;
+
+  /* Erro e alergia: danger e ink-danger. */
+  --color-danger: #c4313e;
+  --color-danger-strong: #a82733;
+  --color-danger-soft: #fbe8ea;
+  --color-danger-medium: #f7d3d7;
+  --color-danger-subtle: #eeb4ba;
+  --color-fg-danger: #b02a36;
+  --color-fg-danger-strong: #8f1f2a;
+
+  /* Sombra só no que flutua: cartão parado não tem sombra. */
+  --shadow-xs: 0 0 #0000;
+  --shadow-card: 0 0 #0000;
+  --shadow-pop: 0 4px 12px #0332381a, 0 1px 3px #0332380f;
+}
+
+/* ------------------------------------------------------------------ */
+/* Escuro: mesmos nomes, valores do escuro do Medvita.                 */
+/* ------------------------------------------------------------------ */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #0a1416;
+    --color-neutral-primary-soft: #101d20;
+    --color-neutral-primary: #0a1416;
+    --color-neutral-primary-medium: #172a2e;
+    --color-neutral-primary-strong: #172a2e;
+    --color-neutral-secondary-soft: #070f11;
+    --color-neutral-secondary: #0a1416;
+    --color-neutral-secondary-medium: #101d20;
+    --color-neutral-secondary-strong: #172a2e;
+    --color-neutral-secondary-strongest: #22363a;
+    --color-neutral-tertiary-soft: #172a2e;
+    --color-neutral-tertiary: #172a2e;
+    --color-neutral-tertiary-medium: #22363a;
+    --color-neutral-quaternary: #22363a;
+    --color-neutral-quaternary-medium: #2c4448;
+    --color-muted: #101d20;
+    --color-light-subtle: #172a2e;
+    --color-light: #172a2e;
+    --color-light-medium: #22363a;
+    --color-disabled: #172a2e;
+    --color-dark-backdrop: #000000;
+
+    --color-heading: #e6eff0;
+    --color-body: #e6eff0;
+    --color-body-subtle: #9fb4b8;
+    --color-fg-disabled: #5c7075;
+
+    --color-default-subtle: #172a2e;
+    --color-default: #22363a;
+    --color-default-medium: #6a8287;
+    --color-default-strong: #9fb4b8;
+
+    --color-success: #2bb673;
+    --color-success-strong: #5fd79b;
+    --color-success-soft: #0d3323;
+    --color-success-medium: #124430;
+    --color-success-subtle: #1f6644;
+    --color-fg-success: #5fd79b;
+    --color-fg-success-strong: #8fe5ba;
+
+    --color-warning: #f2b33d;
+    --color-warning-strong: #f5c566;
+    --color-warning-soft: #3a2a08;
+    --color-warning-medium: #4a360b;
+    --color-warning-subtle: #6f5416;
+    --color-fg-warning: #f5c566;
+    --color-fg-warning-subtle: #f5c566;
+
+    --color-danger: #f0707a;
+    --color-danger-strong: #f48c95;
+    --color-danger-soft: #40151a;
+    --color-danger-medium: #551d23;
+    --color-danger-subtle: #7a2f37;
+    --color-fg-danger: #f59aa1;
+    --color-fg-danger-strong: #f9c0c4;
+
+    --shadow-xs: 0 0 #0000;
+    --shadow-card: 0 0 #0000;
+    --shadow-pop: 0 4px 12px #00000080;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Rótulos sem caixa alta: o Medvita escreve só a primeira letra       */
+/* maiúscula. "label" do sistema de design: 13/18, peso 500. No layer  */
+/* components do núcleo, depois das regras dele: utilitários vencem.   */
+/* ------------------------------------------------------------------ */
+@layer components {
+  :is(.sidebar-heading, .page-eyebrow, .table-scroll thead) {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.8125rem;
+    line-height: 1.125rem;
+  }
+  .table-scroll thead {
+    font-weight: 500;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Títulos em Poppins 600 (a fonte do pacote); corpo na Inter do       */
+/* núcleo. Horários com algarismos de largura fixa.                    */
+/* ------------------------------------------------------------------ */
+@layer base {
+  h1,
+  h2,
+  h3 {
+    font-family: var(--mv-font-display);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  time {
+    font-variant-numeric: tabular-nums;
+  }
+}

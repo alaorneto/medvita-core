@@ -41,6 +41,12 @@
     "configuration_fields": [],
     "default_enabled": false,
     "documentation_root": "docs",
+    "instance_themes": [
+      {
+        "path": "themes/medvita",
+        "slug": "medvita"
+      }
+    ],
     "model_ui": [],
     "navigation": [
       {

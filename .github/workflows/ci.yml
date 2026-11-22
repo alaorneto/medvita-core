@@ -109,6 +109,12 @@ jobs:
           for package in med_patients med_scheduling med_records med_finance; do
             python -m skeleton.system.packages doctor "${package}" --git-ref HEAD
           done
+      - name: Tema Medvita da instância (o mesmo leitor da instalação; sem banco, por isso --skip-checks)
+        env:
+          DJANGO_SETTINGS_MODULE: skeleton.testing.host.settings
+        run: |
+          python -m django appearance --skip-checks check-package med_patients/themes/medvita
+          python -m django appearance --skip-checks build-package med_patients/themes/medvita --output "${RUNNER_TEMP}/medvita-theme.zip"
       - name: Pacotes de teste sem os arquivos de desenvolvimento
         # Chave descartável do próprio job: o pacote não é publicado, só conferido.
         run: |
