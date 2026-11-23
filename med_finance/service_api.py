@@ -29,7 +29,14 @@ from skeleton.service_api import (
 )
 
 from . import common
-from .extension import ChargeOrigin, register_charge_origin
+from .extension import (
+    ChargeOrigin,
+    ChargePanel,
+    ReceiptPanel,
+    register_charge_origin,
+    register_charge_panel,
+    register_receipt_panel,
+)
 from .models import (
     CashDesk,
     CashMovement,
@@ -63,6 +70,11 @@ __all__ = [
     "ChargeItemInput",
     "ChargeOrigin",
     "register_charge_origin",
+    "ChargePanel",
+    "ReceiptPanel",
+    "PanelInfo",
+    "register_charge_panel",
+    "register_receipt_panel",
     "MethodTotal",
     "MovementInfo",
     "SessionInfo",
@@ -649,6 +661,42 @@ class ReceivablesReport:
     as_of: date
     buckets: tuple[AgingRow, ...]
     total: int
+
+
+@dataclass(frozen=True, slots=True)
+class PanelInfo:
+    """A panel another app adds to the charge or the receipt page, ready to show.
+
+    ``template`` is rendered with ``context`` (pairs the app's ``context`` callable returned);
+    ``url_name`` is a link to a page of the app instead. Only one of them is set.
+    """
+
+    code: str
+    label: str
+    template: str
+    url_name: str
+    order: int
+    context: tuple[tuple[str, Any], ...]
+
+
+def _panels(actor: Any, panels: tuple[Any, ...], **target: UUID) -> tuple[PanelInfo, ...]:
+    """The panels of active apps the record shows: ``visible`` answered true and ``context`` did not fail."""
+    from .extension import call_safely
+
+    result = []
+    for panel in panels:
+        if panel.visible is not None:
+            ok, shown = call_safely(panel.code, panel.visible, actor=actor, **target)
+            if not (ok and shown):
+                continue
+        values: tuple[tuple[str, Any], ...] = ()
+        if panel.context is not None:
+            ok, found = call_safely(panel.code, panel.context, actor=actor, **target)
+            if not ok:
+                continue
+            values = tuple(sorted(dict(found or {}).items()))
+        result.append(PanelInfo(panel.code, str(panel.label), panel.template, panel.url_name, panel.order, values))
+    return tuple(result)
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -1604,6 +1652,35 @@ class FinanceService(ServiceAPI):
         Efeitos: nenhum.
         """
         return _receipt_with_void(common.row(actor, Receipt, receipt_id, field="receipt_id", write=False))
+
+    @service_method(read_only=True, since="0.2.0")
+    def charge_panels(self, *, actor: Any, charge_id: UUID) -> tuple[PanelInfo, ...]:
+        """The panels other apps add to the charge page, in order; only active apps.
+
+        A panel with ``visible`` shows only when it answers true for the actor and the charge; a
+        panel whose ``visible`` or ``context`` fails is left out (logged by code and error type).
+        Autorização: leitura do caixa; cada painel lê o que mostra pelo serviço da app dele.
+        Erros: NotFound para conta inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from .extension import CHARGE_PANELS
+
+        charge = _charge(actor, charge_id)
+        return _panels(actor, CHARGE_PANELS.active(actor), charge_id=charge.pk)
+
+    @service_method(read_only=True, since="0.2.0")
+    def receipt_panels(self, *, actor: Any, receipt_id: UUID) -> tuple[PanelInfo, ...]:
+        """The panels other apps add to the receipt page, in order; only active apps.
+
+        As ``charge_panels``, with ``receipt_id`` given to ``visible`` and ``context``.
+        Autorização: leitura do caixa; cada painel lê o que mostra pelo serviço da app dele.
+        Erros: NotFound para recibo inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from .extension import RECEIPT_PANELS
+
+        receipt = common.row(actor, Receipt, receipt_id, field="receipt_id", write=False)
+        return _panels(actor, RECEIPT_PANELS.active(actor), receipt_id=receipt.pk)
 
     @service_method(read_only=True, since="0.1.0")
     def receipts(

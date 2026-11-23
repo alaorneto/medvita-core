@@ -118,3 +118,54 @@ def test_agenda_records_and_finance(ready):
         charge = FinanceService().charge(actor=actor, charge_id=charge_id).charge
     assert sources == {"med_scheduling.appointment_completed", "med_records.encounter_signed"}
     assert (charge.origin_app, charge.total) == ("med_example", 8000)
+
+
+def _paid_charge(clinic, patient):
+    """A charge of the example app, confirmed and paid in cash with its receipt."""
+    finance = FinanceService()
+    with clinic.as_user(clinic.a.reception) as actor:
+        charge_id = ExampleService().bill(
+            actor=actor, patient_id=patient.sysid, amount=8000, key="painel-1", idempotency_key="bill-panel"
+        )
+        charge = finance.charge(actor=actor, charge_id=charge_id).charge
+        if charge.status == "draft":
+            charge = finance.confirm_charge(actor=actor, charge_id=charge_id, expected_revision=charge.revision).charge
+        if finance.current_session(actor=actor) is None:
+            finance.open_session(actor=actor, idempotency_key="session-panel")
+        payment = finance.register_payment(
+            actor=actor,
+            charge_id=charge_id,
+            method="cash",
+            amount=8000,
+            expected_revision=charge.revision,
+            idempotency_key="pay-panel",
+        )
+        receipt = finance.receipts(actor=actor, charge_id=charge_id).items[0]
+    return charge_id, payment, receipt
+
+
+def test_finance_panels(ready):
+    from django.test import Client
+    from django.urls import reverse
+
+    clinic, patient, _appointment = ready
+    charge_id, _payment, receipt = _paid_charge(clinic, patient)
+    org = clinic.org_a.pk
+    reception = Client()
+    reception.force_login(clinic.a.reception)
+    page = reception.get(reverse("med_finance:charge", args=(org, charge_id))).content.decode()
+    assert "Nota de exemplo" in page and f"Situação de exemplo: Pendente · {charge_id}" in page
+    page = reception.get(reverse("med_finance:receipt", args=(org, receipt.sysid))).content.decode()
+    assert "Recibo de exemplo" in page and reverse("med_example:receipt_look", args=(org, receipt.sysid)) in page
+    with clinic.as_user(clinic.a.reception) as actor:
+        codes = [panel.code for panel in FinanceService().charge_panels(actor=actor, charge_id=charge_id)]
+    assert codes == ["med_example.fiscal"]
+    doctor = Client()
+    doctor.force_login(clinic.a.doctor)
+    assert doctor.get(reverse("med_finance:charge", args=(org, charge_id))).status_code == 404
+    assert doctor.get(reverse("med_finance:receipt", args=(org, receipt.sysid))).status_code == 404
+    with clinic.app_disabled("med_example"):
+        page = reception.get(reverse("med_finance:charge", args=(org, charge_id))).content.decode()
+        assert "Nota de exemplo" not in page
+        page = reception.get(reverse("med_finance:receipt", args=(org, receipt.sysid))).content.decode()
+        assert "Recibo de exemplo" not in page
