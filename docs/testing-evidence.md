@@ -78,7 +78,7 @@ Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da t
 
 ## Núcleo v0.5.0 (2026-11-23)
 
-Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da tag `v0.5.0` (commit `2c27873`), PostgreSQL local descartável (`tools/dev_postgres.py` do Skeleton), asserções na role runtime. A árvore é a #104 com as referências ao núcleo trocadas (#106).
+Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da tag `v0.5.0` (commit `2c27873`), PostgreSQL descartável do `dev_postgres.py` de um clone do núcleo, asserções na role runtime. A árvore é a #104 com as referências ao núcleo trocadas (#106).
 
 - `python -m django check --fail-level WARNING` → sem problemas; `makemigrations --check --dry-run` → nada pendente.
 - `python -m pytest -q` (em série) → 443 passed, 705 subtests passed, 1 erro de preparo em 1881 s: `test_slots_and_bookings_follow_the_kinds_of_the_period` achou o schema sem `sk_access_role` ao começar; o arquivo `med_scheduling/tests/test_period_kinds.py` rodado de novo → 7 passed, 31 subtests passed.
