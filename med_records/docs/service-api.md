@@ -1,6 +1,6 @@
 # API de serviços: Prontuário
 
-Referência de `RecordsService` (`applications.med_records.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.4.0/docs/service-api.md).
+Referência de `RecordsService` (`applications.med_records.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.5.0/docs/service-api.md).
 
 ## Visão geral
 

@@ -10,7 +10,7 @@ medvita-core/         <- raiz do repositório git; não é pacote Python
   med_patients/  med_scheduling/  med_records/  med_finance/   <- um pacote por app
 ```
 
-O núcleo entra no virtualenv como pacote instalado, nunca por cópia de código. Ele vem do repositório público do Skeleton, na tag de uma release publicada; a mesma tag está em `SKELETON_REF` no `.github/workflows/ci.yml` (hoje `v0.4.0`):
+O núcleo entra no virtualenv como pacote instalado, nunca por cópia de código. Ele vem do repositório público do Skeleton, na tag de uma release publicada; a mesma tag está em `SKELETON_REF` no `.github/workflows/ci.yml` (hoje `v0.5.0`):
 
 ```bash
 uv venv --python 3.14 .venv
