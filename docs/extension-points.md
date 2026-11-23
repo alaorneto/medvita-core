@@ -21,6 +21,8 @@ As apps publicam pelo `EventService` do núcleo; quem consome registra `register
 | `med_finance.payment_registered`, `payment_reversed` | `med_finance.payment` | `charge`, `method`, `amount`, `status` |
 | `med_finance.receipt_issued`, `receipt_voided` | `med_finance.receipt` | `number`, `charge`, `amount`, `seal_digest` |
 
+Os eventos do financeiro não levam pagador, documento nem descrição. Uma app que emite documento fiscal (Receita Saúde, NFS-e) parte de `payment_registered` e lê o resto por `FinanceService().fiscal_data(actor=..., payment_id=...)`, autorizado pela leitura do caixa. O método exige um ator: o consumidor do evento, que roda sem ator, registra o pendente na própria app, e a leitura acontece numa ação de quem lê o caixa.
+
 Toda chave de payload é um campo do modelo declarado em `read_fields` e em `payload_fields` do tipo, nunca em `personal_fields` nem em `sensitive_fields`. FK sai como o `sysid` em texto.
 
 `mode` da consulta é `booked` (hora marcada) ou `walk_in` (ordem de chegada). Na ordem de chegada a consulta não tem hora: `starts_at` e `ends_at` são os limites do período em que o paciente é atendido. O consumidor que mostra ou agenda algo pela hora da consulta olha `mode` antes.

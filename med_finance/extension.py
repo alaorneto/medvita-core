@@ -78,7 +78,7 @@ class ChargePanel(_Panel):
     """A panel on the charge page, after the app's own content.
 
     ``template`` is rendered in the page with ``panel``, ``organization_id``, ``charge_id`` and what
-    ``context(actor=..., charge_id=...)`` returns; ``url_name``, instead, is a link to a page of the
+    ``context(actor=..., charge_id=...)`` returns (values as text); ``url_name``, instead, is a link to a page of the
     app that receives ``org`` and ``charge_id``. ``visible(actor=..., charge_id=...)``, when given,
     hides the panel; a failure of either hides it too. The panel gets the ``sysid`` only: what it
     shows comes from the service of the app that owns it.

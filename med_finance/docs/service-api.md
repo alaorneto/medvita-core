@@ -136,6 +136,14 @@ The cash desks the actor reads, the default first.
 - **Erros:** nenhum além do contrato.
 - **Efeitos:** nenhum.
 
+#### `fiscal_data(*, actor, payment_id) -> PaymentFiscalData`
+
+What a fiscal document of the payment needs: issuer, professional, payer, beneficiary and items.
+
+- **Autorização:** leitura do caixa (e a leitura do cadastro do paciente, do consultório e da consulta).
+- **Erros:** NotFound para pagamento inexistente, de outra organização ou ilegível, ou paciente ilegível.
+- **Efeitos:** nenhum; nada sai em evento.
+
 #### `issue_receipt(*, actor, payment_id, idempotency_key) -> ReceiptInfo`
 
 Issue the receipt of a payment (one per payment), numbered per year without gaps and sealed.
@@ -263,6 +271,14 @@ Sessions of a cash desk, newest first.
 - **Autorização:** leitura do caixa.
 - **Erros:** NotFound; InvalidInput para datas sem fuso, cursor ou tamanho inválidos.
 - **Efeitos:** nenhum.
+
+#### `set_fiscal_issuer(*, actor, desk_id, fiscal_issuer, expected_revision) -> DeskInfo`
+
+Say who issues the fiscal document of the desk's payments: "practice" or "professional", with CAS.
+
+- **Autorização:** alteração no caixa.
+- **Erros:** NotFound; Forbidden se só lê o caixa; InvalidInput para valor desconhecido; Conflict("stale_revision").
+- **Efeitos:** grava a configuração do caixa.
 
 #### `setup(*, actor, desk_name='', price_list_name='', writer_group_ids=(), reader_group_ids=(), price_manager_group_ids=(), idempotency_key) -> DeskInfo`
 
@@ -407,6 +423,7 @@ A panel on the charge page, after the app's own content.
 | `is_default` | `bool` |
 | `revision` | `int` |
 | `writable` | `bool` |
+| `fiscal_issuer` | `str` |
 
 ### `MethodTotal`
 
@@ -439,7 +456,36 @@ A panel another app adds to the charge or the receipt page, ready to show.
 | `template` | `str` |
 | `url_name` | `str` |
 | `order` | `int` |
-| `context` | `tuple[tuple[str, Any], ...]` |
+| `context` | `tuple[tuple[str, str], ...]` |
+
+### `PaymentFiscalData`
+
+What a fiscal document of one payment needs (Receita Saúde, NFS-e), read through the cash desk.
+
+| Campo | Tipo |
+|---|---|
+| `payment_id` | `UUID` |
+| `charge_id` | `UUID` |
+| `charge_code` | `str` |
+| `desk_id` | `UUID` |
+| `appointment_id` | `UUID | None` |
+| `status` | `str` |
+| `amount` | `int` |
+| `received_at` | `datetime` |
+| `method` | `str` |
+| `installments` | `int` |
+| `issuer_kind` | `str` |
+| `issuer_name` | `str` |
+| `issuer_document` | `str` |
+| `professional_name` | `str` |
+| `professional_council` | `str` |
+| `professional_tax_id` | `str` |
+| `payer_name` | `str` |
+| `payer_document` | `str` |
+| `beneficiary_name` | `str` |
+| `beneficiary_document` | `str` |
+| `description` | `str` |
+| `receipt_number` | `str` |
 
 ### `PaymentInfo`
 
@@ -576,7 +622,7 @@ Nunca nome nem documento do paciente ou do pagador.
 
 `register_charge_origin(ChargeOrigin(app_label, label))`, reexportada por este módulo e chamada no `ready()`: declara uma app que cria contas por `create_charge(origin_app=..., origin_key=...)`; a mesma origem devolve a mesma conta. O financeiro registra a origem `med_scheduling` (a consulta).
 
-`register_charge_panel(ChargePanel(code, label, template | url_name, order, visible, context))` e `register_receipt_panel(ReceiptPanel(...))` acrescentam um painel à página da conta e à do recibo, depois do conteúdo do financeiro (a situação de uma nota fiscal, de um repasse). O código é `<app_label>.<nome>` da app que registra; código repetido com outro painel ou fora do formato é recusado (`ValueError`). Com `template`, o painel é renderizado na página com `panel`, `organization_id`, `charge_id` (ou `receipt_id`) e o que `context(actor=..., charge_id=...)` devolver; com `url_name`, vira um link para a página da app, que recebe `org` e o `sysid`. `visible(actor=..., charge_id=...)`, opcional, esconde o painel. O painel recebe só o `sysid`: o que ele mostra vem do serviço da app dona. `charge_panels` e `receipt_panels` autorizam pela leitura do caixa (quem não lê a conta recebe `NotFound`, e a página, 404) e só devolvem painéis de apps ativas na organização; um `visible`, `context` ou template que falha esconde só aquele painel e é registrado no log pelo código e pelo tipo do erro.
+`register_charge_panel(ChargePanel(code, label, template | url_name, order, visible, context))` e `register_receipt_panel(ReceiptPanel(...))` acrescentam um painel à página da conta e à do recibo, depois do conteúdo do financeiro (a situação de uma nota fiscal, de um repasse). O código é `<app_label>.<nome>` da app que registra; código repetido com outro painel ou fora do formato é recusado (`ValueError`). Com `template`, o painel é renderizado na página com `panel`, `organization_id`, `charge_id` (ou `receipt_id`) e os pares que `context(actor=..., charge_id=...)` devolver, em texto; com `url_name`, vira um link para a página da app, que recebe `org` e o `sysid`. `visible(actor=..., charge_id=...)`, opcional, esconde o painel. O painel recebe só o `sysid`: o que ele mostra vem do serviço da app dona. `charge_panels` e `receipt_panels` autorizam pela leitura do caixa (quem não lê a conta recebe `NotFound`, e a página, 404) e só devolvem painéis de apps ativas na organização; um `visible`, `context` ou template que falha esconde só aquele painel e é registrado no log pelo código e pelo tipo do erro.
 
 ## Contribuições a outras apps
 
@@ -590,4 +636,4 @@ As rotas de `/api/v1/o/<org>/apps/med_finance/` estão em `docs/spec.md` (seçã
 | Versão | Mudança |
 |---|---|
 | 0.1.0 | Primeira versão |
-| 0.2.0 | Painéis de outras apps na conta e no recibo (`register_charge_panel`, `register_receipt_panel`, `charge_panels`, `receipt_panels`, `PanelInfo`) |
+| 0.2.0 | Painéis de outras apps na conta e no recibo (`register_charge_panel`, `register_receipt_panel`, `charge_panels`, `receipt_panels`, `PanelInfo`); dados fiscais do pagamento (`fiscal_data`, `PaymentFiscalData`) e emitente fiscal do caixa (`set_fiscal_issuer`, `fiscal_issuer` no fim de `DeskInfo`, com padrão) |

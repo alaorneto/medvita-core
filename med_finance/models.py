@@ -58,7 +58,16 @@ class PriceItem(OrganizationRecord):
 
 
 class CashDesk(SecuredRecord):
-    """A point of payment; it posts to one ledger book and keeps the book accounts of each method."""
+    """A point of payment; it posts to one ledger book and keeps the book accounts of each method.
+
+    ``fiscal_issuer`` says who issues the fiscal document of a payment received here: the practice
+    (the default) or, for a professional who receives directly inside a clinic, the professional of
+    the appointment. It is configuration only: this app issues no fiscal document.
+    """
+
+    class FiscalIssuer(models.TextChoices):
+        PRACTICE = "practice", gettext_lazy("Consultório")
+        PROFESSIONAL = "professional", gettext_lazy("Profissional da consulta")
 
     name = models.CharField(max_length=120)
     book = models.ForeignKey("skeleton_ledger.Book", on_delete=models.PROTECT, related_name="+")
@@ -66,6 +75,7 @@ class CashDesk(SecuredRecord):
     # Book accounts by payment key ("cash", "pix", "cards", "bank"), resolved at setup by who manages the book.
     payment_accounts = models.JSONField(default=dict, blank=True)
     is_default = models.BooleanField(default=False)
+    fiscal_issuer = models.CharField(max_length=12, choices=FiscalIssuer.choices, default=FiscalIssuer.PRACTICE)
     immutable_fields = ("book_id",)
 
     class Meta(SecuredRecord.Meta):
@@ -75,6 +85,9 @@ class CashDesk(SecuredRecord):
                 condition=Q(is_default=True, deleted_at__isnull=True),
                 name="med_finance_one_default_desk",
                 violation_error_code="unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(fiscal_issuer__in=("practice", "professional")), name="med_finance_desk_fiscal_issuer"
             ),
         ]
         ordering = ("-is_default", "name", "sysid")

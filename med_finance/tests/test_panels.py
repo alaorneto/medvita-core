@@ -88,6 +88,6 @@ def test_visible_and_context_decide_what_shows(clinic):
         with clinic.as_user(clinic.b.reception, clinic.org_b) as outsider, pytest.raises(Exception) as other:
             FinanceService().charge_panels(actor=outsider, charge_id=charge.sysid)
     assert [panel.code for panel in panels] == ["med_finance.a_first", "med_finance.b_shown"]
-    assert panels[1].context == (("a", 2), ("z", 1)) and panels[1].label == "Mostrado"
+    assert panels[1].context == (("a", "2"), ("z", "1")) and panels[1].label == "Mostrado"
     assert seen == [charge.sysid]
     assert type(error.value).__name__ == "NotFound" and type(other.value).__name__ == "NotFound"
