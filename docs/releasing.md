@@ -5,7 +5,7 @@ As quatro apps andam num trem de versão: têm sempre a mesma versão, escrita p
 ## Como uma versão sai
 
 1. Um PR com o label `release` é aprovado e entra na `main`. O check "Verificação do PR" mostra antes a prévia da versão; a análise do diff acumulado (skill `dev-workflow`) decide se o nível sobe.
-2. O workflow **Versão e release** (`.github/workflows/release.yml`) calcula o número, escreve a versão nos manifestos e nas faixas entre as apps, atualiza o `CHANGELOG.md`, cria a tag `v<versão>` e a GitHub Release.
+2. O workflow **Versão e release** (`.github/workflows/release.yml`) calcula o número, escreve a versão nos manifestos e nas faixas entre as apps (inclusive as da app de referência dos testes, `tests/apps/med_example`, que nunca é publicada), atualiza o `CHANGELOG.md`, cria a tag `v<versão>` e a GitHub Release.
 3. O workflow **Publicação dos pacotes** (`.github/workflows/publish.yml`) roda quando a release é publicada: monta os quatro `.skapp` da tag, assina com a chave do publicador `katua-tech`, confere cada um (`tools/check_package.py` e `package validate`), monta o índice assinado e anexa pacotes, índice e chave pública à release.
 
 ## O que o responsável precisa ter feito

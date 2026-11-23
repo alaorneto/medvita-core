@@ -180,6 +180,26 @@ path = "med_finance/manifest.json"
 regex = '"io\.medvita\.scheduling": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
 replace = '"io.medvita.scheduling": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
 
+# The test reference app (never published) follows the suite too, or the core check rejects it (#104).
+[[versioning.files]]
+path = "tests/apps/med_example/manifest.json"
+regex = '"io\.medvita\.finance": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.finance": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+
+[[versioning.files]]
+path = "tests/apps/med_example/manifest.json"
+regex = '"io\.medvita\.patients": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.patients": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+
+[[versioning.files]]
+path = "tests/apps/med_example/manifest.json"
+regex = '"io\.medvita\.records": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.records": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
+
+[[versioning.files]]
+path = "tests/apps/med_example/manifest.json"
+regex = '"io\.medvita\.scheduling": ">=\d+\.\d+\.\d+,<\d+\.\d+\.\d+"'
+replace = '"io.medvita.scheduling": ">={new_major}.{new_minor}.0,<{new_next_minor}"'
 
 # Contratos que outras apps consomem. Remover um arquivo pede major (minor em 0.x).
 [[versioning.public_surfaces]]
