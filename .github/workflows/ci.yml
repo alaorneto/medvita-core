@@ -1,4 +1,4 @@
-# CI do medvita-core: lint, checks do Django, testes no PostgreSQL com a role runtime e diagnóstico
+# CI do Medvita Core: lint, checks do Django, testes no PostgreSQL com a role runtime e diagnóstico
 # dos quatro pacotes. O núcleo vem do repositório público do Skeleton, na tag de uma release
 # publicada (SKELETON_REF); o repositório não contém cópia dele.
 # As senhas abaixo são de um container descartável do próprio job, não segredos.
