@@ -5,10 +5,12 @@
 <nav class="toolbar" aria-label="{% translate "Ações" %}">{% if info.writable %}<a class="btn btn-primary" href="{% url 'med_records:encounter_edit' organization_id header.sysid %}">{% translate "Continuar o rascunho" %}</a>{% endif %}{% if header.signed %}<a class="btn btn-secondary" href="{% url 'med_records:encounter_print' organization_id header.sysid %}">{% translate "Imprimir" %}</a>{% endif %}</nav></div>
 {% include "med_records/_seal.html" with signed=header.signed signed_at=header.signed_at author_name=header.author_name author_council=header.author_council digest=header.seal_digest %}
 {% include "med_records/_sections.html" %}
+{% if info.consumption %}<h2 class="section-heading">{% translate "Itens consumidos" %}</h2><ul class="mb-4">{% for item in info.consumption %}<li>{{ item.item_label }} · {{ item.quantity }}{% if item.unit %} {{ item.unit }}{% endif %}{% if item.lot %} · {% blocktranslate with lot=item.lot %}lote {{ lot }}{% endblocktranslate %}{% endif %}</li>{% endfor %}</ul>{% endif %}
 {% if attachments %}<h2 class="section-heading">{% translate "Anexos" %}</h2><ul class="mb-4">{% for item in attachments %}<li><a href="{% url 'med_records:attachment' organization_id item.sysid %}?encounter={{ header.sysid }}">{{ item.filename }}</a></li>{% endfor %}</ul>{% endif %}
 {% if info.addenda %}<h2 class="section-heading">{% translate "Adendos" %}</h2><ul class="mb-4">{% for item in info.addenda %}<li><a href="{% url 'med_records:encounter' organization_id item.sysid %}">{{ item.code }}</a> · {{ item.signed_at|date:"SHORT_DATETIME_FORMAT" }} · {{ item.author_name }}</li>{% endfor %}</ul>{% endif %}
 {% if header.signed and header.kind != "addendum" %}
 <section class="card max-w-3xl med-records-no-print" aria-labelledby="addendum-heading"><h2 id="addendum-heading">{% translate "Adendo" %}</h2><p class="helptext">{% translate "O atendimento assinado não muda: a correção é um adendo, também assinado." %}</p>
 <form method="post" action="{% url 'med_records:addendum' organization_id header.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% include "skeleton/web/components/form-fields.html" with form=addendum_form hide_marks=True %}<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Escrever adendo" %}</button></div></form></section>
 {% endif %}
+{% include "med_records/_panels.html" %}
 {% endblock %}

@@ -24,6 +24,7 @@ PAYLOAD = {
     "ends_at",
     "status",
     "mode",
+    "modality",
 }
 
 

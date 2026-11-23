@@ -1,6 +1,6 @@
 # API de serviços: Prontuário
 
-Referência de `RecordsService` (`applications.med_records.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.4.0/docs/service-api.md).
+Referência de `RecordsService` (`applications.med_records.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.5.0/docs/service-api.md).
 
 ## Visão geral
 
@@ -39,6 +39,14 @@ Record an allergy on the chart.
 - **Autorização:** alteração no arquivo do prontuário.
 - **Erros:** NotFound; Forbidden; InvalidInput com o nome do campo.
 - **Efeitos:** grava a alergia (substância e reação são dado de saúde) e o último registro do prontuário. A mesma chave devolve a já gravada.
+
+#### `add_consumption(*, actor, encounter_id, item, expected_revision) -> EncounterInfo`
+
+Record an item consumed in the actor's draft: one an active provider offers the actor.
+
+- **Autorização:** alteração no arquivo; só o autor do rascunho; o provedor oferece o item ao ator.
+- **Erros:** NotFound; Forbidden para quem não é o autor; InvalidInput para provedor ou item não oferecido, quantidade fora de 0 a 99999 com até três casas ou lote acima de 40 caracteres; Conflict("signed") ou Conflict("stale_revision").
+- **Efeitos:** grava o item e sobe a revisão do atendimento.
 
 #### `add_medication(*, actor, chart_id, name, dose='', route='', frequency='', started_on=None, note='', idempotency_key) -> MedicationInfo`
 
@@ -120,6 +128,14 @@ The charts of a patient in the archives the actor reads.
 - **Erros:** InvalidInput para identificador inválido.
 - **Efeitos:** nenhum.
 
+#### `consumable_items(*, actor, encounter_id) -> tuple[ConsumableOption, ...]`
+
+The items the providers of active apps offer the actor to record in the encounter.
+
+- **Autorização:** leitura do arquivo do atendimento; cada provedor autoriza o que oferece.
+- **Erros:** NotFound para atendimento inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
 #### `create_archive(*, actor, name, kind='shared', owner_user_id=None, writer_group_ids=(), writer_user_ids=(), idempotency_key) -> ArchiveInfo`
 
 Create one more clinical archive, written by the groups and people informed.
@@ -152,6 +168,14 @@ One document with its text; the read (or the print, with ``printing``) is record
 - **Erros:** NotFound para documento inexistente, de outra organização ou ilegível.
 - **Efeitos:** registra a leitura ou a impressão na trilha do prontuário.
 
+#### `document_panels(*, actor, document_id) -> tuple[PanelInfo, ...]`
+
+The panels other apps add to an issued document, in order; only active apps.
+
+- **Autorização:** leitura do arquivo do prontuário; cada painel lê o que mostra pelo serviço da app dele.
+- **Erros:** NotFound para documento inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum (a leitura do documento fica na trilha pela página que o abre).
+
 #### `documents(*, actor, chart_id) -> tuple[DocumentHeader, ...]`
 
 Headers of the chart's documents, newest first, without their text.
@@ -175,6 +199,14 @@ One encounter with its sections and signed addenda; the read is recorded in the 
 - **Autorização:** leitura do arquivo do prontuário.
 - **Erros:** NotFound para atendimento inexistente, de outra organização ou ilegível.
 - **Efeitos:** registra a leitura na trilha do prontuário.
+
+#### `encounter_panels(*, actor, encounter_id) -> tuple[PanelInfo, ...]`
+
+The panels other apps add to a signed encounter, in order; only active apps.
+
+- **Autorização:** leitura do arquivo do prontuário; cada painel lê o que mostra pelo serviço da app dele.
+- **Erros:** NotFound para atendimento inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum (a leitura do atendimento fica na trilha pela página que o abre).
 
 #### `encounters(*, actor, chart_id, cursor=None, page_size=50) -> Page[EncounterHeader]`
 
@@ -207,6 +239,14 @@ The chart of the patient in the archive, created on first use (get or create).
 - **Autorização:** alteração no arquivo e leitura do paciente.
 - **Erros:** NotFound para paciente ou arquivo ilegíveis; Forbidden sem alteração no arquivo; InvalidInput quando o ator altera vários arquivos e nenhum é o padrão.
 - **Efeitos:** cria o prontuário uma vez; repetir devolve o mesmo.
+
+#### `remove_consumption(*, actor, encounter_id, consumption_id, expected_revision) -> EncounterInfo`
+
+Remove an item recorded in the actor's draft.
+
+- **Autorização:** alteração no arquivo; só o autor do rascunho.
+- **Erros:** NotFound; Forbidden; Conflict("signed") ou Conflict("stale_revision").
+- **Efeitos:** exclusão lógica do item e nova revisão do atendimento.
 
 #### `remove_section(*, actor, encounter_id, section_id, expected_revision) -> EncounterInfo`
 
@@ -254,7 +294,7 @@ Sign the actor's draft: photograph the author, seal it and publish ``encounter_s
 
 - **Autorização:** alteração no arquivo; só o autor do rascunho.
 - **Erros:** NotFound; Forbidden; Conflict("empty") sem seção com conteúdo; Conflict("professional_required") sem ficha de profissional com conselho na agenda; Conflict("signed") ou Conflict("stale_revision").
-- **Efeitos:** grava nome e conselho do autor, sela o atendimento com as seções e publica o evento.
+- **Efeitos:** grava nome e conselho do autor, sela o atendimento com as seções e os itens consumidos, publica ``encounter_signed`` e um ``items_consumed`` por item.
 
 #### `start_encounter(*, actor, chart_id, kind='consultation', occurred_at=None, appointment_id=None, template_id=None, idempotency_key) -> EncounterInfo`
 
@@ -385,6 +425,52 @@ What the chart page shows first (clinical content: the read is recorded in the t
 | `medications` | `tuple[MedicationInfo, ...]` |
 | `latest` | `tuple[EncounterHeader, ...]` |
 
+### `ConsumableItem`
+
+One item a provider offers to record as consumed: its opaque ``ref``, what the professional reads (``label``) and the unit of the quantity ("un", "ml"). The encounter keeps a photograph.
+
+| Campo | Tipo |
+|---|---|
+| `ref` | `str` |
+| `label` | `Any` |
+| `unit` | `str` |
+
+### `ConsumableOption`
+
+An item a provider of an active app offers the actor to record as consumed.
+
+| Campo | Tipo |
+|---|---|
+| `provider` | `str` |
+| `ref` | `str` |
+| `label` | `str` |
+| `unit` | `str` |
+
+### `ConsumptionInfo`
+
+An item consumed in the encounter, as recorded: a photograph of the provider's offer.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `provider` | `str` |
+| `item_ref` | `str` |
+| `item_label` | `str` |
+| `unit` | `str` |
+| `quantity` | `str` |
+| `lot` | `str` |
+
+### `ConsumptionInput`
+
+An item to record as consumed: one the provider offers (``provider`` code and ``item_ref``).
+
+| Campo | Tipo |
+|---|---|
+| `provider` | `str` |
+| `item_ref` | `str` |
+| `quantity` | `Any` |
+| `lot` | `str` |
+
 ### `DocumentHeader`
 
 A clinical document without its text: what lists show.
@@ -430,6 +516,20 @@ A kind of clinical document. ``default_body`` may use {{patient_name}}, {{date}}
 | `default_body` | `Any` |
 | `notice` | `Any` |
 
+### `DocumentPanel`
+
+A panel on the page of an issued document, like ``EncounterPanel`` with ``document_id``.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `visible` | `Callable[..., bool] | None` |
+| `context` | `Callable[..., Mapping[str, Any]] | None` |
+
 ### `EncounterHeader`
 
 An encounter without clinical content: what lists show.
@@ -463,6 +563,21 @@ An encounter with its sections (clinical content: every read is recorded in the 
 | `addenda` | `tuple[EncounterHeader, ...]` |
 | `writable` | `bool` |
 | `appointment_completed` | `bool` |
+| `consumption` | `tuple[ConsumptionInfo, ...]` |
+
+### `EncounterPanel`
+
+A panel on the page of a signed encounter, after the records app's own content.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `visible` | `Callable[..., bool] | None` |
+| `context` | `Callable[..., Mapping[str, Any]] | None` |
 
 ### `Icd10Info`
 
@@ -487,6 +602,19 @@ An encounter with its sections (clinical content: every read is recorded in the 
 | `status` | `str` |
 | `note` | `str` |
 | `revision` | `int` |
+
+### `PanelInfo`
+
+A panel another app adds to a signed encounter or an issued document, ready to show.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `str` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `context` | `tuple[tuple[str, str], ...]` |
 
 ### `SealCheck`
 
@@ -574,12 +702,17 @@ One section of an encounter template: ``data`` are ``(field, value)`` pairs.
 |---|---|---|
 | `med_records.encounter_signed` | `sign_encounter` | `code`, `chart`, `patient`, `kind`, `occurred_at`, `seal_digest` |
 | `med_records.document_issued` | `issue_document` | `code`, `chart`, `patient`, `kind`, `seal_digest` |
+| `med_records.items_consumed` | `sign_encounter`, um por item consumido | `encounter`, `provider`, `item_ref`, `quantity`, `lot` |
 
-Nunca conteúdo clínico, título de documento nem nome do paciente.
+Nunca conteúdo clínico, título de documento nem nome do paciente. O `kind` de `document_issued` é o código registrado do tipo de documento (`<app_label>.<nome>`): `med_records.certificate`, `med_records.simple_prescription` e os outros básicos, ou o de outra app, que assim sabe o que foi emitido sem ler o prontuário.
 
 ## Pontos de extensão
 
 `register_section_type(SectionType(...))` e `register_document_kind(DocumentKind(...))`, reexportadas por este módulo e chamadas no `ready()` da app que se pluga (código `<app_label>.<nome>` da própria app; uma versão nova de um tipo de seção convive com as antigas).
+
+`register_encounter_panel(EncounterPanel(code, label, template | url_name, order, visible, context))` e `register_document_panel(DocumentPanel(...))` acrescentam um painel à página do atendimento assinado e à do documento emitido ("Assinar com ICP-Brasil"), depois do conteúdo do prontuário; rascunho não tem painel. Com `template`, o painel é renderizado com `panel`, `organization_id`, `encounter_id` (ou `document_id`) e os pares que `context(actor=..., encounter_id=...)` devolver, em texto; com `url_name`, vira um link para a página da app, que recebe `org` e o `sysid`. `visible(...)`, opcional, esconde o painel. Só o `sysid` chega ao painel, nunca conteúdo clínico: o que ele mostra vem do serviço da app dona. `register_consumable_provider(code, provider)` oferece itens para registrar como consumidos no atendimento: `provider(*, actor)` devolve os `ConsumableItem(ref, label, unit)` que o ator pode escolher (até 200), autorizados pelo serviço da app dona. O atendimento guarda uma fotografia do item, e a assinatura publica `items_consumed` com a referência, nunca a descrição.
+
+`encounter_panels` e `document_panels` autorizam pela leitura do arquivo (quem não lê recebe `NotFound`, e a página, 404) e só devolvem painéis de apps ativas na organização; um `visible`, `context` ou template que falha esconde só aquele painel e vai para o log pelo código e pelo tipo do erro.
 
 ## Contribuições a outras apps
 
@@ -593,3 +726,4 @@ As rotas de `/api/v1/o/<org>/apps/med_records/` estão em `docs/spec.md` (seçã
 | Versão | Mudança |
 |---|---|
 | 0.1.0 | Primeira versão |
+| 0.2.0 | Painéis de outras apps no atendimento assinado e no documento emitido (`register_encounter_panel`, `register_document_panel`, `encounter_panels`, `document_panels`, `PanelInfo`); itens consumidos no atendimento (`register_consumable_provider`, `ConsumableItem`, `consumable_items`, `add_consumption`, `remove_consumption`, `ConsumptionInput`, `ConsumptionInfo`, `ConsumableOption`, `consumption` no fim de `EncounterInfo`, com padrão, e o evento `items_consumed`) |

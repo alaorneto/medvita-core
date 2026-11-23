@@ -1,6 +1,6 @@
 # Guia de implantação
 
-Para o operador da plataforma e para o administrador da clínica. As regras de instalação, atualização e operação do núcleo estão na documentação do Skeleton ([implantação](https://github.com/alaorneto/skeleton/blob/v0.4.0/docs/deployment.md) e [atualizações](https://github.com/alaorneto/skeleton/blob/v0.4.0/docs/updates.md)); este guia só cobre o que é próprio da suíte.
+Para o operador da plataforma e para o administrador da clínica. As regras de instalação, atualização e operação do núcleo estão na documentação do Skeleton ([implantação](https://github.com/alaorneto/skeleton/blob/v0.5.0/docs/deployment.md) e [atualizações](https://github.com/alaorneto/skeleton/blob/v0.5.0/docs/updates.md)); este guia só cobre o que é próprio da suíte.
 
 ## 1. Operador da plataforma
 

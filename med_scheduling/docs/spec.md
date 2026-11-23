@@ -37,7 +37,7 @@ O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do
 
 **`Room`** (derivada do consultório): `name`, `kind` (`room`, `equipment`), `is_active`.
 
-**`AppointmentType`** (derivada do consultório): `code` (minúsculas, único no consultório entre os vivos, imutável), `name`, `duration_minutes` (5 a 480, a duração padrão), `payment_kind` (`private`, `insurance`, `courtesy`; padrão `private`), `color` (uma de oito chaves fixas, pintada pelo CSS da app), `billing_code`, `requires_room`, `is_active`. "Particular", "Unimed" e "Retorno Unimed" são tipos: o tipo diz como a consulta é paga e quanto dura; não há cadastro de convênios à parte.
+**`AppointmentType`** (derivada do consultório): `code` (minúsculas, único no consultório entre os vivos, imutável), `name`, `duration_minutes` (5 a 480, a duração padrão), `payment_kind` (`private`, `insurance`, `courtesy`; padrão `private`), `modality` (`in_person`, presencial, ou `telehealth`, teleconsulta; padrão `in_person`), `color` (uma de oito chaves fixas, pintada pelo CSS da app), `billing_code`, `requires_room`, `is_active`. "Particular", "Unimed" e "Retorno Unimed" são tipos: o tipo diz como a consulta é paga e quanto dura; não há cadastro de convênios à parte.
 
 **`Schedule`** (contêiner): `practice`, `name`, `professional` ou `room` (pelo menos um), `calendar` (o calendário compartilhado do `skeleton_calendar` que projeta a agenda; imutável), `slot_minutes` (5 a 120), `booking_horizon_days` (1 a 730), `is_active`, e os grupos e pessoas com que a agenda foi compartilhada (`writer_groups`, `reader_groups`, `writer_users`).
 
@@ -80,6 +80,7 @@ O `setup` (capacidade `access.manage`) cria o consultório padrão, privado e do
 | `is_fit_in` | encaixe |
 | `billing_code` | cópia do tipo na marcação |
 | `payment_kind` | `private`, `insurance`, `courtesy`: cópia do tipo na marcação, salvo valor explícito |
+| `modality` | `in_person` ou `telehealth`: cópia do tipo na marcação, salvo valor explícito; muda até o atendimento começar. As consultas de antes da coluna são `in_person` |
 | `notes`, `cancel_note` | **sensíveis**: observação da recepção pode conter o motivo da consulta; nunca saem em lista nem em evento |
 | `confirmed_at`, `arrived_at`, `started_at`, `completed_at`, `cancelled_at`, `cancel_reason` | carimbos e motivo |
 
@@ -92,6 +93,7 @@ A FK do paciente não é oculta: o banco e o núcleo impedem excluir um paciente
 - **Tipo aceito.** A marcação aceita o tipo quando ele está ativo e a agenda não escolheu tipos ou escolheu este com a hora marcada permitida; fora disso responde `Conflict("type_not_allowed")`, com encaixe ou sem.
 - **Duração.** Vale a informada na marcação; sem ela, a da agenda para o tipo; sem ela, a do tipo. Sempre de 5 a 480 minutos.
 - **Forma de pagamento.** A consulta nasce com a do tipo; um valor explícito na marcação vence. Mudar o tipo depois não muda as consultas marcadas, e a remarcação para outra agenda leva a forma de pagamento que a consulta tinha.
+- **Modalidade.** A consulta nasce presencial ou por teleconsulta como o tipo diz; `book(modality=...)` vence. A remarcação leva a modalidade que a consulta tinha. `set_modality` troca a modalidade de uma consulta agendada, confirmada ou com o paciente já chegado, com CAS, e publica `med_scheduling.appointment_modality_changed`; depois do início responde `Conflict("invalid_transition")`, e pedir a modalidade que a consulta já tem não grava nem publica. A sala de vídeo e o link são de outra app (Medvita Business), que lê a modalidade nos eventos.
 - O calendário da agenda recebe o evento gerenciado "<tipo> · <código>", com o profissional como participante: nunca nome, telefone ou observação do paciente.
 - **Modo explícito.** `book(mode="booked")` marca com hora, num período de hora marcada; `book(mode="walk_in")` marca sem hora: `starts_at` é qualquer instante de um período de ordem de chegada, e a consulta fica com os limites do período e com a duração planejada. A hora dentro de um período de ordem de chegada, ou a marcação sem hora num período de hora marcada, responde `Conflict("mode_mismatch")`; fora de qualquer período, `slot_unavailable`. O encaixe com hora continua aceito em qualquer dia, inclusive dentro de um período de ordem de chegada.
 - **Sessão.** A agenda e um período de ordem de chegada num dia formam a sessão: as consultas dela dividem o intervalo do período. A sessão comporta as vagas do período (`capacity`); sem vagas, a soma das durações planejadas não passa dos minutos abertos do período, que são os minutos dele menos o que os bloqueios da agenda tomam. Além disso responde `Conflict("session_full")`. Contam as consultas não canceladas que não são encaixe: cancelar libera a vaga, e o encaixe dispensa a lotação e os tipos do período, nunca o bloqueio (o período todo bloqueado responde `slot_unavailable`) nem os tipos da agenda.
@@ -102,7 +104,7 @@ A FK do paciente não é oculta: o banco e o núcleo impedem excluir um paciente
 - `cancel` vale para agendada, confirmada ou paciente chegou; remove o evento do calendário (na ordem de chegada, o evento da sessão passa a contar uma a menos). Trava a agenda antes da consulta, como toda operação que mexe numa sessão.
 - `day` devolve, de cada agenda legível, as consultas, os horários livres (só de hora marcada) e as sessões de ordem de chegada do dia local com as filas, com um número fixo de consultas ao banco.
 - `day_plan(schedule_id, start_date, end_date)` devolve os períodos efetivos de até 62 dias (`PeriodPlan`): modo, vagas, tipos, quantas consultas e minutos o período já tem, os minutos abertos e, na ordem de chegada, se está lotado; `is_exception` diz se o período é de um dia alterado.
-- Eventos `med_scheduling.appointment_*` com payload `code`, `schedule`, `patient`, `appointment_type`, `billing_code`, `starts_at`, `ends_at`, `status`, `mode`. Numa consulta de ordem de chegada `starts_at` e `ends_at` são os limites do período: quem mostra a hora olha `mode`.
+- Eventos `med_scheduling.appointment_*` com payload `code`, `schedule`, `patient`, `appointment_type`, `billing_code`, `starts_at`, `ends_at`, `status`, `mode`, `modality`. Numa consulta de ordem de chegada `starts_at` e `ends_at` são os limites do período: quem mostra a hora olha `mode`.
 
 ### Atendimento
 
@@ -160,7 +162,7 @@ Em `/o/<org>/apps/med_scheduling/` (nomes `med_scheduling:<nome>`); toda leitura
 | `queue` | Fila de uma agenda num dia (`schedules/<id>/queue/<AAAA-MM-DD>/`): os períodos de ordem de chegada com quem aguarda, quem é esperado e quem já foi atendido |
 | `waitlist` | Lista de espera: entradas, incluir e tirar |
 | `settings` | Dados do consultório, profissionais (com a agenda dele no mesmo passo, para quem tem `access.manage`), salas e tipos (com a forma de pagamento) |
-| `type-edit` | Alterar um tipo de atendimento: nome, duração, forma de pagamento, cor, código de cobrança, sala e ativo |
+| `type-edit` | Alterar um tipo de atendimento: nome, duração, forma de pagamento, modalidade, cor, código de cobrança, sala e ativo |
 | `schedules`, `schedule` | Agendas e a seção "Calendários" (as agendas de atendimento e os outros calendários que a pessoa lê, cada um com "Baixar .ics" e "Assinar no celular"; "Abrir o calendário" e "Calendários compartilhados", a página do núcleo em que a clínica cria os calendários comuns; para quem gerencia o acesso, o aviso das agendas cujo calendário ainda não é gerenciado, com "Vincular à agenda médica"); na agenda, "Assinar no celular", a grade semanal, os dias alterados, os tipos atendidos e os bloqueios |
 | `calendar-subscribe` | `calendars/<id>/subscribe/` (só `GET`): leva à página do núcleo em que a pessoa cria o link de assinatura só daquele calendário; 404 para quem não o lê |
 | `period-edit`, `period-remove` | Alterar um período da grade semanal; tirá-lo da grade (só `POST`) |
@@ -170,7 +172,7 @@ Em `/o/<org>/apps/med_scheduling/` (nomes `med_scheduling:<nome>`); toda leitura
 
 Agenda ou consulta que o ator não lê responde 404. Quem lê a agenda e não lê o paciente vê "Paciente não disponível". A cor do tipo é uma classe do CSS da app, nunca `style=`.
 
-**Marcar.** O seletor de tipo traz os tipos que a agenda escolhida atende, em qualquer modo, com a duração no rótulo ("Unimed · 20 min"). "Duração" vem preenchida com a sugestão e é editável; os horários livres são calculados com ela e a consulta é marcada com ela. A página funciona sem script: uma duração que ninguém digitou (vazia, ou ainda igual à sugestão anterior) acompanha o tipo quando ele muda, e uma duração digitada fica. A forma de pagamento aparece como texto e vem do tipo. Vindo da lista de espera, o tipo é o da entrada.
+**Marcar.** O seletor de tipo traz os tipos que a agenda escolhida atende, em qualquer modo, com a duração no rótulo ("Unimed · 20 min"). "Duração" vem preenchida com a sugestão e é editável; os horários livres são calculados com ela e a consulta é marcada com ela. A página funciona sem script: uma duração que ninguém digitou (vazia, ou ainda igual à sugestão anterior) acompanha o tipo quando ele muda, e uma duração digitada fica. A forma de pagamento aparece como texto e vem do tipo. A modalidade do tipo aparece como texto, e "Modalidade" muda a desta consulta (em branco, segue o tipo). A página da consulta mostra a modalidade e, antes do atendimento, a troca; a agenda do dia marca a teleconsulta. Vindo da lista de espera, o tipo é o da entrada.
 
 **Períodos do dia ao marcar.** Escolhidos a agenda e o dia, Marcar mostra "Períodos de <dia>", um cartão por período com o horário, o modo e a ocupação. O período de hora marcada lista os horários livres; o de ordem de chegada traz uma opção só, o próprio período ("9 de 15 vagas", ou "3 pacientes · 60 de 240 min" quando não tem vagas definidas). Horário e período ficam no mesmo grupo de escolha, e a marcação leva o modo do que foi escolhido. O período lotado leva a marca "Lotado" e o aviso de que só aceita encaixe, e o período que não lista o tipo escolhido diz o mesmo. O período que já terminou, o bloqueado por inteiro e o de um modo em que a agenda não atende o tipo não trazem opção e dizem por quê. Dia sem período mostra "Esta agenda não atende neste dia." com o atalho para a semana. Cada recusa do serviço aparece no campo a que se refere: `slot_unavailable`, `mode_mismatch`, `session_full` e `room_unavailable` no horário, `type_not_allowed` no tipo. "Encaixe" num período de ordem de chegada lotado inclui o paciente mesmo assim.
 
@@ -206,8 +208,8 @@ Em `/api/v1/o/<org>/apps/med_scheduling/`:
 | `GET schedules/<id>/slots/?start=&end=&type=` | Horários livres (`Slot`, com `appointment_type_ids`: os tipos do período; vazio vale todos os da agenda), datas `AAAA-MM-DD`, até 62 dias | `scheduling:read` |
 | `GET schedules/<id>/plan/?start=&end=` | Períodos da agenda em cada dia (`PeriodPlan`: modo, vagas, tipos, ocupação, se é dia alterado), datas `AAAA-MM-DD`; sem `end`, só o dia de `start` | `scheduling:read` |
 | `GET schedules/<id>/queue/?date=` | Fila de cada período de ordem de chegada da agenda no dia (`QueueSession`: aguardando na ordem de chamada, esperados, em atendimento e encerrados), com a marca de prioridade | `scheduling:read` |
-| `GET appointments/?schedule=&patient=&start=&end=&status=&cursor=&page_size=` | Consultas (`AppointmentInfo`, sem observação) | `scheduling:read` |
-| `POST appointments/` | Marca; exige `Idempotency-Key`; campos `schedule`, `patient`, `appointment_type`, `starts_at` (ISO 8601 com fuso) e opcionais `duration_minutes`, `fit_in`, `notes`, `payment_kind` (sem ele, a forma de pagamento do tipo), `room`, `mode` (`booked`, o padrão, ou `walk_in`: `starts_at` é então qualquer instante do período de ordem de chegada); devolve 201 com `ETag` | `scheduling:write` |
+| `GET appointments/?schedule=&patient=&start=&end=&status=&modality=&cursor=&page_size=` | Consultas (`AppointmentInfo`, sem observação); `modality` é `in_person` ou `telehealth` | `scheduling:read` |
+| `POST appointments/` | Marca; exige `Idempotency-Key`; campos `schedule`, `patient`, `appointment_type`, `starts_at` (ISO 8601 com fuso) e opcionais `duration_minutes`, `fit_in`, `notes`, `payment_kind` (sem ele, a forma de pagamento do tipo), `room`, `mode` (`booked`, o padrão, ou `walk_in`: `starts_at` é então qualquer instante do período de ordem de chegada), `modality` (sem ela, a do tipo); devolve 201 com `ETag` | `scheduling:write` |
 | `GET appointments/<id>/` | Detalhe (`AppointmentDetail`, com a observação e a marca de prioridade), com `ETag` | `scheduling:read` |
 | `POST appointments/<id>/<mudança>/` | `confirm`, `check-in` (`priority` opcional: a chegada já com a marca de prioridade), `start`, `complete`, `no-show`, `cancel` (`reason`, `note`) e `reschedule` (`starts_at`, `schedule`); exigem `If-Match` com a revisão | `scheduling:write` |
 | `POST appointments/<id>/priority/` | Põe ou tira a marca de prioridade legal (`priority`, obrigatório, verdadeiro ou falso) antes de o atendimento começar; exige `If-Match`; devolve `AppointmentInfo` com `ETag` | `scheduling:write` |
@@ -218,13 +220,14 @@ Campo fora da lista é 400; sem revisão é 400; revisão vencida é 409; agenda
 
 A marca de prioridade (`is_priority`) é dado sensível: sai só em `queue/` e no detalhe de uma consulta, nunca na lista de consultas nem na resposta de uma marcação, de uma mudança de situação ou da própria rota `priority/`. `arrival_number` e `is_priority` são campos de sistema: mandá-los numa marcação é 400. Os códigos de conflito da ordem de chegada (`mode_mismatch`, `session_full`, `type_not_allowed`) respondem 409 com o código.
 
-As respostas de consulta ganharam `mode`, `duration_minutes` e `arrival_number`. Numa consulta de ordem de chegada, `starts_at` e `ends_at` são os limites do período, não a hora do atendimento: o cliente olha `mode` antes de mostrar a hora, e o cliente que valida o esquema da resposta de forma estrita precisa aceitar os campos novos.
+As respostas de consulta ganharam `mode`, `duration_minutes`, `arrival_number` e `modality`, e as de tipo de atendimento, `modality`. Numa consulta de ordem de chegada, `starts_at` e `ends_at` são os limites do período, não a hora do atendimento: o cliente olha `mode` antes de mostrar a hora, e o cliente que valida o esquema da resposta de forma estrita precisa aceitar os campos novos.
 
 ## Acceptance
 
 - Só o administrador configura o consultório; a configuração é idempotente pela chave e única por organização.
 - A recepção lê profissionais, salas e tipos e não os altera; a organização B não vê nada da A.
 - O tipo tem forma de pagamento; a consulta marcada sem dizê-la herda a do tipo, e um valor explícito vence.
+- O tipo tem modalidade; marcar com um tipo de teleconsulta grava `modality=telehealth` e o evento `appointment_booked` a leva; a consulta iniciada recusa a troca de modalidade; a lista filtra por modalidade.
 - Uma agenda sem tipos escolhidos atende todos os tipos ativos; com tipos escolhidos, marcar outro tipo responde `type_not_allowed` e ele não tem horário livre.
 - A duração da marcação é a informada, depois a da agenda para o tipo, depois a do tipo; fora de 5 a 480 minutos é recusada.
 - Quem altera a agenda (inclusive o profissional dono) escolhe os tipos dela; quem só lê não; revisão vencida não grava e mostra o conflito.

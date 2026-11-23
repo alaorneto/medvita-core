@@ -27,7 +27,7 @@ Valores sempre em inteiros de centavos.
 
 **`PriceItem`** (derivada da tabela de preços): `code` (único por tabela entre os vivos; é o `billing_code` dos tipos de atendimento), `description`, `amount`, `is_active`.
 
-**`CashDesk`** (contêiner): `name`, `book` (o livro, imutável), `price_list` (a tabela padrão do caixa), `payment_accounts`, `is_default`.
+**`CashDesk`** (contêiner): `name`, `book` (o livro, imutável), `price_list` (a tabela padrão do caixa), `payment_accounts`, `is_default`, `fiscal_issuer` (`practice`, o padrão, ou `professional`: quem emite o documento fiscal dos pagamentos do caixa).
 
 **`CashSession`** (derivada do caixa): `opened_by`, `opened_at`, `opening_amount` (imutáveis), `status` (aberto, fechado; uma sessão aberta por caixa), `closed_by`, `closed_at`, `counted_amount`, `expected_amount`, `difference`, `note`.
 
@@ -75,6 +75,14 @@ Valores sempre em inteiros de centavos.
 - `register_payment(issue_receipt=True)` ou `issue_receipt` emitem o recibo do pagamento (um só; repetir devolve o mesmo): o número é pedido depois de todas as validações, na mesma transação do selo, e um rollback o devolve; o recibo é selado na emissão (`seal_record`, referências no `extra`) e publica `receipt_issued` (sem nome nem documento).
 - `void_receipt` grava a anulação; o recibo continua íntegro (`verify_receipt` válido), aparece como anulado e o número não volta. O pagamento só é estornado com o recibo anulado.
 - O recibo não substitui documento fiscal (NFS-e, Receita Saúde).
+
+### Dados fiscais do pagamento
+
+O financeiro não emite documento fiscal: as apps de Receita Saúde (Medvita Pro) e de NFS-e (Medvita Business) partem de `payment_registered`, cujo payload só tem identificadores, e leem o resto por `fiscal_data(payment_id=...)`, com o recibo emitido ou não.
+
+- **Emitente fiscal do caixa.** `fiscal_issuer` diz quem emite: o consultório (`practice`, o padrão: razão social, ou o nome, e o CPF ou CNPJ do consultório) ou o profissional da consulta (`professional`, para o médico autônomo que recebe direto dentro de uma clínica: nome e CPF dele). Com `professional`, uma conta sem consulta, ou cujo profissional não tem CPF, volta ao consultório; `issuer_kind` diz qual valeu. `set_fiscal_issuer` muda a configuração com CAS, para quem altera o caixa; nada já emitido muda.
+- **O que sai.** Valor, data, forma e parcelas do pagamento; emitente; profissional (nome, conselho, CPF); pagador (o da conta ou, sem ele, o paciente, com nome civil e CPF); beneficiário (o paciente atendido); descrição dos itens; o número do recibo vivo, quando há; e a situação do pagamento: um pagamento estornado continua respondendo, marcado `reversed`, para que o documento já emitido seja cancelado.
+- **Autorização.** A leitura do caixa, como as outras leituras do financeiro, mais a leitura do cadastro do paciente; o profissional vem da consulta como o ator a lê (quem não lê a agenda recebe o profissional vazio, como no recibo): quem não lê o caixa, ou o pagamento de outra organização, recebe `NotFound`. Nome e CPF saem só no DTO, nunca em evento, log ou URL.
 
 ### Agenda e página do paciente
 
@@ -133,3 +141,4 @@ Campo fora da lista é 400; conta ou recibo sem acesso ou de outra organização
 - Recibos emitidos têm números consecutivos no ano; a anulação mantém o recibo e o número.
 - A mesma consulta particular gera uma conta só; convênio não gera conta; a conta recente veta anonimizar o paciente.
 - Pelas páginas, a recepção abre o caixa, cria a conta, recebe em dois meios, imprime o recibo, faz sangria e fecha o caixa com diferença.
+- Um pagamento Pix de paciente com CPF devolve emitente, profissional, pagador, beneficiário e descrição por `fiscal_data`; com o caixa do profissional, o emitente é o CPF do profissional; quem não lê o caixa e a organização B recebem `NotFound`; o estorno aparece marcado; o payload dos eventos não ganha dado.

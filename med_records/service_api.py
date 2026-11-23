@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, BinaryIO
 from uuid import UUID
 
@@ -29,13 +30,26 @@ from skeleton.service_api import (
 from skeleton.service_api.files import AttachmentInfo
 
 from . import common
-from .extension import DocumentKind, SectionField, SectionType, register_document_kind, register_section_type
+from .extension import (
+    ConsumableItem,
+    DocumentKind,
+    DocumentPanel,
+    EncounterPanel,
+    SectionField,
+    SectionType,
+    register_consumable_provider,
+    register_document_kind,
+    register_document_panel,
+    register_encounter_panel,
+    register_section_type,
+)
 from .models import (
     AccessLog,
     Allergy,
     Archive,
     ClinicalDocument,
     Encounter,
+    EncounterConsumption,
     EncounterSection,
     EntryTemplate,
     Icd10Code,
@@ -72,6 +86,16 @@ __all__ = [
     "SectionType",
     "register_document_kind",
     "register_section_type",
+    "EncounterPanel",
+    "DocumentPanel",
+    "PanelInfo",
+    "register_encounter_panel",
+    "register_document_panel",
+    "ConsumableItem",
+    "ConsumableOption",
+    "ConsumptionInfo",
+    "ConsumptionInput",
+    "register_consumable_provider",
 ]
 
 
@@ -187,6 +211,58 @@ class EncounterInfo:
     addenda: tuple[EncounterHeader, ...]
     writable: bool
     appointment_completed: bool = False
+    consumption: tuple[ConsumptionInfo, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ConsumptionInfo:
+    """An item consumed in the encounter, as recorded: a photograph of the provider's offer.
+
+    ``item_label`` is health data (a vaccine says why the patient came); ``quantity`` is decimal
+    text ("1", "0.5"), never a float.
+    """
+
+    sysid: UUID
+    provider: str
+    item_ref: str
+    item_label: str
+    unit: str
+    quantity: str
+    lot: str
+
+
+def consumption_info(row: EncounterConsumption) -> ConsumptionInfo:
+    return ConsumptionInfo(
+        row.pk, row.provider, row.item_ref, row.item_label, row.unit, _quantity_text(row.quantity), row.lot
+    )
+
+
+def _quantity_text(value: Decimal) -> str:
+    """``1``, ``0.5``, ``10``: the decimal without trailing zeros nor exponent."""
+    return format(Decimal(value).normalize(), "f")
+
+
+@dataclass(frozen=True, slots=True)
+class ConsumptionInput:
+    """An item to record as consumed: one the provider offers (``provider`` code and ``item_ref``).
+
+    ``quantity`` is a positive integer or decimal (text, ``int`` or ``Decimal``, up to 3 places).
+    """
+
+    provider: str
+    item_ref: str
+    quantity: Any = 1
+    lot: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ConsumableOption:
+    """An item a provider of an active app offers the actor to record as consumed."""
+
+    provider: str
+    ref: str
+    label: str
+    unit: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,7 +283,8 @@ def seal_extra(encounter: Encounter) -> dict[str, Any]:
     creation; the sections are frozen by ``seal_parent``. Stable order, no floats.
     """
     rows = EncounterSection.objects.filter(encounter_id=encounter.pk).order_by("sysid")
-    return {
+    consumed = EncounterConsumption.objects.filter(encounter_id=encounter.pk).order_by("sysid")
+    extra = {
         "references": {
             "chart": encounter.chart_id,
             "patient": encounter.patient_id,
@@ -227,6 +304,21 @@ def seal_extra(encounter: Encounter) -> dict[str, Any]:
             for row in rows
         ],
     }
+    if consumed:
+        # Only when there is some: the digest of an encounter without items is the one it always had.
+        extra["consumption"] = [
+            {
+                "sysid": row.pk,
+                "provider": row.provider,
+                "item_ref": row.item_ref,
+                "item_label": row.item_label,
+                "unit": row.unit,
+                "quantity": _quantity_text(row.quantity),
+                "lot": row.lot,
+            }
+            for row in consumed
+        ]
+    return extra
 
 
 @dataclass(frozen=True, slots=True)
@@ -460,6 +552,42 @@ def access_log_entry(row: AccessLog) -> AccessLogEntry:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PanelInfo:
+    """A panel another app adds to a signed encounter or an issued document, ready to show.
+
+    ``template`` is rendered with ``context`` (the pairs the app's ``context`` callable returned, as text);
+    ``url_name`` is a link to a page of the app instead. Only one of them is set.
+    """
+
+    code: str
+    label: str
+    template: str
+    url_name: str
+    order: int
+    context: tuple[tuple[str, str], ...]
+
+
+def _panels(actor: Any, panels: tuple[Any, ...], **target: UUID) -> tuple[PanelInfo, ...]:
+    """The panels the record shows: ``visible`` answered true and ``context`` did not fail."""
+    from .extension import call_safely
+
+    result = []
+    for panel in panels:
+        if panel.visible is not None:
+            ok, shown = call_safely(panel.code, panel.visible, actor=actor, **target)
+            if not (ok and shown):
+                continue
+        values: tuple[tuple[str, str], ...] = ()
+        if panel.context is not None:
+            ok, found = call_safely(panel.code, panel.context, actor=actor, **target)
+            if not ok:
+                continue
+            values = tuple(sorted((str(key), str(value)) for key, value in dict(found or {}).items()))
+        result.append(PanelInfo(panel.code, str(panel.label), panel.template, panel.url_name, panel.order, values))
+    return tuple(result)
+
+
 # ------------------------------------------------------------------------------------ helpers
 
 
@@ -600,7 +728,42 @@ def _encounter_info(actor: Any, encounter: Encounter) -> EncounterInfo:
         _sections(actor, encounter),
         tuple(encounter_header(row) for row in addenda.order_by("sealed_at", "sysid")),
         writable,
+        consumption=_consumption(actor, encounter),
     )
+
+
+def _consumption(actor: Any, encounter: Encounter) -> tuple[ConsumptionInfo, ...]:
+    from skeleton.access.policies import authorized_queryset
+
+    rows = authorized_queryset(EncounterConsumption, user=actor, action="read").filter(encounter=encounter)
+    return tuple(consumption_info(row) for row in rows.order_by("created_at", "sysid"))
+
+
+def _offers(actor: Any) -> dict[str, dict[str, ConsumableItem]]:
+    """The items each active provider offers the actor, by provider code and reference."""
+    from .extension import active_consumable_providers, call_safely
+
+    offers: dict[str, dict[str, ConsumableItem]] = {}
+    for entry in active_consumable_providers(actor):
+        ok, items = call_safely(entry.code, entry.provider, actor=actor)
+        if not ok:
+            continue
+        offers[entry.code] = {item.ref: item for item in tuple(items or ())[:200] if isinstance(item, ConsumableItem)}
+    return offers
+
+
+def _clean_quantity(value: object) -> Decimal:
+    from decimal import InvalidOperation
+
+    if isinstance(value, bool) or not isinstance(value, (int, str, Decimal)):
+        raise InvalidInput({"quantity": [gettext("Informe a quantidade com até três casas decimais.")]})
+    try:
+        quantity = Decimal(str(value).strip().replace(",", "."))
+    except InvalidOperation:
+        raise InvalidInput({"quantity": [gettext("Informe a quantidade com até três casas decimais.")]}) from None
+    if not quantity.is_finite() or quantity <= 0 or quantity > 99999 or quantity.as_tuple().exponent < -3:
+        raise InvalidInput({"quantity": [gettext("Informe a quantidade com até três casas decimais.")]})
+    return quantity
 
 
 def _occurred(value: object) -> datetime:
@@ -1146,6 +1309,85 @@ class RecordsService(ServiceAPI):
         _touch(encounter)
         return _encounter_info(actor, encounter)
 
+    @service_method(read_only=True, since="0.2.0")
+    def consumable_items(self, *, actor: Any, encounter_id: UUID) -> tuple[ConsumableOption, ...]:
+        """The items the providers of active apps offer the actor to record in the encounter.
+
+        Empty when no active app provides items or the encounter is signed. A provider that fails
+        offers nothing (logged by code and error type).
+        Autorização: leitura do arquivo do atendimento; cada provedor autoriza o que oferece.
+        Erros: NotFound para atendimento inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        encounter = _encounter(actor, encounter_id)
+        if encounter.sealed_at is not None:
+            return ()
+        return tuple(
+            ConsumableOption(code, item.ref, str(item.label), item.unit)
+            for code, items in sorted(_offers(actor).items())
+            for item in items.values()
+        )
+
+    @service_method(read_only=False, since="0.2.0")
+    def add_consumption(
+        self, *, actor: Any, encounter_id: UUID, item: ConsumptionInput, expected_revision: int
+    ) -> EncounterInfo:
+        """Record an item consumed in the actor's draft: one an active provider offers the actor.
+
+        The encounter keeps a photograph of the item (reference, label, unit) with the quantity and
+        the lot; the signature seals it and publishes ``med_records.items_consumed``.
+        Autorização: alteração no arquivo; só o autor do rascunho; o provedor oferece o item ao ator.
+        Erros: NotFound; Forbidden para quem não é o autor; InvalidInput para provedor ou item não
+        oferecido, quantidade fora de 0 a 99999 com até três casas ou lote acima de 40 caracteres;
+        Conflict("signed") ou Conflict("stale_revision").
+        Efeitos: grava o item e sobe a revisão do atendimento.
+        """
+        from skeleton.access.policies import require_parent_action
+
+        if not isinstance(item, ConsumptionInput):
+            raise InvalidInput({"item": [gettext("Informe o item consumido.")]})
+        quantity = _clean_quantity(item.quantity)
+        lot = str(item.lot or "").strip()
+        if len(lot) > 40:
+            raise InvalidInput({"lot": [gettext("Use até 40 caracteres.")]})
+        offered = _offers(actor).get(str(item.provider), {}).get(str(item.item_ref))
+        if offered is None:
+            raise InvalidInput({"item_ref": [gettext("Item não oferecido.")]})
+        encounter = _own_draft(actor, encounter_id, expected_revision)
+        require_parent_action(EncounterConsumption, encounter, user=actor, action="create")
+        EncounterConsumption(
+            organization_id=encounter.organization_id,
+            encounter=encounter,
+            provider=str(item.provider),
+            item_ref=offered.ref,
+            item_label=str(offered.label)[:200],
+            unit=offered.unit,
+            quantity=quantity,
+            lot=lot,
+        ).save()
+        _touch(encounter)
+        return _encounter_info(actor, encounter)
+
+    @service_method(read_only=False, since="0.2.0")
+    def remove_consumption(
+        self, *, actor: Any, encounter_id: UUID, consumption_id: UUID, expected_revision: int
+    ) -> EncounterInfo:
+        """Remove an item recorded in the actor's draft.
+
+        Autorização: alteração no arquivo; só o autor do rascunho.
+        Erros: NotFound; Forbidden; Conflict("signed") ou Conflict("stale_revision").
+        Efeitos: exclusão lógica do item e nova revisão do atendimento.
+        """
+        encounter = _own_draft(actor, encounter_id, expected_revision)
+        row = EncounterConsumption.objects.filter(
+            encounter=encounter, pk=as_uuid(consumption_id, field="consumption_id")
+        ).first()
+        if row is None:
+            raise NotFound()
+        row.delete()
+        _touch(encounter)
+        return _encounter_info(actor, encounter)
+
     @service_method(read_only=False, since="0.1.0")
     def discard_draft(self, *, actor: Any, encounter_id: UUID, expected_revision: int) -> None:
         """Discard the actor's draft encounter with its sections.
@@ -1172,7 +1414,8 @@ class RecordsService(ServiceAPI):
         Erros: NotFound; Forbidden; Conflict("empty") sem seção com conteúdo;
         Conflict("professional_required") sem ficha de profissional com conselho na agenda;
         Conflict("signed") ou Conflict("stale_revision").
-        Efeitos: grava nome e conselho do autor, sela o atendimento com as seções e publica o evento.
+        Efeitos: grava nome e conselho do autor, sela o atendimento com as seções e os itens
+        consumidos, publica ``encounter_signed`` e um ``items_consumed`` por item.
         """
         from applications.med_scheduling.service_api import SchedulingService
         from skeleton.records.sealing import seal_record
@@ -1204,6 +1447,20 @@ class RecordsService(ServiceAPI):
                 ("seal_digest", sealed.seal_digest),
             ),
         )
+        for item in EncounterConsumption.objects.filter(encounter=sealed).order_by("created_at", "sysid"):
+            # The reference of the item, never its label nor the patient: the label may say why they came.
+            EventService().publish(
+                actor=actor,
+                event_type="med_records.items_consumed",
+                record_id=item.pk,
+                data=(
+                    ("encounter", str(sealed.pk)),
+                    ("provider", item.provider),
+                    ("item_ref", item.item_ref),
+                    ("quantity", _quantity_text(item.quantity)),
+                    ("lot", item.lot),
+                ),
+            )
         completed = False
         if sealed.appointment_id is not None:
             try:
@@ -1216,7 +1473,7 @@ class RecordsService(ServiceAPI):
             except (Forbidden, Conflict, NotFound):
                 completed = False
         info = _encounter_info(actor, sealed)
-        return EncounterInfo(info.header, info.sections, info.addenda, info.writable, completed)
+        return EncounterInfo(info.header, info.sections, info.addenda, info.writable, completed, info.consumption)
 
     @service_method(read_only=False, since="0.1.0")
     def add_addendum(self, *, actor: Any, encounter_id: UUID, text: str, idempotency_key: str) -> EncounterInfo:
@@ -1820,6 +2077,42 @@ class RecordsService(ServiceAPI):
         document = _document(actor, document_id)
         record_access(actor, document.chart, "print_document" if printing else "view_document", document)
         return _document_info(actor, document)
+
+    @service_method(read_only=True, since="0.2.0")
+    def encounter_panels(self, *, actor: Any, encounter_id: UUID) -> tuple[PanelInfo, ...]:
+        """The panels other apps add to a signed encounter, in order; only active apps.
+
+        A draft has no panel. A panel with ``visible`` shows only when it answers true for the actor
+        and the encounter; one whose ``visible`` or ``context`` fails is left out (logged by code and
+        error type). Nothing of the encounter but its ``sysid`` reaches the panel.
+        Autorização: leitura do arquivo do prontuário; cada painel lê o que mostra pelo serviço da
+        app dele.
+        Erros: NotFound para atendimento inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum (a leitura do atendimento fica na trilha pela página que o abre).
+        """
+        from .extension import ENCOUNTER_PANELS, active_panels
+
+        encounter = _encounter(actor, encounter_id)
+        if encounter.sealed_at is None:
+            return ()
+        return _panels(actor, active_panels(actor, ENCOUNTER_PANELS), encounter_id=encounter.pk)
+
+    @service_method(read_only=True, since="0.2.0")
+    def document_panels(self, *, actor: Any, document_id: UUID) -> tuple[PanelInfo, ...]:
+        """The panels other apps add to an issued document, in order; only active apps.
+
+        As ``encounter_panels``: a draft has none, and ``visible`` and ``context`` receive ``document_id``.
+        Autorização: leitura do arquivo do prontuário; cada painel lê o que mostra pelo serviço da
+        app dele.
+        Erros: NotFound para documento inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum (a leitura do documento fica na trilha pela página que o abre).
+        """
+        from .extension import DOCUMENT_PANELS, active_panels
+
+        document = _document(actor, document_id)
+        if document.sealed_at is None:
+            return ()
+        return _panels(actor, active_panels(actor, DOCUMENT_PANELS), document_id=document.pk)
 
     @service_method(read_only=True, since="0.1.0")
     def documents(self, *, actor: Any, chart_id: UUID) -> tuple[DocumentHeader, ...]:

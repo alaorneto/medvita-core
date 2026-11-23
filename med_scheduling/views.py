@@ -657,6 +657,7 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                                 payment_kind=values["payment_kind"] or None,
                                 idempotency_key=_key(request),
                                 mode=mode,
+                                modality=values["modality"] or None,
                             )
                         # A form sent twice finds the appointment as the first one left it.
                         if appointment.status in ("scheduled", "confirmed"):
@@ -779,6 +780,8 @@ def appointment_view(request: HttpRequest, organization_id: UUID, appointment_id
             can_reschedule=detail.writable
             and row.status in (("scheduled", "confirmed") if walk_in else ("scheduled", "confirmed", "arrived")),
             can_set_priority=detail.writable and walk_in and row.status in ("scheduled", "confirmed", "arrived"),
+            can_set_modality=detail.writable and row.status in ("scheduled", "confirmed", "arrived"),
+            modalities=scheduling_forms.Modality.choices,
         ),
     )
 
@@ -801,6 +804,29 @@ def appointment_check_in(request: HttpRequest, organization_id: UUID, appointmen
         messages.error(request, conflict_text(error))
     else:
         messages.success(request, _arrival_text(arrived))
+    return _after(request, organization_id, appointment_id)
+
+
+@require_POST
+@practice_page
+def appointment_modality(request: HttpRequest, organization_id: UUID, appointment_id: UUID) -> HttpResponse:
+    """Change where an appointment that has not started is seen (in person or telehealth)."""
+    try:
+        with transaction.atomic():
+            _service().set_modality(
+                actor=request.user,
+                appointment_id=appointment_id,
+                modality=request.POST.get("modality", ""),
+                expected_revision=_revision(request),
+            )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except InvalidInput as error:
+        messages.error(request, " ".join(text for texts in error.errors.values() for text in texts))
+    except Conflict as error:
+        messages.error(request, conflict_text(error))
+    else:
+        messages.success(request, gettext("Modalidade da consulta salva."))
     return _after(request, organization_id, appointment_id)
 
 

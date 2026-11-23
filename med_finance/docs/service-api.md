@@ -1,6 +1,6 @@
 # API de serviços: Financeiro
 
-Referência de `FinanceService` (`applications.med_finance.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.4.0/docs/service-api.md).
+Referência de `FinanceService` (`applications.med_finance.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.5.0/docs/service-api.md).
 
 ## Visão geral
 
@@ -63,6 +63,14 @@ The charge of a private appointment, created on first use from its billing code 
 - **Autorização:** leitura da consulta e do paciente; alteração no caixa padrão.
 - **Erros:** NotFound; Forbidden; InvalidInput("not_private") para convênio ou cortesia, InvalidInput para consulta cancelada ou sem preço ativo para o código de cobrança.
 - **Efeitos:** os de ``create_charge``.
+
+#### `charge_panels(*, actor, charge_id) -> tuple[PanelInfo, ...]`
+
+The panels other apps add to the charge page, in order; only active apps.
+
+- **Autorização:** leitura do caixa; cada painel lê o que mostra pelo serviço da app dele.
+- **Erros:** NotFound para conta inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
 
 #### `charges(*, actor, patient_id=None, status=None, desk_id=None, start=None, end=None, cursor=None, page_size=50) -> Page[ChargeInfo]`
 
@@ -128,6 +136,14 @@ The cash desks the actor reads, the default first.
 - **Erros:** nenhum além do contrato.
 - **Efeitos:** nenhum.
 
+#### `fiscal_data(*, actor, payment_id) -> PaymentFiscalData`
+
+What a fiscal document of the payment needs: issuer, professional, payer, beneficiary and items.
+
+- **Autorização:** leitura do caixa (e a leitura do cadastro do paciente, do consultório e da consulta).
+- **Erros:** NotFound para pagamento inexistente, de outra organização ou ilegível, ou paciente ilegível.
+- **Efeitos:** nenhum; nada sai em evento.
+
 #### `issue_receipt(*, actor, payment_id, idempotency_key) -> ReceiptInfo`
 
 Issue the receipt of a payment (one per payment), numbered per year without gaps and sealed.
@@ -192,6 +208,14 @@ One receipt, marked when voided.
 - **Erros:** NotFound para recibo inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
+#### `receipt_panels(*, actor, receipt_id) -> tuple[PanelInfo, ...]`
+
+The panels other apps add to the receipt page, in order; only active apps.
+
+- **Autorização:** leitura do caixa; cada painel lê o que mostra pelo serviço da app dele.
+- **Erros:** NotFound para recibo inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
 #### `receipts(*, actor, charge_id=None, year=None, cursor=None, page_size=50) -> Page[ReceiptInfo]`
 
 Receipts of the desks the actor reads, newest first, by charge or year.
@@ -247,6 +271,14 @@ Sessions of a cash desk, newest first.
 - **Autorização:** leitura do caixa.
 - **Erros:** NotFound; InvalidInput para datas sem fuso, cursor ou tamanho inválidos.
 - **Efeitos:** nenhum.
+
+#### `set_fiscal_issuer(*, actor, desk_id, fiscal_issuer, expected_revision) -> DeskInfo`
+
+Say who issues the fiscal document of the desk's payments: "practice" or "professional", with CAS.
+
+- **Autorização:** alteração no caixa.
+- **Erros:** NotFound; Forbidden se só lê o caixa; InvalidInput para valor desconhecido; Conflict("stale_revision").
+- **Efeitos:** grava a configuração do caixa.
 
 #### `setup(*, actor, desk_name='', price_list_name='', writer_group_ids=(), reader_group_ids=(), price_manager_group_ids=(), idempotency_key) -> DeskInfo`
 
@@ -354,6 +386,20 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 | `app_label` | `str` |
 | `label` | `Any` |
 
+### `ChargePanel`
+
+A panel on the charge page, after the app's own content.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `visible` | `Callable[..., bool] | None` |
+| `context` | `Callable[..., Mapping[str, Any]] | None` |
+
 ### `DailySummary`
 
 | Campo | Tipo |
@@ -377,6 +423,7 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 | `is_default` | `bool` |
 | `revision` | `int` |
 | `writable` | `bool` |
+| `fiscal_issuer` | `str` |
 
 ### `MethodTotal`
 
@@ -397,6 +444,48 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 | `reason` | `str` |
 | `at` | `datetime` |
 | `ledger_entry_id` | `UUID | None` |
+
+### `PanelInfo`
+
+A panel another app adds to the charge or the receipt page, ready to show.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `str` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `context` | `tuple[tuple[str, str], ...]` |
+
+### `PaymentFiscalData`
+
+What a fiscal document of one payment needs (Receita Saúde, NFS-e), read through the cash desk.
+
+| Campo | Tipo |
+|---|---|
+| `payment_id` | `UUID` |
+| `charge_id` | `UUID` |
+| `charge_code` | `str` |
+| `desk_id` | `UUID` |
+| `appointment_id` | `UUID | None` |
+| `status` | `str` |
+| `amount` | `int` |
+| `received_at` | `datetime` |
+| `method` | `str` |
+| `installments` | `int` |
+| `issuer_kind` | `str` |
+| `issuer_name` | `str` |
+| `issuer_document` | `str` |
+| `professional_name` | `str` |
+| `professional_council` | `str` |
+| `professional_tax_id` | `str` |
+| `payer_name` | `str` |
+| `payer_document` | `str` |
+| `beneficiary_name` | `str` |
+| `beneficiary_document` | `str` |
+| `description` | `str` |
+| `receipt_number` | `str` |
 
 ### `PaymentInfo`
 
@@ -466,6 +555,20 @@ A line to bill: with ``code`` and no ``unit_amount``, the price comes from the d
 | `voided_at` | `datetime | None` |
 | `revision` | `int` |
 
+### `ReceiptPanel`
+
+A panel on the receipt page, like ``ChargePanel`` with ``receipt_id`` in place of ``charge_id``.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `visible` | `Callable[..., bool] | None` |
+| `context` | `Callable[..., Mapping[str, Any]] | None` |
+
 ### `ReceivablesReport`
 
 | Campo | Tipo |
@@ -519,6 +622,8 @@ Nunca nome nem documento do paciente ou do pagador.
 
 `register_charge_origin(ChargeOrigin(app_label, label))`, reexportada por este módulo e chamada no `ready()`: declara uma app que cria contas por `create_charge(origin_app=..., origin_key=...)`; a mesma origem devolve a mesma conta. O financeiro registra a origem `med_scheduling` (a consulta).
 
+`register_charge_panel(ChargePanel(code, label, template | url_name, order, visible, context))` e `register_receipt_panel(ReceiptPanel(...))` acrescentam um painel à página da conta e à do recibo, depois do conteúdo do financeiro (a situação de uma nota fiscal, de um repasse). O código é `<app_label>.<nome>` da app que registra; código repetido com outro painel ou fora do formato é recusado (`ValueError`). Com `template`, o painel é renderizado na página com `panel`, `organization_id`, `charge_id` (ou `receipt_id`) e os pares que `context(actor=..., charge_id=...)` devolver, em texto; com `url_name`, vira um link para a página da app, que recebe `org` e o `sysid`. `visible(actor=..., charge_id=...)`, opcional, esconde o painel. O painel recebe só o `sysid`: o que ele mostra vem do serviço da app dona. `charge_panels` e `receipt_panels` autorizam pela leitura do caixa (quem não lê a conta recebe `NotFound`, e a página, 404) e só devolvem painéis de apps ativas na organização; um `visible`, `context` ou template que falha esconde só aquele painel e é registrado no log pelo código e pelo tipo do erro.
+
 ## Contribuições a outras apps
 
 Registradas no `ready()`: o passo de configuração `med_finance.desk`, a aba `med_finance.account` (com `visible`), a linha do tempo e o relatório do titular `med_finance.finance` e a guarda `med_finance.retention` de `med_patients`; a ação `med_finance.collect` das consultas de `med_scheduling`; as chaves de conta `med_finance.*` e as regras `med_finance.cash_supply` e `cash_withdrawal` do livro.
@@ -531,3 +636,4 @@ As rotas de `/api/v1/o/<org>/apps/med_finance/` estão em `docs/spec.md` (seçã
 | Versão | Mudança |
 |---|---|
 | 0.1.0 | Primeira versão |
+| 0.2.0 | Painéis de outras apps na conta e no recibo (`register_charge_panel`, `register_receipt_panel`, `charge_panels`, `receipt_panels`, `PanelInfo`); dados fiscais do pagamento (`fiscal_data`, `PaymentFiscalData`) e emitente fiscal do caixa (`set_fiscal_issuer`, `fiscal_issuer` no fim de `DeskInfo`, com padrão) |

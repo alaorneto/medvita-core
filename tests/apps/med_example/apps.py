@@ -55,6 +55,18 @@ def _now():
     return timezone.now()
 
 
+def _fiscal_situation(*, actor, charge_id):
+    """Context of the charge panel: what the app would read from its own service."""
+    return {"situation": "Pendente"}
+
+
+def _supplies(*, actor):
+    """The catalog of the example app: what an encounter may record as consumed."""
+    from applications.med_records.service_api import ConsumableItem
+
+    return (ConsumableItem("gauze", "Gaze de exemplo", "un"),)
+
+
 def _keep(*, patient_id):
     from .models import ExampleNote
 
@@ -72,7 +84,14 @@ class MedExampleConfig(AppConfig):
     def ready(self) -> None:
         from pathlib import Path
 
-        from applications.med_finance.service_api import ChargeOrigin, register_charge_origin
+        from applications.med_finance.service_api import (
+            ChargeOrigin,
+            ChargePanel,
+            ReceiptPanel,
+            register_charge_origin,
+            register_charge_panel,
+            register_receipt_panel,
+        )
         from applications.med_patients.service_api import (
             ConsentPurpose,
             PatientSection,
@@ -86,9 +105,14 @@ class MedExampleConfig(AppConfig):
         )
         from applications.med_records.service_api import (
             DocumentKind,
+            DocumentPanel,
+            EncounterPanel,
             SectionField,
             SectionType,
+            register_consumable_provider,
             register_document_kind,
+            register_document_panel,
+            register_encounter_panel,
             register_section_type,
         )
         from applications.med_scheduling.service_api import AppointmentAction, register_appointment_action
@@ -140,4 +164,28 @@ class MedExampleConfig(AppConfig):
             )
         )
         register_document_kind(DocumentKind("med_example.letter", "Carta de exemplo", "Para {{patient_name}}."))
+        register_encounter_panel(
+            EncounterPanel(
+                "med_example.signature",
+                "Assinatura de exemplo",
+                template="med_example/encounter_panel.html",
+                visible=lambda *, actor, encounter_id: True,
+            )
+        )
+        register_document_panel(
+            DocumentPanel("med_example.document", "Documento de exemplo", url_name="med_example:document_look")
+        )
+        register_consumable_provider("med_example.supplies", _supplies)
         register_charge_origin(ChargeOrigin("med_example", "Exemplo"))
+        register_charge_panel(
+            ChargePanel(
+                "med_example.fiscal",
+                "Nota de exemplo",
+                template="med_example/charge_panel.html",
+                order=90,
+                context=_fiscal_situation,
+            )
+        )
+        register_receipt_panel(
+            ReceiptPanel("med_example.receipt", "Recibo de exemplo", url_name="med_example:receipt_look", order=90)
+        )

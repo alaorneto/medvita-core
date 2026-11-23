@@ -8,4 +8,5 @@
 <section class="card max-w-xl med-finance-no-print" aria-labelledby="void-heading"><h2 id="void-heading">{% translate "Anular o recibo" %}</h2><p class="helptext">{% translate "O recibo continua guardado e marcado como anulado; o número não volta." %}</p>
 <form method="post" action="{% url 'med_finance:receipt_void' organization_id receipt.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% include "skeleton/web/components/form-fields.html" with form=reason_form hide_marks=True %}<div class="form-actions"><button type="submit" class="btn btn-danger">{% translate "Anular" %}</button></div></form></section>
 {% endif %}
+{% include "med_finance/_panels.html" %}
 {% endblock %}

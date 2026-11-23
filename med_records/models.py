@@ -131,6 +131,32 @@ class EncounterSection(OrganizationRecord):
         ordering = ("position", "section_type", "sysid")
 
 
+class EncounterConsumption(OrganizationRecord):
+    """An item another app offers (a material, a medicine, a vaccine) used in the encounter; frozen with its seal.
+
+    The item is a photograph of the provider's offer (``item_ref``, ``item_label``, ``unit``), never
+    a key to the other app's tables. ``item_label`` may say why the patient came ("vacina
+    antirrábica"): it is sensitive and never leaves in an event; ``item_ref`` is the provider's
+    opaque reference, which is what the event carries.
+    """
+
+    encounter = models.ForeignKey(Encounter, on_delete=models.PROTECT, related_name="+")
+    provider = models.CharField(max_length=81)
+    item_ref = models.CharField(max_length=80)
+    item_label = models.CharField(max_length=200)
+    unit = models.CharField(max_length=20, blank=True)
+    quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    lot = models.CharField(max_length=40, blank=True)
+    seal_parent = "encounter"
+    immutable_fields = ("encounter_id", "provider", "item_ref", "item_label", "unit")
+
+    class Meta(OrganizationRecord.Meta):
+        constraints = OrganizationRecord.Meta.constraints + [
+            models.CheckConstraint(condition=Q(quantity__gt=0), name="med_records_consumption_quantity"),
+        ]
+        ordering = ("created_at", "sysid")
+
+
 class Allergy(OrganizationRecord):
     """An allergy or intolerance of the patient, on the chart."""
 

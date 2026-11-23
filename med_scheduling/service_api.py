@@ -33,6 +33,7 @@ from .models import (
     AppointmentType,
     AvailabilityRule,
     AvailabilityRuleType,
+    Modality,
     Mode,
     PaymentKind,
     Practice,
@@ -185,6 +186,7 @@ class AppointmentTypeInfo:
     is_active: bool
     revision: int
     payment_kind: str = "private"
+    modality: str = "in_person"
 
 
 def type_info(row: AppointmentType) -> AppointmentTypeInfo:
@@ -200,6 +202,7 @@ def type_info(row: AppointmentType) -> AppointmentTypeInfo:
         row.is_active,
         row.revision,
         str(row.payment_kind),
+        str(row.modality),
     )
 
 
@@ -414,6 +417,7 @@ class AppointmentInfo:
     mode: str = "booked"
     duration_minutes: int = 0
     arrival_number: int | None = None
+    modality: str = "in_person"
 
 
 def _planned(row: Any) -> int:
@@ -441,6 +445,7 @@ def appointment_info(row: Appointment) -> AppointmentInfo:
         str(row.mode),
         _planned(row),
         row.arrival_number,
+        str(row.modality),
     )
 
 
@@ -994,6 +999,7 @@ def _payload(row: Appointment) -> tuple[tuple[str, str], ...]:
         ("ends_at", as_utc(row.ends_at).isoformat()),
         ("status", row.status),
         ("mode", str(row.mode)),
+        ("modality", str(row.modality)),
     )
 
 
@@ -1090,6 +1096,7 @@ def _book(
     idempotency_key: object,
     rescheduled_from: Appointment | None = None,
     mode: object = "booked",
+    modality: object = None,
 ) -> Appointment:
     """Book an appointment (the body of ``SchedulingService.book``, shared with a reschedule)."""
     from datetime import timedelta
@@ -1104,6 +1111,8 @@ def _book(
     mode = _check_mode(mode)
     if payment_kind is not None and payment_kind not in PaymentKind.values:
         raise InvalidInput({"payment_kind": [gettext("Forma de pagamento desconhecida.")]})
+    if modality is not None and modality not in Modality.values:
+        raise InvalidInput({"modality": [gettext("Modalidade desconhecida.")]})
     if len(str(notes)) > 2000:
         raise InvalidInput({"notes": [gettext("Texto longo demais.")]})
     if duration_minutes is not None and (type(duration_minutes) is not int or not 5 <= duration_minutes <= 480):
@@ -1150,6 +1159,7 @@ def _book(
         rescheduled_from=rescheduled_from,
         mode=mode,
         duration_minutes=planned,
+        modality=str(kind.modality if modality is None else modality),
     )
     row.save()
     _project(actor, row, schedule)
@@ -2165,11 +2175,12 @@ class SchedulingService(ServiceAPI):
         requires_room: bool = False,
         idempotency_key: str | None = None,
         payment_kind: str = "private",
+        modality: str = "in_person",
     ) -> AppointmentTypeInfo:
         """Add a kind of appointment; the code is unique in the practice.
 
-        The kind says how it is paid for ("private", "insurance" or "courtesy"): an appointment
-        booked with it starts with that payment kind.
+        The kind says how it is paid for ("private", "insurance" or "courtesy") and where the patient
+        is seen ("in_person" or "telehealth"): an appointment booked with it starts with both.
         Autorização: alteração no consultório.
         Erros: NotFound; Forbidden; InvalidInput; Conflict("integrity_conflict") para código já usado.
         Efeitos: grava o tipo; a mesma chave do mesmo ator devolve o já criado.
@@ -2182,6 +2193,7 @@ class SchedulingService(ServiceAPI):
                 "name": name,
                 "duration_minutes": duration_minutes,
                 "payment_kind": payment_kind,
+                "modality": modality,
                 "color": color,
                 "billing_code": billing_code,
                 "requires_room": requires_room,
@@ -2207,7 +2219,7 @@ class SchedulingService(ServiceAPI):
         Autorização: alteração no consultório.
         Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
         Efeitos: grava só os campos que mudaram; consultas já marcadas guardam a cópia do código de
-        cobrança e da forma de pagamento.
+        cobrança, da forma de pagamento e da modalidade.
         """
         from .services import TYPE_FIELDS, clean_type
 
@@ -2948,6 +2960,7 @@ class SchedulingService(ServiceAPI):
         room_id: UUID | None = None,
         idempotency_key: str,
         mode: str = "booked",
+        modality: str | None = None,
     ) -> AppointmentInfo:
         """Book an appointment; a fit-in skips the grid and the overlap check, never a block.
 
@@ -2955,7 +2968,8 @@ class SchedulingService(ServiceAPI):
         both win. The calendar of the schedule gets the event "<tipo> · <código>", never the patient.
         The kind must be active and taken by the schedule in the mode, fit-in or not. Without
         ``duration_minutes`` the appointment lasts what the schedule gives the kind, then the duration
-        of the kind; without ``payment_kind`` it is paid for as the kind says.
+        of the kind; without ``payment_kind`` it is paid for as the kind says; without ``modality``
+        ("in_person" or "telehealth") it takes the modality of the kind.
 
         ``mode`` is explicit. "booked" takes the time asked for, which must be in a period of booked
         time. "walk_in" has no time: ``starts_at`` is any instant of a walk-in period, and the
@@ -2967,7 +2981,7 @@ class SchedulingService(ServiceAPI):
         Autorização: alteração na agenda e leitura do paciente.
         Erros: NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda;
         InvalidInput (horário sem fuso, duração fora de 5 a 480, modo, forma de pagamento,
-        observação longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable",
+        modalidade, observação longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable",
         "mode_mismatch" para hora num período de ordem de chegada ou o contrário, "session_full",
         "room_unavailable", "patient_inactive", "processing_restricted").
         Efeitos: código da sequência sem lacunas, consulta gravada, evento no calendário e
@@ -2987,6 +3001,7 @@ class SchedulingService(ServiceAPI):
                 room_id=room_id,
                 idempotency_key=idempotency_key,
                 mode=mode,
+                modality=modality,
             )
         )
 
@@ -3075,6 +3090,7 @@ class SchedulingService(ServiceAPI):
                 idempotency_key=idempotency_key or f"reschedule:{row.pk}:{starts_at.isoformat()}",
                 rescheduled_from=row,
                 mode=target_mode,
+                modality=row.modality,
             )
             return appointment_info(moved)
         schedule = locked[row.schedule_id]
@@ -3173,9 +3189,11 @@ class SchedulingService(ServiceAPI):
         status: str | None = None,
         cursor: str | None = None,
         page_size: int = 50,
+        modality: str | None = None,
     ) -> Page[AppointmentInfo]:
         """Appointments of the schedules the actor reads, by start time, filtered.
 
+        ``modality`` ("in_person" or "telehealth") keeps only the appointments seen that way.
         Autorização: leitura de cada agenda.
         Erros: InvalidInput para filtro, cursor ou tamanho de página inválidos.
         Efeitos: nenhum.
@@ -3195,6 +3213,10 @@ class SchedulingService(ServiceAPI):
             if status not in Appointment.Status.values:
                 raise InvalidInput({"status": [gettext("Situação desconhecida.")]})
             rows = rows.filter(status=status)
+        if modality is not None:
+            if modality not in Modality.values:
+                raise InvalidInput({"modality": [gettext("Modalidade desconhecida.")]})
+            rows = rows.filter(modality=modality)
         return paginate(rows, convert=appointment_info, cursor=cursor, page_size=page_size, key=("starts_at", "sysid"))
 
     @service_method(read_only=True, since="0.1.0")
@@ -3455,6 +3477,31 @@ class SchedulingService(ServiceAPI):
         if row.status not in (SCHEDULED, CONFIRMED, ARRIVED):
             raise Conflict("invalid_transition", gettext("A prioridade só muda antes do atendimento começar."))
         common.apply_changes(row, {"is_priority": priority})
+        return appointment_info(row)
+
+    @service_method(read_only=False, since="0.2.0")
+    def set_modality(
+        self, *, actor: Any, appointment_id: UUID, modality: str, expected_revision: int
+    ) -> AppointmentInfo:
+        """Change where an appointment not yet started is seen ("in_person" or "telehealth"), with CAS.
+
+        Asking for the modality it already has changes nothing and publishes nothing.
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; InvalidInput para modalidade desconhecida; Conflict("stale_revision";
+        "invalid_transition" fora de agendada, confirmada ou aguardando).
+        Efeitos: grava a modalidade e publica ``med_scheduling.appointment_modality_changed``.
+        """
+        from .transitions import ARRIVED, CONFIRMED, SCHEDULED
+
+        if modality not in Modality.values:
+            raise InvalidInput({"modality": [gettext("Modalidade desconhecida.")]})
+        _schedule_row, row = _locked(actor, appointment_id, expected_revision)
+        if row.status not in (SCHEDULED, CONFIRMED, ARRIVED):
+            raise Conflict("invalid_transition", gettext("A modalidade só muda antes do atendimento começar."))
+        if row.modality == modality:
+            return appointment_info(row)
+        common.apply_changes(row, {"modality": modality})
+        _publish(actor, "modality_changed", row)
         return appointment_info(row)
 
     @service_method(read_only=False, since="0.1.0")

@@ -29,7 +29,14 @@ from skeleton.service_api import (
 )
 
 from . import common
-from .extension import ChargeOrigin, register_charge_origin
+from .extension import (
+    ChargeOrigin,
+    ChargePanel,
+    ReceiptPanel,
+    register_charge_origin,
+    register_charge_panel,
+    register_receipt_panel,
+)
 from .models import (
     CashDesk,
     CashMovement,
@@ -57,12 +64,18 @@ __all__ = [
     "AgingRow",
     "ReceiptInfo",
     "PaymentInfo",
+    "PaymentFiscalData",
     "ChargeDetail",
     "ChargeInfo",
     "ChargeItemInfo",
     "ChargeItemInput",
     "ChargeOrigin",
     "register_charge_origin",
+    "ChargePanel",
+    "ReceiptPanel",
+    "PanelInfo",
+    "register_charge_panel",
+    "register_receipt_panel",
     "MethodTotal",
     "MovementInfo",
     "SessionInfo",
@@ -87,10 +100,13 @@ class DeskInfo:
     is_default: bool
     revision: int
     writable: bool = False
+    fiscal_issuer: str = "practice"
 
 
 def desk_info(row: CashDesk, *, writable: bool = False) -> DeskInfo:
-    return DeskInfo(row.pk, row.name, row.book_id, row.price_list_id, row.is_default, row.revision, writable)
+    return DeskInfo(
+        row.pk, row.name, row.book_id, row.price_list_id, row.is_default, row.revision, writable, str(row.fiscal_issuer)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,6 +464,42 @@ def receipt_info(row: Receipt, void: ReceiptVoid | None = None) -> ReceiptInfo:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PaymentFiscalData:
+    """What a fiscal document of one payment needs (Receita Saúde, NFS-e), read through the cash desk.
+
+    It carries personal data (names, CPF or CNPJ) and is never put in an event, a log or a URL.
+    ``issuer_kind`` is "practice" or "professional": the professional of the appointment issues
+    when the desk says so and the charge has one with a CPF; otherwise the practice. Without a
+    payer on the charge the payer is the patient. ``beneficiary_*`` is the patient who was seen.
+    ``status`` is the payment's ("registered" or "reversed"): a reversed payment is still returned,
+    marked, so that a document already issued for it can be cancelled.
+    """
+
+    payment_id: UUID
+    charge_id: UUID
+    charge_code: str
+    desk_id: UUID
+    appointment_id: UUID | None
+    status: str
+    amount: int
+    received_at: datetime
+    method: str
+    installments: int
+    issuer_kind: str
+    issuer_name: str
+    issuer_document: str
+    professional_name: str
+    professional_council: str
+    professional_tax_id: str
+    payer_name: str
+    payer_document: str
+    beneficiary_name: str
+    beneficiary_document: str
+    description: str
+    receipt_number: str
+
+
 def receipt_extra(receipt: Receipt) -> dict[str, Any]:
     """What the seal digest covers besides the frozen columns: the immutable references."""
     return {"references": {"charge": receipt.charge_id, "payment": receipt.payment_id}}
@@ -463,10 +515,34 @@ def _has_live_receipt(payment: Payment) -> bool:
     return receipt is not None and not ReceiptVoid.objects.filter(receipt=receipt).exists()
 
 
+def _parties(actor: Any, charge: Charge) -> tuple[Any, Any]:
+    """The practice and the professional of the charge's appointment, as the actor reads them (``None`` when not)."""
+    from applications.med_scheduling.service_api import SchedulingService
+
+    scheduling = SchedulingService()
+    try:
+        practice = scheduling.practice(actor=actor)
+    except (NotFound, Forbidden):
+        practice = None
+    professional = None
+    if charge.appointment_id is not None:
+        try:
+            appointment = scheduling.appointment(actor=actor, appointment_id=charge.appointment_id).appointment
+            if appointment.professional_id is not None:
+                professional = scheduling.professional(actor=actor, professional_id=appointment.professional_id)
+        except (NotFound, Forbidden):
+            professional = None
+    return practice, professional
+
+
+def _description(charge: Charge) -> str:
+    items = ChargeItem.objects.filter(charge=charge).order_by("created_at", "sysid")
+    return "; ".join(f"{row.quantity}x {row.description}" for row in items)[:500]
+
+
 def _issue_receipt(actor: Any, payment: Payment, *, key: str) -> Receipt:
     """Photograph payer, patient, issuer and professional, number the receipt and seal it."""
     from applications.med_patients.service_api import PatientService
-    from applications.med_scheduling.service_api import SchedulingService
     from skeleton.access.policies import require_parent_action
     from skeleton.records.sealing import seal_record
     from skeleton.service_api.sequences import SequenceService
@@ -480,23 +556,9 @@ def _issue_receipt(actor: Any, payment: Payment, *, key: str) -> Receipt:
         raise Conflict("reversed", gettext("Pagamento estornado não recebe recibo."))
     charge = payment.charge
     patient = PatientService().summary(actor=actor, patient_id=charge.patient_id)
-    scheduling = SchedulingService()
-    issuer_name, issuer_document = "", ""
-    try:
-        practice = scheduling.practice(actor=actor)
-        issuer_name, issuer_document = practice.legal_name or practice.name, practice.tax_id
-    except (NotFound, Forbidden):
-        pass
-    professional = None
-    if charge.appointment_id is not None:
-        try:
-            appointment = scheduling.appointment(actor=actor, appointment_id=charge.appointment_id).appointment
-            if appointment.professional_id is not None:
-                professional = scheduling.professional(actor=actor, professional_id=appointment.professional_id)
-        except (NotFound, Forbidden):
-            professional = None
-    items = ChargeItem.objects.filter(charge=charge).order_by("created_at", "sysid")
-    description = "; ".join(f"{row.quantity}x {row.description}" for row in items)[:500]
+    practice, professional = _parties(actor, charge)
+    issuer_name, issuer_document = (practice.legal_name or practice.name, practice.tax_id) if practice else ("", "")
+    description = _description(charge)
     issued_at = timezone.now()
     require_parent_action(Receipt, charge, user=actor, action="create")
     number = SequenceService().next_number(actor=actor, key=RECEIPT_SEQUENCE, at=issued_at)
@@ -649,6 +711,42 @@ class ReceivablesReport:
     as_of: date
     buckets: tuple[AgingRow, ...]
     total: int
+
+
+@dataclass(frozen=True, slots=True)
+class PanelInfo:
+    """A panel another app adds to the charge or the receipt page, ready to show.
+
+    ``template`` is rendered with ``context`` (the pairs the app's ``context`` callable returned, as text);
+    ``url_name`` is a link to a page of the app instead. Only one of them is set.
+    """
+
+    code: str
+    label: str
+    template: str
+    url_name: str
+    order: int
+    context: tuple[tuple[str, str], ...]
+
+
+def _panels(actor: Any, panels: tuple[Any, ...], **target: UUID) -> tuple[PanelInfo, ...]:
+    """The panels of active apps the record shows: ``visible`` answered true and ``context`` did not fail."""
+    from .extension import call_safely
+
+    result = []
+    for panel in panels:
+        if panel.visible is not None:
+            ok, shown = call_safely(panel.code, panel.visible, actor=actor, **target)
+            if not (ok and shown):
+                continue
+        values: tuple[tuple[str, str], ...] = ()
+        if panel.context is not None:
+            ok, found = call_safely(panel.code, panel.context, actor=actor, **target)
+            if not ok:
+                continue
+            values = tuple(sorted((str(key), str(value)) for key, value in dict(found or {}).items()))
+        result.append(PanelInfo(panel.code, str(panel.label), panel.template, panel.url_name, panel.order, values))
+    return tuple(result)
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -857,6 +955,25 @@ class FinanceService(ServiceAPI):
         rows = authorized_queryset(CashDesk, user=actor, action="read").order_by("-is_default", "name", "sysid")
         writable = _writable_ids(actor, CashDesk)
         return tuple(desk_info(row, writable=row.pk in writable) for row in rows[:100])
+
+    @service_method(read_only=False, since="0.2.0")
+    def set_fiscal_issuer(self, *, actor: Any, desk_id: UUID, fiscal_issuer: str, expected_revision: int) -> DeskInfo:
+        """Say who issues the fiscal document of the desk's payments: "practice" or "professional", with CAS.
+
+        "professional" is for the professional who receives directly inside a clinic: the
+        professional of the appointment issues, with the CPF; a charge without one falls back to
+        the practice. Nothing already issued changes.
+        Autorização: alteração no caixa.
+        Erros: NotFound; Forbidden se só lê o caixa; InvalidInput para valor desconhecido;
+        Conflict("stale_revision").
+        Efeitos: grava a configuração do caixa.
+        """
+        if fiscal_issuer not in CashDesk.FiscalIssuer.values:
+            raise InvalidInput({"fiscal_issuer": [gettext("Emitente fiscal desconhecido.")]})
+        desk = _container(actor, CashDesk, desk_id, field="desk_id", write=True, lock=True)
+        common.check_revision(desk, expected_revision)
+        common.apply_changes(desk, {"fiscal_issuer": fiscal_issuer})
+        return desk_info(desk, writable=True)
 
     @service_method(read_only=True, since="0.1.0")
     def price_lists(self, *, actor: Any) -> tuple[PriceListInfo, ...]:
@@ -1564,6 +1681,60 @@ class FinanceService(ServiceAPI):
         _publish_payment(actor, "reversed", payment)
         return payment_info(payment)
 
+    @service_method(read_only=True, since="0.2.0")
+    def fiscal_data(self, *, actor: Any, payment_id: UUID) -> PaymentFiscalData:
+        """What a fiscal document of the payment needs: issuer, professional, payer, beneficiary and items.
+
+        For the apps that issue fiscal documents from ``med_finance.payment_registered``, whose
+        payload has only identifiers. The issuer follows the desk's ``fiscal_issuer``.
+        The professional comes from the appointment as the actor reads it: who reads the desk but not
+        the schedule gets it empty (as on the receipt).
+        Autorização: leitura do caixa (e a leitura do cadastro do paciente, do consultório e da consulta).
+        Erros: NotFound para pagamento inexistente, de outra organização ou ilegível, ou paciente ilegível.
+        Efeitos: nenhum; nada sai em evento.
+        """
+        from applications.med_patients.service_api import PatientService
+
+        payment = common.row(actor, Payment, payment_id, field="payment_id", write=False)
+        charge = payment.charge
+        desk = charge.desk
+        patient = PatientService().get(actor=actor, patient_id=charge.patient_id)
+        practice, professional = _parties(actor, charge)
+        if desk.fiscal_issuer == CashDesk.FiscalIssuer.PROFESSIONAL and professional and professional.tax_id:
+            issuer = ("professional", professional.display_name, professional.tax_id)
+        elif practice is not None:
+            issuer = ("practice", practice.legal_name or practice.name, practice.tax_id)
+        else:
+            issuer = ("practice", "", "")
+        if charge.payer_name:
+            payer_name, payer_document = charge.payer_name, charge.payer_document
+        else:
+            payer_name, payer_document = patient.full_name, patient.cpf
+        receipt = Receipt.objects.filter(payment=payment).first()
+        live = receipt is not None and not ReceiptVoid.objects.filter(receipt=receipt).exists()
+        return PaymentFiscalData(
+            payment.pk,
+            charge.pk,
+            charge.code,
+            desk.pk,
+            charge.appointment_id,
+            payment.status,
+            payment.amount,
+            as_utc(payment.received_at),
+            payment.method,
+            payment.installments,
+            *issuer,
+            professional.display_name if professional else "",
+            professional.council_label if professional else "",
+            professional.tax_id if professional else "",
+            payer_name,
+            payer_document,
+            patient.full_name,
+            patient.cpf,
+            _description(charge) or gettext("Atendimento"),
+            receipt.number if live else "",
+        )
+
     @service_method(read_only=True, since="0.1.0")
     def payments(self, *, actor: Any, charge_id: UUID) -> tuple[PaymentInfo, ...]:
         """The payments of a charge, oldest first.
@@ -1604,6 +1775,35 @@ class FinanceService(ServiceAPI):
         Efeitos: nenhum.
         """
         return _receipt_with_void(common.row(actor, Receipt, receipt_id, field="receipt_id", write=False))
+
+    @service_method(read_only=True, since="0.2.0")
+    def charge_panels(self, *, actor: Any, charge_id: UUID) -> tuple[PanelInfo, ...]:
+        """The panels other apps add to the charge page, in order; only active apps.
+
+        A panel with ``visible`` shows only when it answers true for the actor and the charge; a
+        panel whose ``visible`` or ``context`` fails is left out (logged by code and error type).
+        Autorização: leitura do caixa; cada painel lê o que mostra pelo serviço da app dele.
+        Erros: NotFound para conta inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from .extension import CHARGE_PANELS
+
+        charge = _charge(actor, charge_id)
+        return _panels(actor, CHARGE_PANELS.active(actor), charge_id=charge.pk)
+
+    @service_method(read_only=True, since="0.2.0")
+    def receipt_panels(self, *, actor: Any, receipt_id: UUID) -> tuple[PanelInfo, ...]:
+        """The panels other apps add to the receipt page, in order; only active apps.
+
+        As ``charge_panels``, with ``receipt_id`` given to ``visible`` and ``context``.
+        Autorização: leitura do caixa; cada painel lê o que mostra pelo serviço da app dele.
+        Erros: NotFound para recibo inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from .extension import RECEIPT_PANELS
+
+        receipt = common.row(actor, Receipt, receipt_id, field="receipt_id", write=False)
+        return _panels(actor, RECEIPT_PANELS.active(actor), receipt_id=receipt.pk)
 
     @service_method(read_only=True, since="0.1.0")
     def receipts(

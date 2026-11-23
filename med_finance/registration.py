@@ -52,7 +52,7 @@ def register_price_and_desk_tables() -> None:
             description=_("Caixas: pontos de recebimento ligados a um livro contábil."),
             label=_("Caixas"),
             scope="organization",
-            read_fields=("name", "book", "price_list", "is_default", "owner", "visibility"),
+            read_fields=("name", "book", "price_list", "is_default", "fiscal_issuer", "owner", "visibility"),
             write_fields=("name",),
             sensitive_fields=(),
             expose_api=True,

@@ -6,6 +6,7 @@ A desk, charge or receipt the actor cannot read answers 404.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 from uuid import UUID
@@ -23,6 +24,8 @@ from skeleton.web.views import tenant_page
 
 from . import forms as finance_forms
 from .service_api import ChargeItemInput, FinanceService
+
+logger = logging.getLogger(__name__)
 
 
 def _service() -> FinanceService:
@@ -69,6 +72,30 @@ def _uuid(value: Any) -> UUID:
 
 def _context(organization_id: UUID, **values: Any) -> dict[str, Any]:
     return {"organization_id": organization_id, **values}
+
+
+def _rendered_panels(request: HttpRequest, organization_id: UUID, panels: Any, **target: UUID) -> list[dict[str, Any]]:
+    """The panels of other apps, rendered: a template inline or a link. A template that fails is left out."""
+    from django.template.loader import render_to_string
+    from django.urls import NoReverseMatch, reverse
+
+    shown = []
+    for panel in panels:
+        if panel.url_name:
+            try:
+                url = reverse(panel.url_name, args=(organization_id, *target.values()))
+            except NoReverseMatch:
+                continue
+            shown.append({"code": panel.code, "label": panel.label, "url": url, "html": ""})
+            continue
+        values = {**dict(panel.context), "panel": panel, "organization_id": organization_id, **target}
+        try:
+            html = render_to_string(panel.template, values, request=request)
+        except Exception as exc:  # noqa: BLE001 - one app's panel never breaks the page
+            logger.warning("med_finance.panel_failed", extra={"contribution": panel.code, "error": type(exc).__name__})
+            continue
+        shown.append({"code": panel.code, "label": panel.label, "url": "", "html": html})
+    return shown
 
 
 def _patients(request: HttpRequest, ids: list[UUID]) -> dict[UUID, Any]:
@@ -300,6 +327,12 @@ def charge_view(request: HttpRequest, organization_id: UUID, charge_id: UUID) ->
         raise Http404 from None
     charge = detail.charge
     receipt_of = {item.payment_id: item for item in receipts}
+    panels = _rendered_panels(
+        request,
+        organization_id,
+        _service().charge_panels(actor=request.user, charge_id=charge.sysid),
+        charge_id=charge.sysid,
+    )
     return render(
         request,
         "med_finance/charge.html",
@@ -314,6 +347,7 @@ def charge_view(request: HttpRequest, organization_id: UUID, charge_id: UUID) ->
             ),
             reason_form=finance_forms.ReasonForm(),
             idempotency_key=uuid.uuid4().hex,
+            panels=panels,
         ),
     )
 
@@ -421,11 +455,21 @@ def _receipt(request: HttpRequest, receipt_id: UUID) -> Any:
 @tenant_page()
 def receipt_view(request: HttpRequest, organization_id: UUID, receipt_id: UUID) -> HttpResponse:
     receipt = _receipt(request, receipt_id)
+    panels = _rendered_panels(
+        request,
+        organization_id,
+        _service().receipt_panels(actor=request.user, receipt_id=receipt.sysid),
+        receipt_id=receipt.sysid,
+    )
     return render(
         request,
         "med_finance/receipt.html",
         _context(
-            organization_id, receipt=receipt, reason_form=finance_forms.ReasonForm(), idempotency_key=uuid.uuid4().hex
+            organization_id,
+            receipt=receipt,
+            reason_form=finance_forms.ReasonForm(),
+            idempotency_key=uuid.uuid4().hex,
+            panels=panels,
         ),
     )
 

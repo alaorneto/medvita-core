@@ -150,6 +150,32 @@ def register_encounters() -> None:
             owner_app=APP_LABEL,
         )
     )
+    from .models import EncounterConsumption
+
+    register(
+        TableSpec(
+            model=EncounterConsumption,
+            description=_(
+                "Itens de outras apps consumidos nos atendimentos (material, medicamento, vacina); "
+                "a descrição é dado de saúde."
+            ),
+            label=_("Itens consumidos"),
+            scope="organization",
+            read_fields=("encounter", "provider", "item_ref", "item_label", "unit", "quantity", "lot"),
+            write_fields=(),
+            sensitive_fields=("item_label",),
+            expose_api=False,
+            access_parent="encounter",
+        )
+    )
+    register_event_type(
+        EventType(
+            code="med_records.items_consumed",
+            table_key="med_records.encounterconsumption",
+            payload_fields=("encounter", "provider", "item_ref", "quantity", "lot"),
+            owner_app=APP_LABEL,
+        )
+    )
 
 
 def register_clinical_lists() -> None:
