@@ -1,4 +1,4 @@
-# medvita-core
+# Medvita Core
 
 [![CI](https://github.com/alaorneto/medvita-core/actions/workflows/ci.yml/badge.svg)](https://github.com/alaorneto/medvita-core/actions/workflows/ci.yml)
 

@@ -1,4 +1,4 @@
-# Instruções para agentes: suíte medvita-core
+# Instruções para agentes: suíte Medvita Core
 
 ## Contrato do núcleo
 
