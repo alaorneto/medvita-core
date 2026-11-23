@@ -1,0 +1,2 @@
+{% load i18n %}{% for panel in panels %}<section class="card mt-6 med-records-no-print" aria-labelledby="panel-{{ forloop.counter }}" data-panel="{{ panel.code }}"><h2 id="panel-{{ forloop.counter }}">{{ panel.label }}</h2>{% if panel.url %}<p class="mt-2"><a href="{{ panel.url }}">{% translate "Abrir" %}</a></p>{% else %}<div class="mt-2">{{ panel.html }}</div>{% endif %}</section>
+{% endfor %}

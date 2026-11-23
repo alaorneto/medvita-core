@@ -11,4 +11,5 @@
 <section class="card max-w-3xl med-records-no-print" aria-labelledby="addendum-heading"><h2 id="addendum-heading">{% translate "Adendo" %}</h2><p class="helptext">{% translate "O atendimento assinado não muda: a correção é um adendo, também assinado." %}</p>
 <form method="post" action="{% url 'med_records:addendum' organization_id header.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% include "skeleton/web/components/form-fields.html" with form=addendum_form hide_marks=True %}<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Escrever adendo" %}</button></div></form></section>
 {% endif %}
+{% include "med_records/_panels.html" %}
 {% endblock %}

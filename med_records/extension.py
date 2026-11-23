@@ -7,17 +7,23 @@ while its app is active in the current organization.
 
 - ``register_section_type``: a structured section of an encounter. A new ``version`` of a type lives
   next to the old ones: forms use the latest, stored sections keep the version they were saved with.
-- ``register_document_kind``: a kind of clinical document with its default text.
+- ``register_document_kind``: a kind of clinical document with its default text. The code of the
+  kind is the ``kind`` that ``med_records.document_issued`` publishes.
+- ``register_encounter_panel`` and ``register_document_panel``: a panel on the page of a signed
+  encounter and of an issued document ("Assinar com ICP-Brasil"), shown to who reads the archive.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _CODE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
 _PLUMBING = (
@@ -103,6 +109,44 @@ class DocumentKind:
     notice: Any = ""
 
 
+@dataclass(frozen=True)
+class _Panel:
+    code: str
+    label: Any  # Lazy gettext text.
+    template: str = ""
+    url_name: str = ""
+    order: int = 100
+    visible: Callable[..., bool] | None = None
+    context: Callable[..., Mapping[str, Any]] | None = None
+
+    def __post_init__(self) -> None:
+        if bool(self.template) == bool(self.url_name):
+            raise ValueError(f"{type(self).__name__} {self.code!r}: give a template or a url_name, not both.")
+        if type(self.order) is not int:
+            raise ValueError(f"{type(self).__name__} {self.code!r}: order is an integer.")
+        for name in ("visible", "context"):
+            value = getattr(self, name)
+            if value is not None and not callable(value):
+                raise ValueError(f"{type(self).__name__} {self.code!r}: {name} is a callable.")
+
+
+@dataclass(frozen=True)
+class EncounterPanel(_Panel):
+    """A panel on the page of a signed encounter, after the records app's own content.
+
+    ``template`` is rendered in the page with ``panel``, ``organization_id``, ``encounter_id`` and
+    what ``context(actor=..., encounter_id=...)`` returns; ``url_name``, instead, is a link to a page
+    of the app that receives ``org`` and ``encounter_id``. ``visible(actor=..., encounter_id=...)``,
+    when given, hides the panel; a failure of either hides it too. The panel gets the ``sysid``
+    only: no clinical content passes through it.
+    """
+
+
+@dataclass(frozen=True)
+class DocumentPanel(_Panel):
+    """A panel on the page of an issued document, like ``EncounterPanel`` with ``document_id``."""
+
+
 class _VersionedRegistry:
     """Section types by code and version."""
 
@@ -162,7 +206,9 @@ class _Registry:
 
 SECTION_TYPES = _VersionedRegistry()
 DOCUMENT_KINDS = _Registry("register_document_kind")
-REGISTRIES = (SECTION_TYPES, DOCUMENT_KINDS)
+ENCOUNTER_PANELS = _Registry("register_encounter_panel")
+DOCUMENT_PANELS = _Registry("register_document_panel")
+REGISTRIES = (SECTION_TYPES, DOCUMENT_KINDS, ENCOUNTER_PANELS, DOCUMENT_PANELS)
 
 
 def register_section_type(section_type: SectionType) -> SectionType:
@@ -177,6 +223,29 @@ def register_document_kind(kind: DocumentKind) -> DocumentKind:
     if not isinstance(kind, DocumentKind):
         raise TypeError("register_document_kind takes a DocumentKind.")
     return DOCUMENT_KINDS.add(kind.code, kind, caller=_caller_label())
+
+
+def register_encounter_panel(panel: EncounterPanel) -> EncounterPanel:
+    """Add a panel to the page of a signed encounter; call it in ``ready()``."""
+    if not isinstance(panel, EncounterPanel):
+        raise TypeError("register_encounter_panel takes an EncounterPanel.")
+    return ENCOUNTER_PANELS.add(panel.code, panel, caller=_caller_label())
+
+
+def register_document_panel(panel: DocumentPanel) -> DocumentPanel:
+    """Add a panel to the page of an issued document; call it in ``ready()``."""
+    if not isinstance(panel, DocumentPanel):
+        raise TypeError("register_document_panel takes a DocumentPanel.")
+    return DOCUMENT_PANELS.add(panel.code, panel, caller=_caller_label())
+
+
+def call_safely(code: str, function: Callable[..., Any], **arguments: Any) -> tuple[bool, Any]:
+    """Run a contribution; a failure is logged (by code and error type only) and reported as ``(False, None)``."""
+    try:
+        return True, function(**arguments)
+    except Exception as exc:  # noqa: BLE001 - one app's failure never breaks a clinical page
+        logger.warning("med_records.contribution_failed", extra={"contribution": code, "error": type(exc).__name__})
+        return False, None
 
 
 def _active(actor: Any, items: tuple[Any, ...]) -> tuple[Any, ...]:
@@ -201,6 +270,11 @@ def active_section_types(actor: Any) -> tuple[SectionType, ...]:
 
 def active_document_kinds(actor: Any) -> tuple[DocumentKind, ...]:
     return _active(actor, DOCUMENT_KINDS.all())
+
+
+def active_panels(actor: Any, registry: _Registry) -> tuple[Any, ...]:
+    """The panels of active apps in a panel registry, in order."""
+    return tuple(sorted(_active(actor, registry.all()), key=lambda panel: (panel.order, panel.code)))
 
 
 @contextmanager

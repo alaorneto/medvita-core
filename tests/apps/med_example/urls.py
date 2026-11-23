@@ -15,4 +15,5 @@ urlpatterns = [
     path("patients/<uuid:patient_id>/", notes, name="notes"),
     path("appointments/<uuid:appointment_id>/", notes, name="look"),
     path("receipts/<uuid:receipt_id>/", notes, name="receipt_look"),
+    path("documents/<uuid:document_id>/", notes, name="document_look"),
 ]

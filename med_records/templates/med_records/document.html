@@ -6,4 +6,5 @@
 {% include "med_records/_seal.html" with signed=header.issued signed_at=header.issued_at author_name=header.author_name author_council=header.author_council digest=header.seal_digest %}
 {% if info.notice %}<p class="helptext mb-4">{{ info.notice }}</p>{% endif %}
 <div class="card clinical-text">{{ info.body }}</div>
+{% include "med_records/_panels.html" %}
 {% endblock %}

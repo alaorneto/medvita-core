@@ -8,6 +8,7 @@ or a flash message. A chart, encounter or document the actor cannot read answers
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any
 from uuid import UUID
@@ -28,6 +29,8 @@ from . import forms as record_forms
 from .extension import SECTION_TYPES, active_document_kinds, active_section_types
 from .sections import body_mass_index
 from .service_api import RecordsService, TemplateSectionInput
+
+logger = logging.getLogger(__name__)
 
 
 def _service() -> RecordsService:
@@ -75,6 +78,30 @@ def _patient(request: HttpRequest, patient_id: UUID) -> Any:
         return PatientService().summary(actor=request.user, patient_id=patient_id)
     except (NotFound, Forbidden):
         return None
+
+
+def _rendered_panels(request: HttpRequest, organization_id: UUID, panels: Any, **target: UUID) -> list[dict[str, Any]]:
+    """The panels of other apps, rendered: a template inline or a link. A template that fails is left out."""
+    from django.template.loader import render_to_string
+    from django.urls import NoReverseMatch, reverse
+
+    shown = []
+    for panel in panels:
+        if panel.url_name:
+            try:
+                url = reverse(panel.url_name, args=(organization_id, *target.values()))
+            except NoReverseMatch:
+                continue
+            shown.append({"code": panel.code, "label": panel.label, "url": url, "html": ""})
+            continue
+        values = {**dict(panel.context), "panel": panel, "organization_id": organization_id, **target}
+        try:
+            html = render_to_string(panel.template, values, request=request)
+        except Exception as exc:  # noqa: BLE001 - one app's panel never breaks a clinical page
+            logger.warning("med_records.panel_failed", extra={"contribution": panel.code, "error": type(exc).__name__})
+            continue
+        shown.append({"code": panel.code, "label": panel.label, "url": "", "html": html})
+    return shown
 
 
 def _context(organization_id: UUID, **values: Any) -> dict[str, Any]:
@@ -339,7 +366,15 @@ def _encounter_context(request: HttpRequest, organization_id: UUID, encounter_id
 @tenant_page()
 def encounter_view(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
     context = _encounter_context(request, organization_id, encounter_id)
-    context.update(addendum_form=record_forms.AddendumForm(), idempotency_key=uuid.uuid4().hex)
+    try:
+        panels = _service().encounter_panels(actor=request.user, encounter_id=encounter_id)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    context.update(
+        addendum_form=record_forms.AddendumForm(),
+        idempotency_key=uuid.uuid4().hex,
+        panels=_rendered_panels(request, organization_id, panels, encounter_id=context["header"].sysid),
+    )
     return render(request, "med_records/encounter.html", context)
 
 
@@ -644,7 +679,13 @@ def _document_context(
 @never_cache
 @tenant_page()
 def document_view(request: HttpRequest, organization_id: UUID, document_id: UUID) -> HttpResponse:
-    return render(request, "med_records/document.html", _document_context(request, organization_id, document_id))
+    context = _document_context(request, organization_id, document_id)
+    try:
+        panels = _service().document_panels(actor=request.user, document_id=document_id)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    context["panels"] = _rendered_panels(request, organization_id, panels, document_id=context["header"].sysid)
+    return render(request, "med_records/document.html", context)
 
 
 @never_cache

@@ -169,3 +169,55 @@ def test_finance_panels(ready):
         assert "Nota de exemplo" not in page
         page = reception.get(reverse("med_finance:receipt", args=(org, receipt.sysid))).content.decode()
         assert "Recibo de exemplo" not in page
+
+
+def test_records_panels_and_the_kind_of_an_issued_document(ready):
+    from django.test import Client
+    from django.urls import reverse
+
+    from skeleton.testing.events import capture_events
+
+    clinic, patient, appointment = ready
+    records = RecordsService()
+    with clinic.as_user(clinic.a.doctor) as doctor:
+        chart = records.open_chart(actor=doctor, patient_id=patient.sysid)
+        draft = records.start_encounter(
+            actor=doctor, chart_id=chart.sysid, appointment_id=appointment.sysid, idempotency_key="panel-e"
+        )
+        letter = records.draft_document(
+            actor=doctor, chart_id=chart.sysid, kind="med_example.letter", idempotency_key="panel-letter"
+        )
+        assert records.encounter_panels(actor=doctor, encounter_id=draft.header.sysid) == ()
+        assert records.document_panels(actor=doctor, document_id=letter.header.sysid) == ()
+        draft = records.save_section(
+            actor=doctor,
+            encounter_id=draft.header.sysid,
+            section_type="med_example.eye_exam",
+            data=(("visual_acuity", "20/20"),),
+            expected_revision=draft.header.revision,
+        )
+        signed = records.sign_encounter(
+            actor=doctor, encounter_id=draft.header.sysid, expected_revision=draft.header.revision
+        )
+        with capture_events() as events:
+            issued = records.issue_document(
+                actor=doctor, document_id=letter.header.sysid, expected_revision=letter.header.revision
+            )
+    (event,) = [item for item in events if item.event_type == "med_records.document_issued"]
+    assert dict(event.data)["kind"] == "med_example.letter"
+    org = clinic.org_a.pk
+    encounter_url = reverse("med_records:encounter", args=(org, signed.header.sysid))
+    document_url = reverse("med_records:document", args=(org, issued.header.sysid))
+    doctor_client = Client()
+    doctor_client.force_login(clinic.a.doctor)
+    page = doctor_client.get(encounter_url).content.decode()
+    assert "Assinatura de exemplo" in page and f"Assinar o atendimento {signed.header.sysid}" in page
+    page = doctor_client.get(document_url).content.decode()
+    assert reverse("med_example:document_look", args=(org, issued.header.sysid)) in page
+    reception = Client()
+    reception.force_login(clinic.a.reception)
+    assert reception.get(encounter_url).status_code == 404
+    assert reception.get(document_url).status_code == 404
+    with clinic.app_disabled("med_example"):
+        assert "Assinatura de exemplo" not in doctor_client.get(encounter_url).content.decode()
+        assert "Documento de exemplo" not in doctor_client.get(document_url).content.decode()

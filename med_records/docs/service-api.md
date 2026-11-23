@@ -152,6 +152,14 @@ One document with its text; the read (or the print, with ``printing``) is record
 - **Erros:** NotFound para documento inexistente, de outra organização ou ilegível.
 - **Efeitos:** registra a leitura ou a impressão na trilha do prontuário.
 
+#### `document_panels(*, actor, document_id) -> tuple[PanelInfo, ...]`
+
+The panels other apps add to an issued document, in order; only active apps.
+
+- **Autorização:** leitura do arquivo do prontuário; cada painel lê o que mostra pelo serviço da app dele.
+- **Erros:** NotFound para documento inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum (a leitura do documento fica na trilha pela página que o abre).
+
 #### `documents(*, actor, chart_id) -> tuple[DocumentHeader, ...]`
 
 Headers of the chart's documents, newest first, without their text.
@@ -175,6 +183,14 @@ One encounter with its sections and signed addenda; the read is recorded in the 
 - **Autorização:** leitura do arquivo do prontuário.
 - **Erros:** NotFound para atendimento inexistente, de outra organização ou ilegível.
 - **Efeitos:** registra a leitura na trilha do prontuário.
+
+#### `encounter_panels(*, actor, encounter_id) -> tuple[PanelInfo, ...]`
+
+The panels other apps add to a signed encounter, in order; only active apps.
+
+- **Autorização:** leitura do arquivo do prontuário; cada painel lê o que mostra pelo serviço da app dele.
+- **Erros:** NotFound para atendimento inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum (a leitura do atendimento fica na trilha pela página que o abre).
 
 #### `encounters(*, actor, chart_id, cursor=None, page_size=50) -> Page[EncounterHeader]`
 
@@ -430,6 +446,20 @@ A kind of clinical document. ``default_body`` may use {{patient_name}}, {{date}}
 | `default_body` | `Any` |
 | `notice` | `Any` |
 
+### `DocumentPanel`
+
+A panel on the page of an issued document, like ``EncounterPanel`` with ``document_id``.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `visible` | `Callable[..., bool] | None` |
+| `context` | `Callable[..., Mapping[str, Any]] | None` |
+
 ### `EncounterHeader`
 
 An encounter without clinical content: what lists show.
@@ -464,6 +494,20 @@ An encounter with its sections (clinical content: every read is recorded in the 
 | `writable` | `bool` |
 | `appointment_completed` | `bool` |
 
+### `EncounterPanel`
+
+A panel on the page of a signed encounter, after the records app's own content.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `visible` | `Callable[..., bool] | None` |
+| `context` | `Callable[..., Mapping[str, Any]] | None` |
+
 ### `Icd10Info`
 
 | Campo | Tipo |
@@ -487,6 +531,19 @@ An encounter with its sections (clinical content: every read is recorded in the 
 | `status` | `str` |
 | `note` | `str` |
 | `revision` | `int` |
+
+### `PanelInfo`
+
+A panel another app adds to a signed encounter or an issued document, ready to show.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `str` |
+| `template` | `str` |
+| `url_name` | `str` |
+| `order` | `int` |
+| `context` | `tuple[tuple[str, Any], ...]` |
 
 ### `SealCheck`
 
@@ -575,11 +632,13 @@ One section of an encounter template: ``data`` are ``(field, value)`` pairs.
 | `med_records.encounter_signed` | `sign_encounter` | `code`, `chart`, `patient`, `kind`, `occurred_at`, `seal_digest` |
 | `med_records.document_issued` | `issue_document` | `code`, `chart`, `patient`, `kind`, `seal_digest` |
 
-Nunca conteúdo clínico, título de documento nem nome do paciente.
+Nunca conteúdo clínico, título de documento nem nome do paciente. O `kind` de `document_issued` é o código registrado do tipo de documento (`<app_label>.<nome>`): `med_records.certificate`, `med_records.simple_prescription` e os outros básicos, ou o de outra app, que assim sabe o que foi emitido sem ler o prontuário.
 
 ## Pontos de extensão
 
 `register_section_type(SectionType(...))` e `register_document_kind(DocumentKind(...))`, reexportadas por este módulo e chamadas no `ready()` da app que se pluga (código `<app_label>.<nome>` da própria app; uma versão nova de um tipo de seção convive com as antigas).
+
+`register_encounter_panel(EncounterPanel(code, label, template | url_name, order, visible, context))` e `register_document_panel(DocumentPanel(...))` acrescentam um painel à página do atendimento assinado e à do documento emitido ("Assinar com ICP-Brasil"), depois do conteúdo do prontuário; rascunho não tem painel. Com `template`, o painel é renderizado com `panel`, `organization_id`, `encounter_id` (ou `document_id`) e o que `context(actor=..., encounter_id=...)` devolver; com `url_name`, vira um link para a página da app, que recebe `org` e o `sysid`. `visible(...)`, opcional, esconde o painel. Só o `sysid` chega ao painel, nunca conteúdo clínico: o que ele mostra vem do serviço da app dona. `encounter_panels` e `document_panels` autorizam pela leitura do arquivo (quem não lê recebe `NotFound`, e a página, 404) e só devolvem painéis de apps ativas na organização; um `visible`, `context` ou template que falha esconde só aquele painel e vai para o log pelo código e pelo tipo do erro.
 
 ## Contribuições a outras apps
 
@@ -593,3 +652,4 @@ As rotas de `/api/v1/o/<org>/apps/med_records/` estão em `docs/spec.md` (seçã
 | Versão | Mudança |
 |---|---|
 | 0.1.0 | Primeira versão |
+| 0.2.0 | Painéis de outras apps no atendimento assinado e no documento emitido (`register_encounter_panel`, `register_document_panel`, `encounter_panels`, `document_panels`, `PanelInfo`) |

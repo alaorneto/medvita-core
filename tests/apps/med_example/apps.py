@@ -98,9 +98,13 @@ class MedExampleConfig(AppConfig):
         )
         from applications.med_records.service_api import (
             DocumentKind,
+            DocumentPanel,
+            EncounterPanel,
             SectionField,
             SectionType,
             register_document_kind,
+            register_document_panel,
+            register_encounter_panel,
             register_section_type,
         )
         from applications.med_scheduling.service_api import AppointmentAction, register_appointment_action
@@ -152,6 +156,17 @@ class MedExampleConfig(AppConfig):
             )
         )
         register_document_kind(DocumentKind("med_example.letter", "Carta de exemplo", "Para {{patient_name}}."))
+        register_encounter_panel(
+            EncounterPanel(
+                "med_example.signature",
+                "Assinatura de exemplo",
+                template="med_example/encounter_panel.html",
+                visible=lambda *, actor, encounter_id: True,
+            )
+        )
+        register_document_panel(
+            DocumentPanel("med_example.document", "Documento de exemplo", url_name="med_example:document_look")
+        )
         register_charge_origin(ChargeOrigin("med_example", "Exemplo"))
         register_charge_panel(
             ChargePanel(

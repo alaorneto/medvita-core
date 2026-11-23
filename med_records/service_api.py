@@ -29,7 +29,17 @@ from skeleton.service_api import (
 from skeleton.service_api.files import AttachmentInfo
 
 from . import common
-from .extension import DocumentKind, SectionField, SectionType, register_document_kind, register_section_type
+from .extension import (
+    DocumentKind,
+    DocumentPanel,
+    EncounterPanel,
+    SectionField,
+    SectionType,
+    register_document_kind,
+    register_document_panel,
+    register_encounter_panel,
+    register_section_type,
+)
 from .models import (
     AccessLog,
     Allergy,
@@ -72,6 +82,11 @@ __all__ = [
     "SectionType",
     "register_document_kind",
     "register_section_type",
+    "EncounterPanel",
+    "DocumentPanel",
+    "PanelInfo",
+    "register_encounter_panel",
+    "register_document_panel",
 ]
 
 
@@ -458,6 +473,42 @@ def access_log_entry(row: AccessLog) -> AccessLogEntry:
     return AccessLogEntry(
         row.pk, row.actor_id, row.action, row.target_table, row.target_id, as_utc(row.at), row.origin, row.client_id
     )
+
+
+@dataclass(frozen=True, slots=True)
+class PanelInfo:
+    """A panel another app adds to a signed encounter or an issued document, ready to show.
+
+    ``template`` is rendered with ``context`` (pairs the app's ``context`` callable returned);
+    ``url_name`` is a link to a page of the app instead. Only one of them is set.
+    """
+
+    code: str
+    label: str
+    template: str
+    url_name: str
+    order: int
+    context: tuple[tuple[str, Any], ...]
+
+
+def _panels(actor: Any, panels: tuple[Any, ...], **target: UUID) -> tuple[PanelInfo, ...]:
+    """The panels the record shows: ``visible`` answered true and ``context`` did not fail."""
+    from .extension import call_safely
+
+    result = []
+    for panel in panels:
+        if panel.visible is not None:
+            ok, shown = call_safely(panel.code, panel.visible, actor=actor, **target)
+            if not (ok and shown):
+                continue
+        values: tuple[tuple[str, Any], ...] = ()
+        if panel.context is not None:
+            ok, found = call_safely(panel.code, panel.context, actor=actor, **target)
+            if not ok:
+                continue
+            values = tuple(sorted(dict(found or {}).items()))
+        result.append(PanelInfo(panel.code, str(panel.label), panel.template, panel.url_name, panel.order, values))
+    return tuple(result)
 
 
 # ------------------------------------------------------------------------------------ helpers
@@ -1820,6 +1871,42 @@ class RecordsService(ServiceAPI):
         document = _document(actor, document_id)
         record_access(actor, document.chart, "print_document" if printing else "view_document", document)
         return _document_info(actor, document)
+
+    @service_method(read_only=True, since="0.2.0")
+    def encounter_panels(self, *, actor: Any, encounter_id: UUID) -> tuple[PanelInfo, ...]:
+        """The panels other apps add to a signed encounter, in order; only active apps.
+
+        A draft has no panel. A panel with ``visible`` shows only when it answers true for the actor
+        and the encounter; one whose ``visible`` or ``context`` fails is left out (logged by code and
+        error type). Nothing of the encounter but its ``sysid`` reaches the panel.
+        Autorização: leitura do arquivo do prontuário; cada painel lê o que mostra pelo serviço da
+        app dele.
+        Erros: NotFound para atendimento inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum (a leitura do atendimento fica na trilha pela página que o abre).
+        """
+        from .extension import ENCOUNTER_PANELS, active_panels
+
+        encounter = _encounter(actor, encounter_id)
+        if encounter.sealed_at is None:
+            return ()
+        return _panels(actor, active_panels(actor, ENCOUNTER_PANELS), encounter_id=encounter.pk)
+
+    @service_method(read_only=True, since="0.2.0")
+    def document_panels(self, *, actor: Any, document_id: UUID) -> tuple[PanelInfo, ...]:
+        """The panels other apps add to an issued document, in order; only active apps.
+
+        As ``encounter_panels``: a draft has none, and ``visible`` and ``context`` receive ``document_id``.
+        Autorização: leitura do arquivo do prontuário; cada painel lê o que mostra pelo serviço da
+        app dele.
+        Erros: NotFound para documento inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum (a leitura do documento fica na trilha pela página que o abre).
+        """
+        from .extension import DOCUMENT_PANELS, active_panels
+
+        document = _document(actor, document_id)
+        if document.sealed_at is None:
+            return ()
+        return _panels(actor, active_panels(actor, DOCUMENT_PANELS), document_id=document.pk)
 
     @service_method(read_only=True, since="0.1.0")
     def documents(self, *, actor: Any, chart_id: UUID) -> tuple[DocumentHeader, ...]:
