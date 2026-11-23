@@ -9,10 +9,10 @@
   },
   "conflicts": {},
   "dependencies": {
-    "io.medvita.finance": ">=0.0.0,<0.1.0",
-    "io.medvita.patients": ">=0.0.0,<0.1.0",
-    "io.medvita.records": ">=0.0.0,<0.1.0",
-    "io.medvita.scheduling": ">=0.0.0,<0.1.0"
+    "io.medvita.finance": ">=0.1.0,<0.2.0",
+    "io.medvita.patients": ">=0.1.0,<0.2.0",
+    "io.medvita.records": ">=0.1.0,<0.2.0",
+    "io.medvita.scheduling": ">=0.1.0,<0.2.0"
   },
   "description": "App de referência dos testes: mostra como um add-on se pluga nas quatro apps sem alterá-las. Nunca é publicada.",
   "files": [],
