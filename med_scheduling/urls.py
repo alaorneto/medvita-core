@@ -18,6 +18,7 @@ urlpatterns = [
     path("schedules/<uuid:schedule_id>/", views.schedule_view, name="schedule"),
     path("schedules/<uuid:schedule_id>/week/", views.week_view, name="week"),
     path("schedules/<uuid:schedule_id>/day/", views.day_exception_view, name="day-exception"),
+    path("schedules/<uuid:schedule_id>/online/", views.schedule_online, name="schedule-online"),
     path("schedules/<uuid:schedule_id>/queue/<str:day>/", views.queue_view, name="queue"),
     path("schedules/<uuid:schedule_id>/periods/<uuid:rule_id>/", views.period_edit_view, name="period-edit"),
     path("schedules/<uuid:schedule_id>/periods/<uuid:rule_id>/remove/", views.period_remove, name="period-remove"),

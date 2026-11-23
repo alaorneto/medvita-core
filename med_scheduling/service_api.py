@@ -25,6 +25,7 @@ from skeleton.service_api import (
     paginate,
     service_method,
 )
+from skeleton.tenancy.context import current_context
 
 from . import common
 from .extension import AppointmentAction, register_appointment_action
@@ -57,6 +58,8 @@ BOOKED = Mode.BOOKED.value
 WALK_IN = Mode.WALK_IN.value
 
 __all__ = [
+    "PublicSchedule",
+    "PublicType",
     "APP_ID",
     "AppointmentAction",
     "AppointmentActionInfo",
@@ -187,6 +190,7 @@ class AppointmentTypeInfo:
     revision: int
     payment_kind: str = "private"
     modality: str = "in_person"
+    online_booking: bool = False
 
 
 def type_info(row: AppointmentType) -> AppointmentTypeInfo:
@@ -203,6 +207,7 @@ def type_info(row: AppointmentType) -> AppointmentTypeInfo:
         row.revision,
         str(row.payment_kind),
         str(row.modality),
+        row.online_booking,
     )
 
 
@@ -245,6 +250,9 @@ class ScheduleInfo:
     is_active: bool
     revision: int
     writable: bool = False
+    online_booking: bool = False
+    online_min_notice_hours: int = 24
+    online_horizon_days: int = 30
 
 
 def schedule_info(row: Schedule, *, writable: bool = False) -> ScheduleInfo:
@@ -260,6 +268,9 @@ def schedule_info(row: Schedule, *, writable: bool = False) -> ScheduleInfo:
         row.is_active,
         row.revision,
         writable,
+        row.online_booking,
+        row.online_min_notice_hours,
+        row.online_horizon_days,
     )
 
 
@@ -418,6 +429,7 @@ class AppointmentInfo:
     duration_minutes: int = 0
     arrival_number: int | None = None
     modality: str = "in_person"
+    booked_online: bool = False
 
 
 def _planned(row: Any) -> int:
@@ -446,6 +458,7 @@ def appointment_info(row: Appointment) -> AppointmentInfo:
         _planned(row),
         row.arrival_number,
         str(row.modality),
+        row.booked_online,
     )
 
 
@@ -761,13 +774,12 @@ def _shape(rule: Any) -> tuple[int, int, int, date, date | None]:
 
 def _rule_kinds(actor: Any, rules: Any) -> dict[UUID, list[UUID]]:
     """The kinds each window lists, by window, in one query for all of them."""
-    from skeleton.access.policies import authorized_queryset
 
     ids = [rule.pk for rule in rules]
     found: dict[UUID, list[UUID]] = {}
     if not ids:
         return found
-    links = authorized_queryset(AvailabilityRuleType, user=actor, action="read").filter(rule_id__in=ids)
+    links = common.readable(actor, AvailabilityRuleType).filter(rule_id__in=ids)
     for rule_id, type_id in links.values_list("rule_id", "appointment_type_id"):
         found.setdefault(rule_id, []).append(type_id)
     return found
@@ -837,9 +849,8 @@ MAX_SCHEDULE_TYPES = 200
 
 def _schedule_type_rows(actor: Any, schedule: Schedule) -> dict[UUID, ScheduleAppointmentType]:
     """The kinds a schedule was configured with, by kind; empty while it takes every active kind."""
-    from skeleton.access.policies import authorized_queryset
 
-    rows = authorized_queryset(ScheduleAppointmentType, user=actor, action="read").filter(schedule=schedule)
+    rows = common.readable(actor, ScheduleAppointmentType).filter(schedule=schedule)
     return {row.appointment_type_id: row for row in rows}
 
 
@@ -939,18 +950,19 @@ def _check_schedule_types(types: object, schedule: Schedule, actor: Any) -> dict
 
 def _taken(actor: Any, schedule: Schedule, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
     """Blocks, live appointments and busy intervals of the professional that overlap the window."""
-    from skeleton.access.policies import authorized_queryset
 
     from . import calendar_bridge
 
     taken = list(
-        authorized_queryset(ScheduleBlock, user=actor, action="read")
+        common.readable(actor, ScheduleBlock)
         .filter(schedule=schedule, starts_at__lt=end, ends_at__gt=start)
         .values_list("starts_at", "ends_at")
     )
     taken += _appointments_taken(actor, schedule, start, end)
     user_id = schedule.professional.user_id if schedule.professional_id else None
-    if user_id is not None:
+    # The core does not open people's free/busy in the portal: there, the schedule's own blocks and
+    # appointments decide (med_scheduling/docs/adr.md, ADR-017).
+    if user_id is not None and not current_context().external:
         taken += [
             (block.starts_at, block.ends_at)
             for block in calendar_bridge.busy_of_people(actor, user_ids=(user_id,), start=start, end=end)
@@ -962,12 +974,11 @@ def _appointments_taken(
     actor: Any, schedule: Schedule, start: datetime, end: datetime
 ) -> list[tuple[datetime, datetime]]:
     """Live appointments of the schedule that overlap the window."""
-    from skeleton.access.policies import authorized_queryset
 
     from .transitions import LIVE
 
     return list(
-        authorized_queryset(Appointment, user=actor, action="read")
+        common.readable(actor, Appointment)
         .filter(schedule=schedule, status__in=LIVE, starts_at__lt=end, ends_at__gt=start)
         .values_list("starts_at", "ends_at")
     )
@@ -986,6 +997,118 @@ def _day_window(day_start: date, day_end: date, timezone: str) -> tuple[datetime
 
 def _appointment(actor: Any, appointment_id: object, *, write: bool = False, lock: bool = False) -> Appointment:
     return common.row(actor, Appointment, appointment_id, field="appointment_id", write=write, lock=lock)
+
+
+@dataclass(frozen=True, slots=True)
+class PublicType:
+    """A kind of appointment offered for online booking on a published schedule."""
+
+    sysid: UUID
+    name: str
+    duration_minutes: int
+    modality: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublicSchedule:
+    """A schedule published for online booking, as the patient portal shows it: no member data."""
+
+    sysid: UUID
+    name: str
+    professional_name: str
+    specialty: str
+    min_notice_hours: int
+    horizon_days: int
+    types: tuple[PublicType, ...]
+
+
+# Online booking: at most this many by one patient in a day, and by everyone in one schedule in an hour.
+PORTAL_BOOKINGS_PER_PATIENT_DAY = 3
+PORTAL_BOOKINGS_PER_SCHEDULE_HOUR = 30
+
+
+def _portal_patient(actor: Any, patient_id: object) -> Any:
+    """A patient the external person acts for (the portal app's link), or ``NotFound``."""
+    from applications.med_patients.service_api import PatientService
+
+    pk = as_uuid(patient_id, field="patient_id")
+    found = next((item for item in PatientService().portal_patients(actor=actor) if item.sysid == pk), None)
+    if found is None:
+        raise NotFound()
+    return found
+
+
+def _published_schedule(schedule_id: object, *, lock: bool = False) -> Schedule:
+    """An active schedule published for online booking; any other answers like a missing one."""
+    rows = Schedule.objects.filter(pk=as_uuid(schedule_id, field="schedule_id"), online_booking=True, is_active=True)
+    found = (rows.select_for_update() if lock else rows).first()
+    if found is None:
+        raise NotFound()
+    return found
+
+
+def _published_kinds(actor: Any, schedule: Schedule) -> list[tuple[AppointmentType, int]]:
+    """The kinds published for online booking that the schedule takes at a booked time, with the duration.
+
+    A kind that requires a room is never offered: the portal does not choose rooms.
+    """
+    kinds = AppointmentType.objects.filter(
+        practice_id=schedule.practice_id, online_booking=True, is_active=True, requires_room=False
+    ).order_by("name", "sysid")
+    result = []
+    for kind in kinds:
+        duration = _type_duration(actor, schedule, kind)
+        if duration is not None:
+            result.append((kind, duration))
+    return result
+
+
+def _published_kind(actor: Any, schedule: Schedule, type_id: object) -> tuple[AppointmentType, int]:
+    pk = as_uuid(type_id, field="appointment_type_id")
+    found = next((item for item in _published_kinds(actor, schedule) if item[0].pk == pk), None)
+    if found is None:
+        raise NotFound()
+    return found
+
+
+def _public_free(
+    actor: Any, schedule: Schedule, kind: AppointmentType, duration: int, start_date: date, end_date: date
+) -> list[tuple[datetime, datetime]]:
+    """Free booked-time slots of the kind, from the schedule's notice to its online horizon."""
+    from datetime import timedelta
+
+    from django.utils import timezone as dj_timezone
+
+    from .slots import typed_slots
+    from .transitions import LIVE
+
+    now = dj_timezone.now()
+    earliest = now + timedelta(hours=schedule.online_min_notice_hours)
+    horizon = min(schedule.online_horizon_days, schedule.booking_horizon_days)
+    latest = now + timedelta(days=horizon)
+    timezone = schedule.practice.timezone
+    start, end = _day_window(start_date, end_date, timezone)
+    taken = _taken(actor, schedule, start, end)
+    if schedule.room_id is not None:
+        # The room of the schedule, busy in any schedule.
+        taken += list(
+            Appointment.objects.filter(
+                room_id=schedule.room_id, status__in=LIVE, starts_at__lt=end, ends_at__gt=start
+            ).values_list("starts_at", "ends_at")
+        )
+    found = typed_slots(
+        windows=_windows(actor, common.readable(actor, AvailabilityRule).filter(schedule=schedule)),
+        taken=taken,
+        start_date=start_date,
+        end_date=end_date,
+        slot_minutes=schedule.slot_minutes,
+        duration_minutes=duration,
+        timezone=timezone,
+        now=earliest,
+        horizon_days=horizon,
+        appointment_type_id=kind.pk,
+    )
+    return [(begin, finish) for begin, finish, _kinds in found if begin >= earliest and finish <= latest]
 
 
 def _payload(row: Appointment) -> tuple[tuple[str, str], ...]:
@@ -1054,7 +1177,8 @@ def _project(actor: Any, row: Appointment, schedule: Schedule) -> None:
         _project_session(actor, schedule, row.starts_at)
         return
     attendees = ()
-    if row.professional_id is not None:
+    # In the portal the core leaves the attendees as they are: the event has none of its own.
+    if row.professional_id is not None and not current_context().external:
         user = Professional.objects.filter(pk=row.professional_id).values_list("user_id", flat=True).first()
         attendees = (user,) if user else ()
     calendar_bridge.put_event(
@@ -2176,11 +2300,13 @@ class SchedulingService(ServiceAPI):
         idempotency_key: str | None = None,
         payment_kind: str = "private",
         modality: str = "in_person",
+        online_booking: bool = False,
     ) -> AppointmentTypeInfo:
         """Add a kind of appointment; the code is unique in the practice.
 
         The kind says how it is paid for ("private", "insurance" or "courtesy") and where the patient
         is seen ("in_person" or "telehealth"): an appointment booked with it starts with both.
+        ``online_booking`` offers the kind in the patient portal, on the schedules published for it.
         Autorização: alteração no consultório.
         Erros: NotFound; Forbidden; InvalidInput; Conflict("integrity_conflict") para código já usado.
         Efeitos: grava o tipo; a mesma chave do mesmo ator devolve o já criado.
@@ -2194,6 +2320,7 @@ class SchedulingService(ServiceAPI):
                 "duration_minutes": duration_minutes,
                 "payment_kind": payment_kind,
                 "modality": modality,
+                "online_booking": online_booking,
                 "color": color,
                 "billing_code": billing_code,
                 "requires_room": requires_room,
@@ -2474,6 +2601,43 @@ class SchedulingService(ServiceAPI):
         common.check_revision(row, expected_revision)
         common.apply_changes(row, values)
         return schedule_info(row, writable=True)
+
+    @service_method(read_only=False, since="0.2.0")
+    def set_online_booking(
+        self,
+        *,
+        actor: Any,
+        schedule_id: UUID,
+        enabled: bool,
+        expected_revision: int,
+        min_notice_hours: int = 24,
+        horizon_days: int = 30,
+    ) -> ScheduleInfo:
+        """Publish a schedule for online booking in the patient portal, or take it off, with CAS.
+
+        The portal books only the kinds also published (``online_booking`` of the kind), from
+        ``min_notice_hours`` (0 to 720) from now to ``horizon_days`` (1 to 365) ahead, never beyond
+        the booking horizon of the schedule. Taking it off keeps the appointments already booked.
+        Autorização: alteração na agenda.
+        Erros: NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
+        Efeitos: grava a publicação da agenda.
+        """
+        _check_flag(enabled, "enabled")
+        if type(min_notice_hours) is not int or not 0 <= min_notice_hours <= 720:
+            raise InvalidInput({"min_notice_hours": [gettext("Use de 0 a 720 horas.")]})
+        if type(horizon_days) is not int or not 1 <= horizon_days <= 365:
+            raise InvalidInput({"horizon_days": [gettext("Use de 1 a 365 dias.")]})
+        schedule = _schedule(actor, schedule_id, write=True, lock=True)
+        common.check_revision(schedule, expected_revision)
+        common.apply_changes(
+            schedule,
+            {
+                "online_booking": enabled,
+                "online_min_notice_hours": min_notice_hours,
+                "online_horizon_days": horizon_days,
+            },
+        )
+        return schedule_info(schedule, writable=True)
 
     @service_method(read_only=False, since="0.1.0")
     def set_schedule_access(
@@ -3004,6 +3168,156 @@ class SchedulingService(ServiceAPI):
                 modality=modality,
             )
         )
+
+    # ------------------------------------------------------------------ online booking (portal)
+
+    @service_method(read_only=True, since="0.2.0", allow_external=True)
+    def public_schedules(self, *, actor: Any) -> tuple[PublicSchedule, ...]:
+        """The schedules published for online booking, each with the kinds offered on it.
+
+        Only in the portal. A schedule without any published kind it takes is left out.
+        Autorização: só no portal, para a pessoa externa com um paciente ligado pela app do portal.
+        Erros: Forbidden fora do portal; NotFound sem acesso externo ativo.
+        Efeitos: nenhum.
+        """
+        from applications.med_patients.service_api import PatientService
+
+        if not PatientService().portal_patients(actor=actor):
+            return ()
+        result = []
+        for schedule in Schedule.objects.filter(online_booking=True, is_active=True).order_by("name", "sysid")[:100]:
+            kinds = _published_kinds(actor, schedule)
+            if not kinds:
+                continue
+            professional = schedule.professional
+            result.append(
+                PublicSchedule(
+                    schedule.pk,
+                    schedule.name,
+                    professional.display_name if professional else "",
+                    professional.specialty if professional else "",
+                    schedule.online_min_notice_hours,
+                    min(schedule.online_horizon_days, schedule.booking_horizon_days),
+                    tuple(PublicType(kind.pk, kind.name, minutes, str(kind.modality)) for kind, minutes in kinds),
+                )
+            )
+        return tuple(result)
+
+    @service_method(read_only=True, since="0.2.0", allow_external=True)
+    def public_slots(
+        self, *, actor: Any, schedule_id: UUID, appointment_type_id: UUID, start_date: date, end_date: date
+    ) -> tuple[Slot, ...]:
+        """Free booked-time slots of a published kind on a published schedule (at most 62 days).
+
+        Only from the schedule's minimum notice to its online horizon (never beyond the booking
+        horizon). A schedule or kind not published answers like a missing one. The professional's
+        own calendar is not consulted in the portal: the schedule's blocks and appointments are.
+        Autorização: só no portal, para a pessoa externa com um paciente ligado pela app do portal.
+        Erros: Forbidden fora do portal; NotFound para agenda ou tipo não publicado; InvalidInput
+        para intervalo invertido ou acima de 62 dias.
+        Efeitos: nenhum.
+        """
+        from applications.med_patients.service_api import PatientService
+
+        if not isinstance(start_date, date) or not isinstance(end_date, date) or end_date < start_date:
+            raise InvalidInput({"end_date": [gettext("O fim precisa ser depois do início.")]})
+        if (end_date - start_date).days >= MAX_SLOT_DAYS:
+            raise InvalidInput({"end_date": [gettext("Consulte no máximo 62 dias por vez.")]})
+        if not PatientService().portal_patients(actor=actor):
+            raise NotFound()
+        schedule = _published_schedule(schedule_id)
+        kind, duration = _published_kind(actor, schedule, appointment_type_id)
+        found = _public_free(actor, schedule, kind, duration, start_date, end_date)
+        return tuple(Slot(begin, finish, schedule.pk, (kind.pk,)) for begin, finish in found)
+
+    @service_method(read_only=False, since="0.2.0", allow_external=True)
+    def book_external(
+        self,
+        *,
+        actor: Any,
+        schedule_id: UUID,
+        appointment_type_id: UUID,
+        patient_id: UUID,
+        starts_at: datetime,
+        idempotency_key: str,
+    ) -> AppointmentInfo:
+        """Book, from the portal, a free slot of a published kind for a patient the person acts for.
+
+        The patient must be linked to the person by the portal app (``register_portal_patients``);
+        the time must be one ``public_slots`` offers. The schedule is locked as in ``book``: two
+        requests for the same time never both win. The appointment is marked ``booked_online``,
+        takes the payment kind and the modality of the kind, and enters the schedule's calendar
+        without attendees (the core does not change them from the portal).
+        Autorização: só no portal, pela publicação da agenda e do tipo e pelo vínculo do paciente;
+        nenhuma concessão na agenda.
+        Erros: Forbidden fora do portal; NotFound para agenda ou tipo não publicado e paciente não
+        ligado; InvalidInput para horário sem fuso ou chave inválida; Conflict("slot_unavailable"),
+        Conflict("rate_limited") acima de 3 marcações do paciente em 24 horas ou de 30 na agenda
+        em uma hora, Conflict("patient_inactive"), Conflict("processing_restricted").
+        Efeitos: código da sequência, consulta gravada, evento no calendário e
+        ``med_scheduling.appointment_booked`` com a pessoa externa como ator; a mesma chave devolve
+        a mesma consulta.
+        """
+        from datetime import timedelta
+        from zoneinfo import ZoneInfo
+
+        from django.utils import timezone as dj_timezone
+
+        from skeleton.service_api.sequences import SequenceService
+
+        from .registration import APPOINTMENT_SEQUENCE
+
+        key = common.key(idempotency_key)
+        starts_at = _aware(starts_at, "starts_at")
+        patient = _portal_patient(actor, patient_id)
+        sysid = common.deterministic_id("portal-appointment", actor, key)
+        existing = Appointment.objects.filter(pk=sysid).first()
+        if existing is not None:
+            if existing.patient_id != patient.sysid:
+                raise NotFound()
+            return appointment_info(existing)
+        if patient.status != "active":
+            raise Conflict("patient_inactive", gettext("O paciente não está ativo."))
+        if patient.processing_restricted:
+            raise Conflict("processing_restricted", gettext("O tratamento dos dados deste paciente está restrito."))
+        schedule = _published_schedule(schedule_id, lock=True)
+        kind, duration = _published_kind(actor, schedule, appointment_type_id)
+        now = dj_timezone.now()
+        online = Appointment.objects.filter(booked_online=True)
+        if (
+            online.filter(patient_id=patient.sysid, created_at__gte=now - timedelta(days=1)).count()
+            >= PORTAL_BOOKINGS_PER_PATIENT_DAY
+            or online.filter(schedule=schedule, created_at__gte=now - timedelta(hours=1)).count()
+            >= PORTAL_BOOKINGS_PER_SCHEDULE_HOUR
+        ):
+            raise Conflict("rate_limited", gettext("Muitas marcações em pouco tempo. Tente mais tarde."))
+        day = starts_at.astimezone(ZoneInfo(schedule.practice.timezone)).date()
+        ends_at = starts_at + timedelta(minutes=duration)
+        if (starts_at, ends_at) not in _public_free(actor, schedule, kind, duration, day, day):
+            raise Conflict("slot_unavailable", gettext("Este horário não está mais livre."))
+        number = SequenceService().next_number(actor=actor, key=APPOINTMENT_SEQUENCE)
+        row = Appointment(
+            sysid=sysid,
+            organization_id=schedule.organization_id,
+            schedule=schedule,
+            code=number.formatted,
+            patient_id=patient.sysid,
+            appointment_type=kind,
+            professional_id=schedule.professional_id,
+            room_id=schedule.room_id,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            billing_code=kind.billing_code,
+            payment_kind=str(kind.payment_kind),
+            modality=str(kind.modality),
+            mode=Mode.BOOKED,
+            duration_minutes=duration,
+            booked_online=True,
+        )
+        row.save()
+        _project(actor, row, schedule)
+        _publish(actor, "booked", row)
+        return appointment_info(row)
 
     @service_method(read_only=False, since="0.1.0")
     def reschedule(

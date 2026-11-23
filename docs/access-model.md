@@ -77,4 +77,11 @@ Cada leitura de conteúdo clínico grava na trilha do prontuário (`AccessLog`) 
 
 ## Pessoas externas (portal)
 
-Nenhuma das quatro apps atende a pessoa externa do portal do núcleo: os métodos de serviço não têm `allow_external`, então no portal todos respondem `Forbidden("external_not_allowed")`, e `authorized_queryset` nega antes de qualquer consulta. O agendamento pelo paciente (alaorneto/medvita-core#99) espera o núcleo deixar uma app numerar, publicar evento e escrever no calendário que ela gerencia dentro do portal (alaorneto/skeleton#741); a decisão e a investigação estão no ADR-017 de `med_scheduling/docs/adr.md`. Quando vier, a regra continua a desta página: nenhuma concessão nova na agenda para a pessoa externa, autorização pela publicação da agenda e pelo vínculo do paciente.
+A pessoa externa do portal do núcleo não é membro e não recebe concessão em nenhum contêiner. Ela chega à suíte só por métodos de serviço marcados `allow_external`, que autorizam pela ligação da app do portal, nunca por `authorized_queryset` (que nega no portal):
+
+| App | Método | Autoriza por |
+|---|---|---|
+| `med_patients` | `portal_patients` | o vínculo que a app que admitiu a pessoa declara por `register_portal_patients` (a pessoa, um filho) |
+| `med_scheduling` | `public_schedules`, `public_slots`, `book_external` | a publicação da agenda e do tipo (`online_booking`) e o vínculo do paciente acima |
+
+Todo outro método responde `Forbidden("external_not_allowed")` no portal. A marcação externa trava a agenda como a da recepção, tem limite de taxa por paciente e por agenda, e a auditoria e o evento `appointment_booked` registram a pessoa externa como ator, com `source="http:portal"`. A decisão está no ADR-017 de `med_scheduling/docs/adr.md`; as páginas do portal e o convite são da app do portal (Medvita Business).

@@ -143,6 +143,38 @@ def _side(key: str, slug: str) -> Side:
     return Side(organization=organization, groups=groups, **people)
 
 
+def portal_scenario(clinic: Clinic, app_label: str) -> Any:
+    """The core's portal scenario on the clinic's organizations, admitted by ``app_label``.
+
+    A and B get the portal on; a new person has external access to A; A's administrator is also
+    external to A (``dual``); the reception of A is a member without external access; another new
+    person (``outsider``) is the one the core's kit admits to B.
+    """
+    from skeleton.tenancy.context import system_context
+    from skeleton.testing.external import ExternalScenario, enable_portal, grant_external_access
+
+    with system_context(reason="fixture:portal-identities"):
+        external = _identity(f"external-{app_label}@portal.example.test")
+        outsider = _identity(f"outsider-{app_label}@portal.example.test")
+    for organization in (clinic.org_a, clinic.org_b):
+        enable_portal(organization)
+    grant_external_access(clinic.org_a, external, app_label=app_label)
+    grant_external_access(clinic.org_a, clinic.a.admin, app_label=app_label)
+    return ExternalScenario(
+        clinic.org_a, clinic.org_b, clinic.a.admin, external, clinic.a.admin, outsider, member=clinic.a.reception
+    )
+
+
+def with_new_outsider(scenario: Any, name: str) -> Any:
+    """The scenario with another outsider: the core's kit admits the outsider to B on every use."""
+    from dataclasses import replace
+
+    from skeleton.tenancy.context import system_context
+
+    with system_context(reason="fixture:portal-outsider"):
+        return replace(scenario, outsider=_identity(f"outsider-{name}@portal.example.test"))
+
+
 def build_clinic(slug: str = "clinic") -> Clinic:
     """Open the suite apps for every organization and build organizations A and B."""
     from skeleton.testing.applications import open_app

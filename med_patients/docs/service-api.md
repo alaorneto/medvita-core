@@ -178,6 +178,14 @@ Tabs and shortcuts other apps add to the patient page, in order; only active app
 - **Erros:** nenhum além do contrato.
 - **Efeitos:** nenhum.
 
+#### `portal_patients(*, actor) -> tuple[PatientSummary, ...]`
+
+The patients the external person of the portal acts for: the ones the app that admitted the person linked to the access (``register_portal_patients``), live and in the organization.
+
+- **Autorização:** só no portal, pela ligação da app que admitiu a pessoa.
+- **Erros:** Forbidden fora do portal; NotFound sem acesso externo ativo.
+- **Efeitos:** nenhum.
+
 #### `registries(*, actor) -> tuple[RegistryInfo, ...]`
 
 Patient registries the actor reads, the default one first.
@@ -619,6 +627,7 @@ Funções reexportadas por este módulo, chamadas no `ready()` da app que se plu
 | `register_timeline_provider(code, provider)` | Itens da linha do tempo: `provider(*, actor, patient_id, before, limit)` devolve até `limit` `TimelineEntry` com `at <= before` (ou os mais recentes, com `before=None`), já autorizados; o título nunca leva dado de saúde |
 | `register_patient_data_provider(code, provider)` | Seção do relatório do titular: `provider(*, actor, patient_id)` devolve pares (rótulo, valor) |
 | `register_setup_step(SetupStep(code, label, url_name, is_done, order))` | Passo da lista "Configuração da clínica"; `is_done(actor=...)` diz se está concluído |
+| `register_portal_patients(code, resolver)` | Os pacientes por quem a pessoa externa do portal age. `resolver(*, actor, access_id)` roda no portal do núcleo e devolve os `sysid` que a app ligou àquele acesso, lidos pelo serviço dela (marcado `allow_external`, que fica indisponível com a app desligada). `portal_patients` só consulta os resolvers da app que admitiu a pessoa (`ExternalAccessInfo.app_label`); um que falha não acrescenta ninguém |
 
 Um provedor que levanta exceção não derruba a página: a falha vai para o log só com o código da contribuição e o tipo do erro, e a linha do tempo lista o provedor em `unavailable`.
 
@@ -637,3 +646,4 @@ Payload dos eventos de paciente só com `code`, `status` e `registry` (o `sysid`
 | Versão | Mudança |
 |---|---|
 | 0.1.0 | Primeira versão |
+| 0.2.0 | Pacientes da pessoa externa do portal: `register_portal_patients` e `portal_patients` (`allow_external`) |

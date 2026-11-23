@@ -160,6 +160,8 @@ class AppointmentType(OrganizationRecord):
     is_active = models.BooleanField(default=True)
     # The modality an appointment of this kind starts with; the appointment keeps its own copy.
     modality = models.CharField(max_length=10, choices=Modality.choices, default=Modality.IN_PERSON)
+    # Offered for online booking in the patient portal, on the schedules published for it.
+    online_booking = models.BooleanField(default=False)
     immutable_fields = ("practice_id",)
 
     class Meta(OrganizationRecord.Meta):
@@ -203,6 +205,11 @@ class Schedule(SecuredRecord):
     writer_groups = models.JSONField(default=list, blank=True)
     reader_groups = models.JSONField(default=list, blank=True)
     writer_users = models.JSONField(default=list, blank=True)
+    # Published for online booking: the patient portal sees the free times of the kinds published
+    # too, from ``online_min_notice_hours`` from now to ``online_horizon_days`` ahead.
+    online_booking = models.BooleanField(default=False)
+    online_min_notice_hours = models.PositiveSmallIntegerField(default=24)
+    online_horizon_days = models.PositiveSmallIntegerField(default=30)
     immutable_fields = ("practice_id", "calendar_id")
 
     class Meta(SecuredRecord.Meta):
@@ -216,6 +223,10 @@ class Schedule(SecuredRecord):
             models.CheckConstraint(
                 condition=Q(booking_horizon_days__gte=1, booking_horizon_days__lte=730),
                 name="med_scheduling_schedule_horizon",
+            ),
+            models.CheckConstraint(
+                condition=Q(online_min_notice_hours__lte=720, online_horizon_days__gte=1, online_horizon_days__lte=365),
+                name="med_scheduling_schedule_online",
             ),
         ]
         ordering = ("name", "sysid")
@@ -411,7 +422,9 @@ class Appointment(OrganizationRecord):
     is_priority = models.BooleanField(default=False)
     # Copied from the kind when booked; changes only before the appointment starts.
     modality = models.CharField(max_length=10, choices=Modality.choices, default=Modality.IN_PERSON)
-    immutable_fields = ("schedule_id", "code", "patient_id", "rescheduled_from_id")
+    # Booked by the patient in the portal (``book_external``), not by the reception.
+    booked_online = models.BooleanField(default=False)
+    immutable_fields = ("schedule_id", "code", "patient_id", "rescheduled_from_id", "booked_online")
 
     class Meta(OrganizationRecord.Meta):
         constraints = OrganizationRecord.Meta.constraints + [
