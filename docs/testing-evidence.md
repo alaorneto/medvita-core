@@ -75,3 +75,13 @@ Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da t
 - `python -m pytest -q -n auto` → 439 passed, 692 subtests passed em 566 s.
 - `tools/sync_leaves.py --check`, `tools/service_reference.py --check`, `ruff check .` e `ruff format --check .` → limpos.
 - `package doctor <pacote> --git-ref HEAD` nos quatro, sobre o commit desta troca (antes de acrescentar esta linha) → `"ok": true`, `problems: []`.
+
+## Núcleo v0.5.0 (2026-11-23)
+
+Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da tag `v0.5.0` (commit `2c27873`), PostgreSQL local descartável (`tools/dev_postgres.py` do Skeleton), asserções na role runtime. A árvore é a #104 com as referências ao núcleo trocadas (#106).
+
+- `python -m django check --fail-level WARNING` → sem problemas; `makemigrations --check --dry-run` → nada pendente.
+- `python -m pytest -q` (em série) → 443 passed, 705 subtests passed, 1 erro de preparo em 1881 s: `test_slots_and_bookings_follow_the_kinds_of_the_period` achou o schema sem `sk_access_role` ao começar; o arquivo `med_scheduling/tests/test_period_kinds.py` rodado de novo → 7 passed, 31 subtests passed.
+- Em paralelo (`-n 8`) o banco local recusou a recriação do schema por worker (`pg_namespace_nspname_index`) com o núcleo v0.4.0 e com o v0.5.0 igualmente: é do ambiente local, não da troca. A execução paralela fica com o CI do PR.
+- `tools/sync_leaves.py --check`, `tools/service_reference.py --check`, `ruff check .` e `ruff format --check .` → limpos.
+- `package doctor <pacote> --git-ref HEAD` nos quatro, sobre o commit da troca (antes desta seção) → `"ok": true`, `problems: []`.
