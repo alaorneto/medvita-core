@@ -22,6 +22,7 @@
   <dt>{% translate "Tipo de atendimento" %}</dt><dd>{{ chosen.kind.name }}</dd>
   <dt>{% translate "Duração" %}</dt><dd>{% blocktranslate with minutes=chosen.minutes %}{{ minutes }} min{% endblocktranslate %}{% if chosen.minutes != chosen.suggested %} <span class="badge badge-neutral">{% blocktranslate with minutes=chosen.suggested %}alterada; o padrão é {{ minutes }} min{% endblocktranslate %}</span>{% endif %}</dd>
   <dt>{% translate "Forma de pagamento" %}</dt><dd>{{ chosen.kind.payment_kind|scheduling_label:"payment_kind" }}</dd>
+  <dt>{% translate "Modalidade" %}</dt><dd>{{ chosen.kind.modality|scheduling_label:"modality" }}</dd>
 </dl>
 <fieldset class="mb-4"><legend>{% blocktranslate with day=chosen.day|date:"l, d/m/Y" %}Períodos de {{ day }}{% endblocktranslate %}</legend>
 <p class="helptext mb-4">{% translate "Escolha um horário livre de um período de hora marcada, ou um período de ordem de chegada." %}</p>{{ form.slot.errors }}
@@ -32,7 +33,7 @@
 {% if item.slots %}<div class="slot-list">{% for slot in item.slots %}<label class="badge badge-neutral"><input type="radio" name="slot" value="{{ slot.value }}"{% if slot.picked %} checked{% endif %}> {{ slot.local|time:"H:i" }}</label>{% endfor %}</div>{% endif %}
 {% if item.note %}<p class="helptext">{{ item.note }}</p>{% endif %}
 </div>{% empty %}<p class="helptext">{% translate "Esta agenda não atende neste dia." %} <a href="{% url 'med_scheduling:week' organization_id chosen.schedule_id %}?start={{ chosen.day|date:'Y-m-d' }}">{% translate "Ver a semana" %}</a>. {% translate "Um encaixe com hora continua possível." %}</p>{% endfor %}</fieldset>
-<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.fit_in %}{% include "skeleton/web/components/form-field.html" with field=form.fit_in_time %}{% include "skeleton/web/components/form-field.html" with field=form.notes %}{% if chosen.today %}{% include "skeleton/web/components/form-field.html" with field=form.arrived %}{% endif %}{% include "skeleton/web/components/form-field.html" with field=form.priority %}</div>
+<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.fit_in %}{% include "skeleton/web/components/form-field.html" with field=form.fit_in_time %}{% include "skeleton/web/components/form-field.html" with field=form.modality %}{% include "skeleton/web/components/form-field.html" with field=form.notes %}{% if chosen.today %}{% include "skeleton/web/components/form-field.html" with field=form.arrived %}{% endif %}{% include "skeleton/web/components/form-field.html" with field=form.priority %}</div>
 <div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Marcar" %}</button></div></form>
 {% endif %}
 {% endif %}

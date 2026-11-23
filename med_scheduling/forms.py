@@ -11,7 +11,17 @@ from django import forms
 from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 
-from .models import COLORS, Appointment, Mode, PaymentKind, Professional, Room, ScheduleBlock, WaitlistEntry
+from .models import (
+    COLORS,
+    Appointment,
+    Modality,
+    Mode,
+    PaymentKind,
+    Professional,
+    Room,
+    ScheduleBlock,
+    WaitlistEntry,
+)
 from .slots import collide
 
 WEEKDAYS = (
@@ -83,6 +93,12 @@ class BookForm(forms.Form):
     )
     # Not shown: the appointment is paid for as its kind says. Kept for whoever posts it.
     payment_kind = forms.ChoiceField(label=_("Forma de pagamento"), choices=PaymentKind.choices, required=False)
+    modality = forms.ChoiceField(
+        label=_("Modalidade"),
+        choices=[("", _("A do tipo de atendimento")), *Modality.choices],
+        required=False,
+        help_text=_("Presencial ou teleconsulta. Em branco, a consulta segue o tipo de atendimento."),
+    )
     notes = forms.CharField(
         label=_("Observação da recepção"),
         required=False,
@@ -177,9 +193,20 @@ class TypeForm(forms.Form):
         initial=PaymentKind.PRIVATE,
         help_text=_("A consulta marcada com este tipo nasce com esta forma de pagamento."),
     )
+    modality = forms.ChoiceField(
+        label=_("Modalidade"),
+        choices=Modality.choices,
+        initial=Modality.IN_PERSON,
+        required=False,
+        help_text=_("A consulta marcada com este tipo nasce presencial ou por teleconsulta; muda até o início."),
+    )
     color = forms.ChoiceField(label=_("Cor"), choices=[(color, color) for color in COLORS])
     billing_code = forms.CharField(label=_("Código de cobrança"), max_length=40, required=False)
     requires_room = forms.BooleanField(label=_("Exige sala"), required=False)
+
+    def clean_modality(self) -> str:
+        # Left out (a page or client from before the field): presencial, or what the kind already has.
+        return self.cleaned_data.get("modality") or self.initial.get("modality") or Modality.IN_PERSON
 
 
 class TypeEditForm(TypeForm):

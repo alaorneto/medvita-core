@@ -9,12 +9,21 @@ from django.utils.translation import gettext
 from skeleton.service_api import InvalidInput
 
 from . import validators
-from .models import COLORS, AppointmentType, PaymentKind, Professional, Room
+from .models import COLORS, AppointmentType, Modality, PaymentKind, Professional, Room
 
 PRACTICE_FIELDS = ("name", "legal_name", "tax_id", "phone", "email", "address", "city", "state", "timezone")
 PROFESSIONAL_FIELDS = ("display_name", "council", "council_number", "council_state", "specialty", "rqe", "tax_id")
 ROOM_FIELDS = ("name", "kind", "is_active")
-TYPE_FIELDS = ("name", "duration_minutes", "payment_kind", "color", "billing_code", "requires_room", "is_active")
+TYPE_FIELDS = (
+    "name",
+    "duration_minutes",
+    "payment_kind",
+    "modality",
+    "color",
+    "billing_code",
+    "requires_room",
+    "is_active",
+)
 LIMITS = {
     "name": 120,
     "legal_name": 200,
@@ -137,6 +146,10 @@ def clean_type(values: dict[str, Any], *, partial: bool) -> dict[str, Any]:
         clean["payment_kind"] = _text(values["payment_kind"]) if "payment_kind" in values else "private"
         if clean["payment_kind"] not in PaymentKind.values:
             errors["payment_kind"] = [gettext("Forma de pagamento desconhecida.")]
+    if "modality" in values or not partial:
+        clean["modality"] = _text(values["modality"]) if "modality" in values else "in_person"
+        if clean["modality"] not in Modality.values:
+            errors["modality"] = [gettext("Modalidade desconhecida.")]
     for name in ("requires_room", "is_active"):
         if name in values:
             clean[name] = bool(values[name])

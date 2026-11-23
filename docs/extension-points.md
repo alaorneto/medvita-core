@@ -14,7 +14,7 @@ As apps publicam pelo `EventService` do núcleo; quem consome registra `register
 |---|---|---|
 | `med_patients.patient_created`, `patient_updated`, `patient_status_changed` | `med_patients.patient` | `code`, `status`, `registry` |
 | `med_patients.consent_changed` | `med_patients.consent` | `patient`, `purpose`, `status` |
-| `med_scheduling.appointment_booked`, `_rescheduled`, `_confirmed`, `_arrived`, `_started`, `_completed`, `_no_show`, `_cancelled` | `med_scheduling.appointment` | `code`, `schedule`, `patient`, `appointment_type`, `billing_code`, `starts_at`, `ends_at`, `status`, `mode` |
+| `med_scheduling.appointment_booked`, `_rescheduled`, `_confirmed`, `_arrived`, `_started`, `_completed`, `_no_show`, `_cancelled`, `_modality_changed` | `med_scheduling.appointment` | `code`, `schedule`, `patient`, `appointment_type`, `billing_code`, `starts_at`, `ends_at`, `status`, `mode`, `modality` |
 | `med_records.encounter_signed` | `med_records.encounter` | `code`, `chart`, `patient`, `kind`, `occurred_at`, `seal_digest` |
 | `med_records.document_issued` | `med_records.clinicaldocument` | `code`, `chart`, `patient`, `kind`, `seal_digest` |
 | `med_finance.charge_confirmed`, `charge_paid`, `charge_cancelled` | `med_finance.charge` | `code`, `desk`, `patient`, `status`, `total`, `origin_app`, `origin_key` |
@@ -24,6 +24,8 @@ As apps publicam pelo `EventService` do núcleo; quem consome registra `register
 Toda chave de payload é um campo do modelo declarado em `read_fields` e em `payload_fields` do tipo, nunca em `personal_fields` nem em `sensitive_fields`. FK sai como o `sysid` em texto.
 
 `mode` da consulta é `booked` (hora marcada) ou `walk_in` (ordem de chegada). Na ordem de chegada a consulta não tem hora: `starts_at` e `ends_at` são os limites do período em que o paciente é atendido. O consumidor que mostra ou agenda algo pela hora da consulta olha `mode` antes.
+
+`modality` é `in_person` (presencial) ou `telehealth` (teleconsulta): a consulta copia a do tipo na marcação e a troca até o início, com o evento `appointment_modality_changed`. Uma app de telemedicina abre a sala pelos eventos de uma consulta `telehealth` e a fecha quando a consulta é cancelada ou volta a ser presencial.
 
 ## 3. Registries de interface e de regra
 

@@ -100,6 +100,7 @@ def register_practice_tables() -> None:
                 "billing_code",
                 "requires_room",
                 "is_active",
+                "modality",
             ),
             write_fields=(),
             sensitive_fields=(),
@@ -208,7 +209,17 @@ def register_schedule_tables() -> None:
 
 
 APPOINTMENT_SEQUENCE = "med_scheduling.appointment"
-APPOINTMENT_EVENTS = ("booked", "rescheduled", "confirmed", "arrived", "started", "completed", "no_show", "cancelled")
+APPOINTMENT_EVENTS = (
+    "booked",
+    "rescheduled",
+    "confirmed",
+    "arrived",
+    "started",
+    "completed",
+    "no_show",
+    "cancelled",
+    "modality_changed",
+)
 APPOINTMENT_PAYLOAD = (
     "code",
     "schedule",
@@ -219,6 +230,7 @@ APPOINTMENT_PAYLOAD = (
     "ends_at",
     "status",
     "mode",
+    "modality",
 )
 
 
@@ -261,6 +273,7 @@ def register_appointments() -> None:
                 "duration_minutes",
                 "arrival_number",
                 "is_priority",
+                "modality",
             ),
             write_fields=(),
             # The priority mark lets one infer age, pregnancy or disability: it never leaves in an event.

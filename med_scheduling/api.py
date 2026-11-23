@@ -220,6 +220,7 @@ BOOK_FIELDS = (
     "payment_kind",
     "room",
     "mode",
+    "modality",
 )
 
 
@@ -235,6 +236,7 @@ BOOK_INPUT = obj(
         "payment_kind": string(),
         "room": UUID_SCHEMA,
         "mode": string(),
+        "modality": string(),
     },
     required=("schedule", "patient", "appointment_type", "starts_at"),
 )
@@ -244,6 +246,7 @@ APPOINTMENT_QUERY = (
     ("start", string(format="date-time"), "Início do intervalo (ISO 8601 com fuso)"),
     ("end", string(format="date-time"), "Fim do intervalo (ISO 8601 com fuso)"),
     ("status", string(), "Situação"),
+    ("modality", string(), "Modalidade (in_person ou telehealth)"),
     ("cursor", string(), "Cursor devolvido pela página anterior"),
     ("page_size", INTEGER, "Tamanho da página"),
 )
@@ -275,6 +278,7 @@ class AppointmentsAPI(ScopedAPI):
             start=_datetime(params.get("start"), "start"),
             end=_datetime(params.get("end"), "end"),
             status=params.get("status") or None,
+            modality=params.get("modality") or None,
             cursor=params.get("cursor") or None,
             page_size=_page_size(request),
         )
@@ -304,6 +308,7 @@ class AppointmentsAPI(ScopedAPI):
                 payment_kind=str(fields["payment_kind"]) if fields.get("payment_kind") else None,
                 room_id=_uuid(fields.get("room"), "room"),
                 mode=str(fields["mode"]) if fields.get("mode") else "booked",
+                modality=str(fields["modality"]) if fields.get("modality") else None,
                 idempotency_key=key[:150],
             )
         return _with_etag(Response(_json(info), status=201), info.revision)

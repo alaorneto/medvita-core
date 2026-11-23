@@ -16,7 +16,7 @@ Referência de `SchedulingService` (`applications.med_scheduling.service_api`). 
 
 ### `SchedulingService`
 
-#### `add_appointment_type(*, actor, code, name, duration_minutes=30, color='blue', billing_code='', requires_room=False, idempotency_key=None, payment_kind='private') -> AppointmentTypeInfo`
+#### `add_appointment_type(*, actor, code, name, duration_minutes=30, color='blue', billing_code='', requires_room=False, idempotency_key=None, payment_kind='private', modality='in_person') -> AppointmentTypeInfo`
 
 Add a kind of appointment; the code is unique in the practice.
 
@@ -72,7 +72,7 @@ Kinds of appointment of the practice.
 - **Erros:** NotFound sem consultório legível.
 - **Efeitos:** nenhum.
 
-#### `appointments(*, actor, schedule_id=None, patient_id=None, start=None, end=None, status=None, cursor=None, page_size=50) -> Page[AppointmentInfo]`
+#### `appointments(*, actor, schedule_id=None, patient_id=None, start=None, end=None, status=None, cursor=None, page_size=50, modality=None) -> Page[AppointmentInfo]`
 
 Appointments of the schedules the actor reads, by start time, filtered.
 
@@ -112,12 +112,12 @@ Blocks of a schedule that overlap a window.
 - **Erros:** NotFound; InvalidInput para janela sem fuso, invertida ou acima de 400 dias.
 - **Efeitos:** nenhum.
 
-#### `book(*, actor, schedule_id, patient_id, appointment_type_id, starts_at, duration_minutes=None, fit_in=False, notes='', payment_kind=None, room_id=None, idempotency_key, mode='booked') -> AppointmentInfo`
+#### `book(*, actor, schedule_id, patient_id, appointment_type_id, starts_at, duration_minutes=None, fit_in=False, notes='', payment_kind=None, room_id=None, idempotency_key, mode='booked', modality=None) -> AppointmentInfo`
 
 Book an appointment; a fit-in skips the grid and the overlap check, never a block.
 
 - **Autorização:** alteração na agenda e leitura do paciente.
-- **Erros:** NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda; InvalidInput (horário sem fuso, duração fora de 5 a 480, modo, forma de pagamento, observação longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable", "mode_mismatch" para hora num período de ordem de chegada ou o contrário, "session_full", "room_unavailable", "patient_inactive", "processing_restricted").
+- **Erros:** NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda; InvalidInput (horário sem fuso, duração fora de 5 a 480, modo, forma de pagamento, modalidade, observação longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable", "mode_mismatch" para hora num período de ordem de chegada ou o contrário, "session_full", "room_unavailable", "patient_inactive", "processing_restricted").
 - **Efeitos:** código da sequência sem lacunas, consulta gravada, evento no calendário e ``med_scheduling.appointment_booked`` publicados; a mesma chave devolve a já marcada.
 
 #### `book_from_waitlist(*, actor, entry_id, schedule_id, starts_at, expected_revision, idempotency_key, duration_minutes=None, mode='booked') -> AppointmentInfo`
@@ -360,6 +360,14 @@ Make one day of a schedule follow ``windows`` in place of the weekly grid, with 
 - **Erros:** NotFound; Forbidden; InvalidInput para dia que já passou, nenhum período, períodos sobrepostos ou inválidos, ou tipo que a agenda não atende no modo do período; Conflict("stale_revision"); Conflict("plan_conflicts") quando há consulta que a mudança não comporta (fora dos períodos novos, de ordem de chegada num período que vira hora marcada, ou com chegada registrada) ou que ela moveria sem ``convert_existing``; Conflict("plan_changed") quando as consultas a mover não são as de ``expected_affected``.
 - **Efeitos:** grava os períodos do dia (os que ficam mantêm a linha), move as consultas confirmadas na lista, troca o evento de cada uma no calendário pelo da sessão, publica ``appointment_rescheduled`` de cada uma e dá revisão nova à agenda.
 
+#### `set_modality(*, actor, appointment_id, modality, expected_revision) -> AppointmentInfo`
+
+Change where an appointment not yet started is seen ("in_person" or "telehealth"), with CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput para modalidade desconhecida; Conflict("stale_revision"; "invalid_transition" fora de agendada, confirmada ou aguardando).
+- **Efeitos:** grava a modalidade e publica ``med_scheduling.appointment_modality_changed``.
+
 #### `set_priority(*, actor, appointment_id, priority, expected_revision) -> AppointmentInfo`
 
 Set or take off the legal priority mark of an appointment not yet started, with CAS.
@@ -414,7 +422,7 @@ Change a kind of appointment, with CAS; the code never changes.
 
 - **Autorização:** alteração no consultório.
 - **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
-- **Efeitos:** grava só os campos que mudaram; consultas já marcadas guardam a cópia do código de cobrança e da forma de pagamento.
+- **Efeitos:** grava só os campos que mudaram; consultas já marcadas guardam a cópia do código de cobrança, da forma de pagamento e da modalidade.
 
 #### `update_practice(*, actor, changes, expected_revision) -> PracticeInfo`
 
@@ -529,6 +537,7 @@ An appointment as lists show it: never the notes of the reception nor the priori
 | `mode` | `str` |
 | `duration_minutes` | `int` |
 | `arrival_number` | `int | None` |
+| `modality` | `str` |
 
 ### `AppointmentTypeInfo`
 
@@ -545,6 +554,7 @@ An appointment as lists show it: never the notes of the reception nor the priori
 | `is_active` | `bool` |
 | `revision` | `int` |
 | `payment_kind` | `str` |
+| `modality` | `str` |
 
 ### `AvailabilityRuleInfo`
 
@@ -833,7 +843,7 @@ A free time; ``appointment_type_ids`` are the kinds its period takes (none: ever
 
 ## Eventos publicados
 
-Payload: `code`, `schedule`, `patient` (o `sysid`, em texto), `appointment_type`, `billing_code`, `starts_at`, `ends_at` (ISO 8601, UTC) e `status`. Nunca nome do paciente nem observação.
+Payload: `code`, `schedule`, `patient` (o `sysid`, em texto), `appointment_type`, `billing_code`, `starts_at`, `ends_at` (ISO 8601, UTC), `status`, `mode` (`booked` ou `walk_in`) e `modality` (`in_person` ou `telehealth`). Nunca nome do paciente nem observação.
 
 | Tipo | Quando |
 |---|---|
@@ -841,6 +851,7 @@ Payload: `code`, `schedule`, `patient` (o `sysid`, em texto), `appointment_type`
 | `med_scheduling.appointment_rescheduled` | `reschedule` na mesma agenda |
 | `med_scheduling.appointment_cancelled` | `cancel`, e a consulta antiga de uma remarcação para outra agenda |
 | `med_scheduling.appointment_confirmed`, `_arrived`, `_started`, `_completed`, `_no_show` | `confirm`, `check_in`, `start`, `complete`, `mark_no_show` |
+| `med_scheduling.appointment_modality_changed` | `set_modality` que troca a modalidade |
 
 ## Pontos de extensão
 
@@ -862,3 +873,4 @@ As rotas de `/api/v1/o/<org>/apps/med_scheduling/` estão em `docs/spec.md` (se�
 | Versão | Mudança |
 |---|---|
 | 0.1.0 | Primeira versão |
+| 0.2.0 | Modalidade presencial ou teleconsulta: `modality` em `AppointmentTypeInfo` e `AppointmentInfo` (no fim, com padrão), em `add_appointment_type`, `book` e no filtro de `appointments`; `set_modality`; `modality` no payload dos eventos e o evento `appointment_modality_changed` |

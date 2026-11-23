@@ -32,6 +32,13 @@ class Mode(models.TextChoices):
     WALK_IN = "walk_in", gettext_lazy("Ordem de chegada")
 
 
+class Modality(models.TextChoices):
+    """Where the patient is seen: in the practice, or at a distance (telehealth)."""
+
+    IN_PERSON = "in_person", gettext_lazy("Presencial")
+    TELEHEALTH = "telehealth", gettext_lazy("Teleconsulta")
+
+
 def validate_timezone(value: str) -> None:
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -151,6 +158,8 @@ class AppointmentType(OrganizationRecord):
     billing_code = models.CharField(max_length=40, blank=True)
     requires_room = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    # The modality an appointment of this kind starts with; the appointment keeps its own copy.
+    modality = models.CharField(max_length=10, choices=Modality.choices, default=Modality.IN_PERSON)
     immutable_fields = ("practice_id",)
 
     class Meta(OrganizationRecord.Meta):
@@ -168,6 +177,9 @@ class AppointmentType(OrganizationRecord):
             models.CheckConstraint(
                 condition=Q(payment_kind__in=("private", "insurance", "courtesy")),
                 name="med_scheduling_type_payment_kind",
+            ),
+            models.CheckConstraint(
+                condition=Q(modality__in=("in_person", "telehealth")), name="med_scheduling_type_modality"
             ),
         ]
         ordering = ("name", "sysid")
@@ -397,6 +409,8 @@ class Appointment(OrganizationRecord):
     duration_minutes = models.PositiveSmallIntegerField(null=True, blank=True)
     arrival_number = models.PositiveIntegerField(null=True, blank=True)
     is_priority = models.BooleanField(default=False)
+    # Copied from the kind when booked; changes only before the appointment starts.
+    modality = models.CharField(max_length=10, choices=Modality.choices, default=Modality.IN_PERSON)
     immutable_fields = ("schedule_id", "code", "patient_id", "rescheduled_from_id")
 
     class Meta(OrganizationRecord.Meta):
@@ -418,6 +432,9 @@ class Appointment(OrganizationRecord):
                 name="med_scheduling_appointment_payment_kind",
             ),
             models.CheckConstraint(condition=Q(mode__in=("booked", "walk_in")), name="med_scheduling_appointment_mode"),
+            models.CheckConstraint(
+                condition=Q(modality__in=("in_person", "telehealth")), name="med_scheduling_appointment_modality"
+            ),
             models.CheckConstraint(
                 condition=Q(duration_minutes__isnull=True) | Q(duration_minutes__gte=5, duration_minutes__lte=480),
                 name="med_scheduling_appointment_duration",
