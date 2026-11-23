@@ -60,6 +60,13 @@ def _fiscal_situation(*, actor, charge_id):
     return {"situation": "Pendente"}
 
 
+def _supplies(*, actor):
+    """The catalog of the example app: what an encounter may record as consumed."""
+    from applications.med_records.service_api import ConsumableItem
+
+    return (ConsumableItem("gauze", "Gaze de exemplo", "un"),)
+
+
 def _keep(*, patient_id):
     from .models import ExampleNote
 
@@ -102,6 +109,7 @@ class MedExampleConfig(AppConfig):
             EncounterPanel,
             SectionField,
             SectionType,
+            register_consumable_provider,
             register_document_kind,
             register_document_panel,
             register_encounter_panel,
@@ -167,6 +175,7 @@ class MedExampleConfig(AppConfig):
         register_document_panel(
             DocumentPanel("med_example.document", "Documento de exemplo", url_name="med_example:document_look")
         )
+        register_consumable_provider("med_example.supplies", _supplies)
         register_charge_origin(ChargeOrigin("med_example", "Exemplo"))
         register_charge_panel(
             ChargePanel(

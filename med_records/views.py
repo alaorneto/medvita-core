@@ -28,7 +28,7 @@ from skeleton.web.views import tenant_page
 from . import forms as record_forms
 from .extension import SECTION_TYPES, active_document_kinds, active_section_types
 from .sections import body_mass_index
-from .service_api import RecordsService, TemplateSectionInput
+from .service_api import ConsumptionInput, RecordsService, TemplateSectionInput
 
 logger = logging.getLogger(__name__)
 
@@ -415,6 +415,27 @@ def _encounter_post(request: HttpRequest, organization_id: UUID, encounter_id: U
             expected_revision=_revision(request),
         )
         messages.success(request, gettext("Seção salva."))
+    elif action == "consumption_add":
+        provider, _sep, ref = request.POST.get("item", "").partition("|")
+        _service().add_consumption(
+            actor=request.user,
+            encounter_id=encounter_id,
+            item=ConsumptionInput(
+                provider=provider,
+                item_ref=ref,
+                quantity=(request.POST.get("quantity") or "").strip()[:20],
+                lot=(request.POST.get("lot") or "")[:41],
+            ),
+            expected_revision=_revision(request),
+        )
+        messages.success(request, gettext("Item consumido incluído."))
+    elif action == "consumption_remove":
+        _service().remove_consumption(
+            actor=request.user,
+            encounter_id=encounter_id,
+            consumption_id=_uuid(request.POST.get("consumption_id", "")),
+            expected_revision=_revision(request),
+        )
     elif action == "remove":
         _service().remove_section(
             actor=request.user,
@@ -521,7 +542,18 @@ def encounter_edit(request: HttpRequest, organization_id: UUID, encounter_id: UU
             icd = _service().search_icd10(actor=request.user, query=query)
         except InvalidInput:
             icd = ()
-    context.update(cards=cards, types=list(types.values()), query=query, icd=icd, idempotency_key=uuid.uuid4().hex)
+    try:
+        consumables = _service().consumable_items(actor=request.user, encounter_id=encounter_id)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    context.update(
+        cards=cards,
+        types=list(types.values()),
+        query=query,
+        icd=icd,
+        idempotency_key=uuid.uuid4().hex,
+        consumables=consumables,
+    )
     return render(request, "med_records/encounter_edit.html", context, status=status)
 
 

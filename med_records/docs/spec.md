@@ -29,6 +29,8 @@ Em ambos, o papel `member` recebe leitura e alteração da tabela de arquivos (q
 
 **`EncounterSection`** (derivada do atendimento, três saltos até o arquivo; `seal_parent` do atendimento): `section_type` e `type_version`, `position`, `data` (JSON) e `text`, ambos em `sensitive_fields`. Uma seção viva por tipo e posição.
 
+**`EncounterConsumption`** (derivada do atendimento; `seal_parent` do atendimento): um item de outra app consumido no atendimento, como fotografia da oferta do provedor: `provider` (o código do provedor), `item_ref` (a referência opaca da app dona), `item_label` (em `sensitive_fields`: uma vacina diz por que o paciente veio), `unit`, `quantity` (decimal positivo, até três casas) e `lot`. Nunca FK para a outra app.
+
 **`Allergy`** (derivada do prontuário): `substance` e `reaction` (`sensitive_fields`), `category` (medicamento, alimento, ambiental, outra), `severity` (leve, moderada, grave, não informada), `status` (ativa, resolvida, descartada), `noted_on`.
 
 **`Medication`** (derivada do prontuário): `name`, `dose`, `frequency` e `note` (`sensitive_fields`), `route`, `started_on`, `ended_on` (não antes do início), `status` (em uso, suspenso, encerrado).
@@ -54,10 +56,11 @@ Anexos (PDF, JPEG, PNG, até 20 MB) ficam no armazenamento privado do núcleo, n
 - `save_section` valida pelo tipo de seção, usa a revisão do **atendimento** como CAS (cada seção salva sobe a revisão) e atualiza `last_entry_at` do prontuário. `remove_section` e `discard_draft` são exclusões lógicas; atendimento assinado responde `Conflict("signed")`.
 - `encounters` devolve só cabeçalhos; `encounter` devolve o conteúdo e registra a leitura na trilha.
 - O conteúdo das seções sai `[REDACTED]` na auditoria.
+- **Itens consumidos.** Uma app dona de catálogo (estoque, vacinas) registra `register_consumable_provider(code, provider)`; `provider(*, actor)` autoriza pelo serviço dela e devolve os `ConsumableItem(ref, label, unit)` que o ator pode escolher. `consumable_items` lista as ofertas das apps ativas para um rascunho (vazio no assinado e sem provedor). `add_consumption` grava um item oferecido ao ator (outro responde `InvalidInput`), com quantidade e lote, usa a revisão do atendimento como CAS e só vale no rascunho do autor; `remove_consumption` é exclusão lógica. O editor mostra a seção "Itens consumidos" só quando há provedor ativo ou item gravado.
 
 ### Assinatura, adendo e verificação
 
-- `sign_encounter`: só o autor, com pelo menos uma seção preenchida (`Conflict("empty")`) e uma ficha de profissional com conselho na agenda (`Conflict("professional_required")`). Grava `author_name` e `author_council` da ficha, sela o atendimento (`skeleton.records.sealing.seal_record`, com as referências e as seções no `extra`) e publica `med_records.encounter_signed`. Com a consulta vinculada em atendimento, tenta concluí-la; a recusa da agenda não desfaz a assinatura e `appointment_completed` diz o que aconteceu.
+- `sign_encounter`: só o autor, com pelo menos uma seção preenchida (`Conflict("empty")`) e uma ficha de profissional com conselho na agenda (`Conflict("professional_required")`). Grava `author_name` e `author_council` da ficha, sela o atendimento (`skeleton.records.sealing.seal_record`, com as referências, as seções e, quando há, os itens consumidos no `extra`) e publica `med_records.encounter_signed` e um `med_records.items_consumed` por item (`encounter`, `provider`, `item_ref`, `quantity`, `lot`: a referência do item, nunca a descrição nem o paciente). Um atendimento sem item tem o mesmo resumo de antes. Com a consulta vinculada em atendimento, tenta concluí-la; a recusa da agenda não desfaz a assinatura e `appointment_completed` diz o que aconteceu.
 - Depois de assinado, nada muda: seções, exclusão e anexos novos são recusados pelo serviço e pelo guard do banco. **Não há assinatura digital ICP-Brasil**: o selo é o resumo SHA-256 do conteúdo, que uma app de assinatura poderá assinar.
 - `add_addendum`: qualquer profissional que altera o arquivo cria um rascunho `addendum` com texto livre apontando para o original assinado; assina-se pelo mesmo `sign_encounter`. O original nunca muda e lista os adendos assinados.
 - `verify_encounter` recalcula o resumo a partir do conteúdo gravado.
@@ -153,6 +156,7 @@ Com token, só `GET`: `POST`, `PATCH`, `PUT` e `DELETE` são sempre 403 `token_n
 - Com registro clínico recente, anonimizar o paciente é recusado com o motivo da guarda; passados os 20 anos, é aceito.
 - Assinado, o atendimento recusa seção nova, exclusão e anexo; `verify_encounter` confirma o selo e acusa conteúdo diferente do selado.
 - O evento `encounter_signed` não leva conteúdo clínico.
+- Com um provedor, o atendimento registra dois itens e a assinatura os sela e publica `items_consumed` com a referência, sem a descrição; sem provedor a seção não aparece; o atendimento assinado recusa item novo.
 - Pelas páginas, o profissional abre o prontuário, inicia um atendimento, salva seções, assina, vê o selo, escreve um adendo, emite e imprime um atestado.
 - A recepção recebe 404 em todas as páginas clínicas e não vê a aba "Prontuário".
 - Texto com `<script>` digitado numa seção sai escapado na leitura e na impressão.

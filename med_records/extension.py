@@ -11,6 +11,8 @@ while its app is active in the current organization.
   kind is the ``kind`` that ``med_records.document_issued`` publishes.
 - ``register_encounter_panel`` and ``register_document_panel``: a panel on the page of a signed
   encounter and of an issued document ("Assinar com ICP-Brasil"), shown to who reads the archive.
+- ``register_consumable_provider``: an app that owns a catalog (stock, vaccines) offers the items
+  the author of a draft may record as consumed in the encounter.
 """
 
 from __future__ import annotations
@@ -143,6 +145,30 @@ class EncounterPanel(_Panel):
 
 
 @dataclass(frozen=True)
+class ConsumableItem:
+    """One item a provider offers to record as consumed: its opaque ``ref``, what the professional
+    reads (``label``) and the unit of the quantity ("un", "ml"). The encounter keeps a photograph."""
+
+    ref: str
+    label: Any
+    unit: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.ref, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}", self.ref):
+            raise ValueError(f"ConsumableItem ref {self.ref!r} must be 1 to 80 letters, digits or ._:-.")
+        if not str(self.label).strip() or len(str(self.label)) > 200:
+            raise ValueError(f"ConsumableItem {self.ref!r}: the label has 1 to 200 characters.")
+        if not isinstance(self.unit, str) or len(self.unit) > 20:
+            raise ValueError(f"ConsumableItem {self.ref!r}: the unit has up to 20 characters.")
+
+
+@dataclass(frozen=True)
+class _Provider:
+    code: str
+    provider: Callable[..., Any]
+
+
+@dataclass(frozen=True)
 class DocumentPanel(_Panel):
     """A panel on the page of an issued document, like ``EncounterPanel`` with ``document_id``."""
 
@@ -208,7 +234,8 @@ SECTION_TYPES = _VersionedRegistry()
 DOCUMENT_KINDS = _Registry("register_document_kind")
 ENCOUNTER_PANELS = _Registry("register_encounter_panel")
 DOCUMENT_PANELS = _Registry("register_document_panel")
-REGISTRIES = (SECTION_TYPES, DOCUMENT_KINDS, ENCOUNTER_PANELS, DOCUMENT_PANELS)
+CONSUMABLE_PROVIDERS = _Registry("register_consumable_provider")
+REGISTRIES = (SECTION_TYPES, DOCUMENT_KINDS, ENCOUNTER_PANELS, DOCUMENT_PANELS, CONSUMABLE_PROVIDERS)
 
 
 def register_section_type(section_type: SectionType) -> SectionType:
@@ -237,6 +264,23 @@ def register_document_panel(panel: DocumentPanel) -> DocumentPanel:
     if not isinstance(panel, DocumentPanel):
         raise TypeError("register_document_panel takes a DocumentPanel.")
     return DOCUMENT_PANELS.add(panel.code, panel, caller=_caller_label())
+
+
+def register_consumable_provider(code: str, provider: Callable[..., Any]) -> Callable[..., Any]:
+    """Offer items to record as consumed in an encounter; call it in ``ready()``.
+
+    ``provider(*, actor)`` authorizes with its own service and returns the ``ConsumableItem``
+    tuple the actor may choose (at most 200; ``()`` when the actor reads nothing).
+    """
+    if not callable(provider):
+        raise TypeError("register_consumable_provider takes a callable.")
+    CONSUMABLE_PROVIDERS.add(code, _Provider(code, provider), caller=_caller_label())
+    return provider
+
+
+def active_consumable_providers(actor: Any) -> tuple[_Provider, ...]:
+    """The consumable providers of active apps, by code."""
+    return _active(actor, CONSUMABLE_PROVIDERS.all())
 
 
 def call_safely(code: str, function: Callable[..., Any], **arguments: Any) -> tuple[bool, Any]:

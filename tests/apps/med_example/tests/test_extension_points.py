@@ -4,7 +4,7 @@ import pytest
 
 from applications.med_finance.service_api import FinanceService
 from applications.med_patients.service_api import PatientService
-from applications.med_records.service_api import RecordsService
+from applications.med_records.service_api import ConsumptionInput, RecordsService
 from applications.med_scheduling.service_api import SchedulingService
 from skeleton.service_api import Conflict
 from skeleton.service_api.records import RecordSealService
@@ -189,6 +189,14 @@ def test_records_panels_and_the_kind_of_an_issued_document(ready):
         )
         assert records.encounter_panels(actor=doctor, encounter_id=draft.header.sysid) == ()
         assert records.document_panels(actor=doctor, document_id=letter.header.sysid) == ()
+        offered = records.consumable_items(actor=doctor, encounter_id=draft.header.sysid)
+        assert [(item.provider, item.ref) for item in offered] == [("med_example.supplies", "gauze")]
+        draft = records.add_consumption(
+            actor=doctor,
+            encounter_id=draft.header.sysid,
+            item=ConsumptionInput("med_example.supplies", "gauze", 2),
+            expected_revision=draft.header.revision,
+        )
         draft = records.save_section(
             actor=doctor,
             encounter_id=draft.header.sysid,
@@ -205,6 +213,7 @@ def test_records_panels_and_the_kind_of_an_issued_document(ready):
             )
     (event,) = [item for item in events if item.event_type == "med_records.document_issued"]
     assert dict(event.data)["kind"] == "med_example.letter"
+    assert [item.item_ref for item in signed.consumption] == ["gauze"]
     org = clinic.org_a.pk
     encounter_url = reverse("med_records:encounter", args=(org, signed.header.sysid))
     document_url = reverse("med_records:document", args=(org, issued.header.sysid))
@@ -221,3 +230,6 @@ def test_records_panels_and_the_kind_of_an_issued_document(ready):
     with clinic.app_disabled("med_example"):
         assert "Assinatura de exemplo" not in doctor_client.get(encounter_url).content.decode()
         assert "Documento de exemplo" not in doctor_client.get(document_url).content.decode()
+        with clinic.as_user(clinic.a.doctor) as doctor:
+            other = records.start_encounter(actor=doctor, chart_id=chart.sysid, idempotency_key="panel-off")
+            assert records.consumable_items(actor=doctor, encounter_id=other.header.sysid) == ()
