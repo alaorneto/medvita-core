@@ -85,3 +85,13 @@ Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da t
 - Em paralelo (`-n 8`) o banco local recusou a recriação do schema por worker (`pg_namespace_nspname_index`) com o núcleo v0.4.0 e com o v0.5.0 igualmente: é do ambiente local, não da troca. A execução paralela fica com o CI do PR.
 - `tools/sync_leaves.py --check`, `tools/service_reference.py --check`, `ruff check .` e `ruff format --check .` → limpos.
 - `package doctor <pacote> --git-ref HEAD` nos quatro, sobre o commit da troca (antes desta seção) → `"ok": true`, `problems: []`.
+
+## Núcleo v0.6.0 (2026-11-23)
+
+Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da tag `v0.6.0` (commit `4975493`), dois PostgreSQL descartáveis do `dev_postgres.py` de um clone do núcleo, um por metade da suíte, asserções na role runtime. A árvore é a `main` com as referências ao núcleo trocadas (#109).
+
+- `python -m django check --fail-level WARNING` → sem problemas; `makemigrations --check --dry-run` → nada pendente.
+- `python -m pytest med_scheduling -q -n 4` → 189 passed, 574 subtests passed em 456 s.
+- `python -m pytest med_patients med_records med_finance tests -q -n 4` → 271 passed, 138 subtests passed em 500 s. Juntas, as duas cobrem a suíte inteira, sem nenhuma mudança de código.
+- O paralelismo funciona com um servidor só para a execução: as falhas de recriação do schema por worker (`pg_namespace_nspname_index`) da troca anterior vinham de outra execução usando o mesmo servidor ao mesmo tempo.
+- `package doctor <pacote> --git-ref HEAD` nos quatro, sobre o commit da troca → `"ok": true`, `problems: []`.
