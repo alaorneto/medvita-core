@@ -1,0 +1,956 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-24T00:00:00Z",
+  "title": "Design System: Medvita Core",
+  "extensions": {
+    "colorMeta": {
+      "medvita-blue": {
+        "canonical": "#1273c4",
+        "role": "primary",
+        "displayName": "Medvita Blue",
+        "tonalRamp": [
+          "#062947",
+          "#093c66",
+          "#0f5ea1",
+          "#1273c4",
+          "#5ea0d7",
+          "#9bc4e6",
+          "#e3eef8",
+          "#f3f8fc"
+        ],
+        "note": "tokens.brand_color in theme.json; step 600 of the core-generated --color-cobalt-* scale, which the tonalRamp shows."
+      },
+      "medvita-blue-deep": {
+        "canonical": "#0f5ea1",
+        "role": "primary",
+        "displayName": "Deep Medvita Blue",
+        "tonalRamp": [
+          "#062947",
+          "#093c66",
+          "#0f5ea1",
+          "#1273c4",
+          "#5ea0d7",
+          "#9bc4e6",
+          "#e3eef8",
+          "#f3f8fc"
+        ]
+      },
+      "medvita-blue-ink": {
+        "canonical": "#0c4c81",
+        "role": "primary",
+        "displayName": "Medvita Blue Ink",
+        "tonalRamp": [
+          "#062947",
+          "#093c66",
+          "#0f5ea1",
+          "#1273c4",
+          "#5ea0d7",
+          "#9bc4e6",
+          "#e3eef8",
+          "#f3f8fc"
+        ]
+      },
+      "medvita-blue-mist": {
+        "canonical": "#f3f8fc",
+        "role": "primary",
+        "displayName": "Medvita Blue Mist",
+        "tonalRamp": [
+          "#062947",
+          "#093c66",
+          "#0f5ea1",
+          "#1273c4",
+          "#5ea0d7",
+          "#9bc4e6",
+          "#e3eef8",
+          "#f3f8fc"
+        ]
+      },
+      "medvita-blue-night-text": {
+        "canonical": "#418fd0",
+        "role": "primary",
+        "displayName": "Night Link Blue",
+        "tonalRamp": [
+          "#062947",
+          "#093c66",
+          "#0f5ea1",
+          "#1273c4",
+          "#5ea0d7",
+          "#9bc4e6",
+          "#e3eef8",
+          "#f3f8fc"
+        ]
+      },
+      "medvita-blue-night-focus": {
+        "canonical": "#5ea0d7",
+        "role": "primary",
+        "displayName": "Night Focus Blue",
+        "tonalRamp": [
+          "#062947",
+          "#093c66",
+          "#0f5ea1",
+          "#1273c4",
+          "#5ea0d7",
+          "#9bc4e6",
+          "#e3eef8",
+          "#f3f8fc"
+        ]
+      },
+      "medvita-blue-night-mist": {
+        "canonical": "#0e2237",
+        "role": "primary",
+        "displayName": "Night Blue Mist",
+        "tonalRamp": [
+          "#062947",
+          "#093c66",
+          "#0f5ea1",
+          "#1273c4",
+          "#5ea0d7",
+          "#9bc4e6",
+          "#e3eef8",
+          "#f3f8fc"
+        ]
+      },
+      "slate-ground": {
+        "canonical": "#f8fafc",
+        "role": "neutral",
+        "displayName": "Slate Ground",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "card-white": {
+        "canonical": "#ffffff",
+        "role": "neutral",
+        "displayName": "Card White",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "slate-wash": {
+        "canonical": "#f1f5f9",
+        "role": "neutral",
+        "displayName": "Slate Wash",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "slate-line": {
+        "canonical": "#e2e8f0",
+        "role": "neutral",
+        "displayName": "Slate Line",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "control-edge": {
+        "canonical": "#7c8ba1",
+        "role": "neutral",
+        "displayName": "Control Edge",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "slate-strong": {
+        "canonical": "#475569",
+        "role": "neutral",
+        "displayName": "Slate Strong",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "slate-secondary": {
+        "canonical": "#5b6b82",
+        "role": "neutral",
+        "displayName": "Slate Secondary",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "slate-disabled": {
+        "canonical": "#94a3b8",
+        "role": "neutral",
+        "displayName": "Slate Disabled",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "slate-ink": {
+        "canonical": "#0f172a",
+        "role": "neutral",
+        "displayName": "Slate Ink",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "night-ground": {
+        "canonical": "#0b1120",
+        "role": "neutral",
+        "displayName": "Night Ground",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "night-card": {
+        "canonical": "#111827",
+        "role": "neutral",
+        "displayName": "Night Card",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "night-raised": {
+        "canonical": "#1e293b",
+        "role": "neutral",
+        "displayName": "Night Raised",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "night-line": {
+        "canonical": "#334155",
+        "role": "neutral",
+        "displayName": "Night Line",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "night-edge": {
+        "canonical": "#64748b",
+        "role": "neutral",
+        "displayName": "Night Edge",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "night-secondary": {
+        "canonical": "#94a3b8",
+        "role": "neutral",
+        "displayName": "Night Secondary",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "night-body": {
+        "canonical": "#e2e8f0",
+        "role": "neutral",
+        "displayName": "Night Body",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "night-ink": {
+        "canonical": "#f1f5f9",
+        "role": "neutral",
+        "displayName": "Night Ink",
+        "tonalRamp": [
+          "#0f172a",
+          "#1e293b",
+          "#334155",
+          "#475569",
+          "#64748b",
+          "#94a3b8",
+          "#e2e8f0",
+          "#f8fafc"
+        ]
+      },
+      "done-fill": {
+        "canonical": "#dcfce7",
+        "role": "secondary",
+        "displayName": "Done Fill",
+        "tonalRamp": [
+          "#052e16",
+          "#14532d",
+          "#166534",
+          "#15803d",
+          "#16a34a",
+          "#4ade80",
+          "#bbf7d0",
+          "#dcfce7"
+        ]
+      },
+      "done-text": {
+        "canonical": "#14532d",
+        "role": "secondary",
+        "displayName": "Done Text",
+        "tonalRamp": [
+          "#052e16",
+          "#14532d",
+          "#166534",
+          "#15803d",
+          "#16a34a",
+          "#4ade80",
+          "#bbf7d0",
+          "#dcfce7"
+        ]
+      },
+      "attention-fill": {
+        "canonical": "#fef3c7",
+        "role": "secondary",
+        "displayName": "Attention Fill",
+        "tonalRamp": [
+          "#3b2a06",
+          "#78350f",
+          "#92400e",
+          "#b45309",
+          "#d97706",
+          "#fbbf24",
+          "#fde68a",
+          "#fef3c7"
+        ]
+      },
+      "attention-text": {
+        "canonical": "#92400e",
+        "role": "secondary",
+        "displayName": "Attention Text",
+        "tonalRamp": [
+          "#3b2a06",
+          "#78350f",
+          "#92400e",
+          "#b45309",
+          "#d97706",
+          "#fbbf24",
+          "#fde68a",
+          "#fef3c7"
+        ]
+      },
+      "attention-solid": {
+        "canonical": "#d97706",
+        "role": "secondary",
+        "displayName": "Attention Solid",
+        "tonalRamp": [
+          "#3b2a06",
+          "#78350f",
+          "#92400e",
+          "#b45309",
+          "#d97706",
+          "#fbbf24",
+          "#fde68a",
+          "#fef3c7"
+        ]
+      },
+      "failed-fill": {
+        "canonical": "#fee2e2",
+        "role": "secondary",
+        "displayName": "Failed Fill",
+        "tonalRamp": [
+          "#3f0d0d",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "failed-text": {
+        "canonical": "#991b1b",
+        "role": "secondary",
+        "displayName": "Failed Text",
+        "tonalRamp": [
+          "#3f0d0d",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "failed-link": {
+        "canonical": "#b91c1c",
+        "role": "secondary",
+        "displayName": "Failed Link",
+        "tonalRamp": [
+          "#3f0d0d",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "failed-solid": {
+        "canonical": "#dc2626",
+        "role": "secondary",
+        "displayName": "Failed Solid",
+        "tonalRamp": [
+          "#3f0d0d",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "done-fill-night": {
+        "canonical": "#052e16",
+        "role": "secondary",
+        "displayName": "Done Fill Night",
+        "tonalRamp": [
+          "#052e16",
+          "#14532d",
+          "#166534",
+          "#15803d",
+          "#16a34a",
+          "#4ade80",
+          "#bbf7d0",
+          "#dcfce7"
+        ]
+      },
+      "done-text-night": {
+        "canonical": "#86efac",
+        "role": "secondary",
+        "displayName": "Done Text Night",
+        "tonalRamp": [
+          "#052e16",
+          "#14532d",
+          "#166534",
+          "#15803d",
+          "#16a34a",
+          "#4ade80",
+          "#bbf7d0",
+          "#dcfce7"
+        ]
+      },
+      "attention-fill-night": {
+        "canonical": "#3b2a06",
+        "role": "secondary",
+        "displayName": "Attention Fill Night",
+        "tonalRamp": [
+          "#3b2a06",
+          "#78350f",
+          "#92400e",
+          "#b45309",
+          "#d97706",
+          "#fbbf24",
+          "#fde68a",
+          "#fef3c7"
+        ]
+      },
+      "attention-text-night": {
+        "canonical": "#fbbf24",
+        "role": "secondary",
+        "displayName": "Attention Text Night",
+        "tonalRamp": [
+          "#3b2a06",
+          "#78350f",
+          "#92400e",
+          "#b45309",
+          "#d97706",
+          "#fbbf24",
+          "#fde68a",
+          "#fef3c7"
+        ]
+      },
+      "failed-fill-night": {
+        "canonical": "#3f0d0d",
+        "role": "secondary",
+        "displayName": "Failed Fill Night",
+        "tonalRamp": [
+          "#3f0d0d",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "failed-text-night": {
+        "canonical": "#fca5a5",
+        "role": "secondary",
+        "displayName": "Failed Text Night",
+        "tonalRamp": [
+          "#3f0d0d",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "failed-link-night": {
+        "canonical": "#f87171",
+        "role": "secondary",
+        "displayName": "Failed Link Night",
+        "tonalRamp": [
+          "#3f0d0d",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#f87171",
+          "#fca5a5",
+          "#fee2e2"
+        ]
+      },
+      "type-blue": {
+        "canonical": "#2563eb",
+        "role": "tertiary",
+        "displayName": "Appointment type blue"
+      },
+      "type-green": {
+        "canonical": "#16a34a",
+        "role": "tertiary",
+        "displayName": "Appointment type green"
+      },
+      "type-amber": {
+        "canonical": "#d97706",
+        "role": "tertiary",
+        "displayName": "Appointment type amber"
+      },
+      "type-red": {
+        "canonical": "#e11d48",
+        "role": "tertiary",
+        "displayName": "Appointment type red"
+      },
+      "type-purple": {
+        "canonical": "#7c3aed",
+        "role": "tertiary",
+        "displayName": "Appointment type purple"
+      },
+      "type-teal": {
+        "canonical": "#0d9488",
+        "role": "tertiary",
+        "displayName": "Appointment type teal"
+      },
+      "type-gray": {
+        "canonical": "#64748b",
+        "role": "tertiary",
+        "displayName": "Appointment type gray"
+      },
+      "type-pink": {
+        "canonical": "#db2777",
+        "role": "tertiary",
+        "displayName": "Appointment type pink"
+      },
+      "type-blue-night": {
+        "canonical": "#60a5fa",
+        "role": "tertiary",
+        "displayName": "Appointment type blue (night)"
+      },
+      "type-green-night": {
+        "canonical": "#4ade80",
+        "role": "tertiary",
+        "displayName": "Appointment type green (night)"
+      },
+      "type-amber-night": {
+        "canonical": "#fbbf24",
+        "role": "tertiary",
+        "displayName": "Appointment type amber (night)"
+      },
+      "type-red-night": {
+        "canonical": "#fb7185",
+        "role": "tertiary",
+        "displayName": "Appointment type red (night)"
+      },
+      "type-purple-night": {
+        "canonical": "#a78bfa",
+        "role": "tertiary",
+        "displayName": "Appointment type purple (night)"
+      },
+      "type-teal-night": {
+        "canonical": "#2dd4bf",
+        "role": "tertiary",
+        "displayName": "Appointment type teal (night)"
+      },
+      "type-gray-night": {
+        "canonical": "#94a3b8",
+        "role": "tertiary",
+        "displayName": "Appointment type gray (night)"
+      },
+      "type-pink-night": {
+        "canonical": "#f472b6",
+        "role": "tertiary",
+        "displayName": "Appointment type pink (night)"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The page h1, one per page; 1.5rem / 32px on phones, 1.75rem / 36px from 640 px."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section h2 and card titles."
+      },
+      "title-sm": {
+        "displayName": "Title Small",
+        "purpose": "h3 and the weekday heads of the week grid."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "The value of a stat tile, in tabular numerals."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text; form fields are 16 px on phones and 14 px from 640 px."
+      },
+      "body-sm": {
+        "displayName": "Body Small",
+        "purpose": "Tables, metadata values, buttons and navigation links (buttons and links at 500)."
+      },
+      "section": {
+        "displayName": "Section",
+        "purpose": "The core's section heading in ink, one step above a field label."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Sentence-case labels in secondary grey: table heads, metadata terms, stat labels, the location line, rail headings."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Pills, markers, counters, small buttons, cell second lines."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "UUIDs, codes and seal digests in the system monospace."
+      }
+    },
+    "shadows": [
+      {
+        "name": "hairline",
+        "value": "0 1px 2px 0 oklch(30% .03 268 / .05), 0 1px 3px 0 oklch(30% .03 268 / .04)",
+        "purpose": "Cards, tables and stat tiles, as compiled in the core; invisible in dark mode."
+      },
+      {
+        "name": "control",
+        "value": "0 1px 2px 0 oklch(30% .03 268 / .06)",
+        "purpose": "Buttons and inputs, as compiled in the core."
+      },
+      {
+        "name": "pop",
+        "value": "0 10px 24px -4px #0f172a1f, 0 2px 6px #0f172a14",
+        "purpose": "Theme token --shadow-pop for what floats (menus); dark: 0 12px 28px -6px #00000099, 0 2px 6px #00000066."
+      },
+      {
+        "name": "field-focus",
+        "value": "0 0 0 3px color-mix(in oklab, var(--color-brand) 22%, transparent)",
+        "purpose": "A focused input, with its border turned to the brand colour."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-standard",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Default easing of colour and border transitions (core)."
+      },
+      {
+        "name": "duration-default",
+        "value": "150ms",
+        "purpose": "Hover and focus transitions on buttons, links and fields."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px",
+        "purpose": "Tables stop stacking; h1 grows to 28/36; fields to 14 px; card padding to 24 px."
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px",
+        "purpose": "The left rail sits sticky beside the content."
+      },
+      {
+        "name": "xl",
+        "value": "1280px",
+        "purpose": "Container width; header search box inline."
+      }
+    ],
+    "themeBoundary": "The Medvita theme (med_patients/themes/medvita) changes only tokens, fonts, logo and CSS over the core's stable component classes; layout and components belong to the apps' templates and to the core.",
+    "darkMode": "The same token names redefined under @media (prefers-color-scheme: dark); the core rewrites that query for a forced scheme."
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action of a page header or form, in the Medvita blue.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Marcar consulta</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font: 500 14px/20px 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; padding: 10px 16px; border-radius: var(--radius-base, 8px); border: 1px solid transparent; cursor: pointer; white-space: nowrap; box-shadow: 0 1px 2px 0 rgb(15 23 42 / .06); transition: background-color .15s cubic-bezier(.4,0,.2,1), border-color .15s cubic-bezier(.4,0,.2,1); } .ds-btn:focus-visible { outline: 2px solid var(--color-focus, #1273c4); outline-offset: 2px; } .ds-btn-primary { background: var(--color-brand, #1273c4); color: #fff; } .ds-btn-primary:hover { background: var(--color-brand-strong, #0f5ea1); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral, navigational or reversible actions such as Registrar chegada or Editar.",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Registrar chegada</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; justify-content: center; font: 500 14px/20px 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; padding: 10px 16px; border-radius: var(--radius-base, 8px); border: 1px solid transparent; cursor: pointer; box-shadow: 0 1px 2px 0 rgb(15 23 42 / .06); transition: background-color .15s, border-color .15s; } .ds-btn:focus-visible { outline: 2px solid var(--color-focus, #1273c4); outline-offset: 2px; } .ds-btn-secondary { background: var(--color-neutral-primary-soft, #ffffff); border-color: var(--color-default-medium, #7c8ba1); color: var(--color-heading, #0f172a); } .ds-btn-secondary:hover { background: var(--color-neutral-tertiary-soft, #f8fafc); border-color: var(--color-default-strong, #475569); }"
+    },
+    {
+      "name": "Destructive Buttons",
+      "kind": "button",
+      "refersTo": "button-danger-outline",
+      "description": "Danger outline opens a destructive action; the red fill is only the final submit on the confirmation page.",
+      "html": "<a class=\"ds-btn ds-btn-danger-outline\" href=\"#\">Remover</a> <button class=\"ds-btn ds-btn-danger\">Anular recibo</button>",
+      "css": ".ds-btn { display: inline-flex; align-items: center; font: 500 12px/20px 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; padding: 6px 12px; border-radius: var(--radius-base, 8px); border: 1px solid transparent; cursor: pointer; text-decoration: none; transition: background-color .15s; } .ds-btn:focus-visible { outline: 2px solid var(--color-focus, #1273c4); outline-offset: 2px; } .ds-btn-danger-outline { background: var(--color-neutral-primary-soft, #ffffff); border-color: var(--color-danger-subtle, #fca5a5); color: var(--color-fg-danger, #b91c1c); } .ds-btn-danger-outline:hover { background: var(--color-danger-soft, #fee2e2); } .ds-btn-danger { background: var(--color-danger, #dc2626); color: #fff; font-size: 14px; padding: 10px 16px; } .ds-btn-danger:hover { background: var(--color-danger-strong, #b91c1c); }"
+    },
+    {
+      "name": "State Pills",
+      "kind": "chip",
+      "refersTo": "state-pill-attention",
+      "description": "A state that changes with time: round pill with a dot, soft fill, dark text; one sense per tone.",
+      "html": "<span class=\"ds-pill ds-done\">Confirmada</span> <span class=\"ds-pill ds-progress\">Em atendimento</span> <span class=\"ds-pill ds-attention\">Aguardando</span> <span class=\"ds-pill ds-failed\">Faltou</span> <span class=\"ds-pill ds-inactive\">Cancelada</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 4px; border: 1px solid; border-radius: 9999px; padding: 2px 8px; font: 500 12px/16px 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; white-space: nowrap; } .ds-pill::before { content: ''; width: 6px; height: 6px; border-radius: 9999px; background: currentColor; } .ds-done { background: var(--color-success-soft, #dcfce7); border-color: var(--color-success-subtle, #86efac); color: var(--color-fg-success-strong, #14532d); } .ds-progress { background: var(--color-brand-softer, #f3f8fc); border-color: var(--color-brand-subtle, #c6ddf1); color: var(--color-fg-brand-strong, #0c4c81); } .ds-attention { background: var(--color-warning-soft, #fef3c7); border-color: var(--color-warning-subtle, #fcd34d); color: var(--color-fg-warning, #92400e); } .ds-failed { background: var(--color-danger-soft, #fee2e2); border-color: var(--color-danger-subtle, #fca5a5); color: var(--color-fg-danger-strong, #991b1b); } .ds-inactive { background: var(--color-neutral-secondary-soft, #f8fafc); border-color: var(--color-default, #e2e8f0); color: var(--color-body, #0f172a); }"
+    },
+    {
+      "name": "Marker",
+      "kind": "chip",
+      "refersTo": "marker",
+      "description": "A fixed property that changes behaviour: square-cornered label, no dot.",
+      "html": "<span class=\"ds-marker ds-marker-warning\">Encaixe</span> <span class=\"ds-marker ds-marker-brand\">Principal</span> <span class=\"ds-marker\">Teleconsulta</span>",
+      "css": ".ds-marker { display: inline-flex; align-items: center; border: 1px solid var(--color-default, #e2e8f0); background: var(--color-neutral-secondary-soft, #f8fafc); color: var(--color-body, #0f172a); border-radius: 6px; padding: 2px 6px; font: 500 12px/16px 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; } .ds-marker-warning { background: var(--color-warning-soft, #fef3c7); border-color: var(--color-warning-subtle, #fcd34d); color: var(--color-fg-warning, #92400e); } .ds-marker-brand { background: var(--color-brand-softer, #f3f8fc); border-color: var(--color-brand-subtle, #c6ddf1); color: var(--color-fg-brand-strong, #0c4c81); }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "White card on the slate ground, 12 px corners, a line instead of a shadow.",
+      "html": "<section class=\"ds-card\"><h2 class=\"ds-card-title\">Aguardando</h2><p class=\"ds-card-text\">Ninguém aguardando.</p></section>",
+      "css": ".ds-card { background: var(--color-neutral-primary-soft, #ffffff); border: 1px solid var(--color-default, #e2e8f0); border-radius: var(--radius-card, 12px); padding: 24px; box-shadow: 0 1px 2px 0 rgb(15 23 42 / .05), 0 1px 3px 0 rgb(15 23 42 / .04); font-family: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; } .ds-card-title { margin: 0 0 12px; font-size: 18px; line-height: 28px; font-weight: 600; letter-spacing: -0.015em; color: var(--color-heading, #0f172a); } .ds-card-text { margin: 0; font-size: 14px; line-height: 20px; color: var(--color-body-subtle, #5b6b82); }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "White field with a visible control edge; focus turns the border blue with a soft ring.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Nome completo *</span><input class=\"ds-input\" type=\"text\" value=\"Maria da Silva\"></label>",
+      "css": ".ds-field { display: grid; gap: 6px; font-family: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; } .ds-field-label { font-size: 14px; line-height: 20px; font-weight: 500; color: var(--color-heading, #0f172a); } .ds-input { width: 100%; box-sizing: border-box; background: var(--color-neutral-secondary-medium, #ffffff); border: 1px solid var(--color-default-medium, #7c8ba1); border-radius: var(--radius-base, 8px); padding: 10px 12px; font-family: inherit; font-size: 14px; line-height: 24px; color: var(--color-heading, #0f172a); box-shadow: 0 1px 2px 0 rgb(15 23 42 / .06); transition: border-color .15s, box-shadow .15s; } .ds-input:hover { border-color: var(--color-default-strong, #475569); } .ds-input:focus-visible { outline: none; border-color: var(--color-brand, #1273c4); box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-brand, #1273c4) 22%, transparent); }"
+    },
+    {
+      "name": "Left Rail Navigation",
+      "kind": "nav",
+      "refersTo": "nav-link-active",
+      "description": "The apps in the left rail; the current one in the blue mist with blue text at 600.",
+      "html": "<nav class=\"ds-rail\" aria-label=\"Aplicativos\"><a class=\"ds-rail-link\" href=\"#\">Pacientes</a><a class=\"ds-rail-link\" href=\"#\" aria-current=\"page\">Agenda médica</a><a class=\"ds-rail-link\" href=\"#\">Prontuário</a><a class=\"ds-rail-link\" href=\"#\">Financeiro</a></nav>",
+      "css": ".ds-rail { display: grid; gap: 2px; width: 220px; font-family: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; } .ds-rail-link { display: flex; align-items: center; padding: 8px 12px; border-radius: var(--radius-base, 8px); font-size: 14px; line-height: 20px; font-weight: 500; color: var(--color-body, #0f172a); text-decoration: none; transition: background-color .15s, color .15s; } .ds-rail-link:hover { background: var(--color-neutral-tertiary, #f1f5f9); color: var(--color-heading, #0f172a); } .ds-rail-link:focus-visible { outline: 2px solid var(--color-focus, #1273c4); outline-offset: 2px; } .ds-rail-link[aria-current] { background: var(--color-brand-softer, #f3f8fc); color: var(--color-fg-brand, #0f5ea1); font-weight: 600; }"
+    },
+    {
+      "name": "Appointment Line",
+      "kind": "custom",
+      "refersTo": "type-blue",
+      "description": "An appointment in the schedule: an 8 px round type swatch, tabular time, the type always written beside it.",
+      "html": "<div class=\"ds-appt ds-appt-blue\"><time class=\"ds-appt-time\">09:30</time> Maria da Silva <span class=\"ds-appt-type\">· Primeira consulta</span> <span class=\"ds-pill-attn\">Aguardando</span></div>",
+      "css": ".ds-appt { position: relative; padding: 4px 8px 4px 20px; margin-bottom: 4px; font: 400 14px/20px 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; color: var(--color-body, #0f172a); } .ds-appt::before { content: ''; position: absolute; left: 4px; top: 10px; width: 8px; height: 8px; border-radius: 999px; background: var(--appt-type, var(--color-default-medium, #7c8ba1)); } .ds-appt-blue { --appt-type: var(--mv-type-blue, #2563eb); } .ds-appt-time { font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 6px; } .ds-appt-type { color: var(--color-body-subtle, #5b6b82); } .ds-pill-attn { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; border: 1px solid var(--color-warning-subtle, #fcd34d); background: var(--color-warning-soft, #fef3c7); color: var(--color-fg-warning, #92400e); border-radius: 9999px; padding: 2px 8px; font-size: 12px; line-height: 16px; font-weight: 500; } .ds-pill-attn::before { content: ''; width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }"
+    },
+    {
+      "name": "Time Slot Option",
+      "kind": "custom",
+      "refersTo": "slot-option-checked",
+      "description": "A free time to book: a 44 px target whose checked state shows without the radio dot.",
+      "html": "<div class=\"ds-slots\"><label class=\"ds-slot\"><input type=\"radio\" name=\"s\"> 08:00</label><label class=\"ds-slot\"><input type=\"radio\" name=\"s\" checked> 08:30</label><label class=\"ds-slot\"><input type=\"radio\" name=\"s\"> 09:00</label></div>",
+      "css": ".ds-slots { display: flex; flex-wrap: wrap; gap: 8px; } .ds-slot { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border: 1px solid var(--color-default-medium, #7c8ba1); border-radius: var(--radius-base, 8px); font: 400 14px/20px 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif; font-variant-numeric: tabular-nums; color: var(--color-heading, #0f172a); cursor: pointer; } .ds-slot:hover { border-color: var(--color-default-strong, #475569); } .ds-slot:has(input:checked) { border-color: var(--color-brand, #1273c4); background: var(--color-brand-softer, #f3f8fc); color: var(--color-fg-brand, #0f5ea1); font-weight: 600; } .ds-slot:has(input:focus-visible) { outline: 2px solid var(--color-focus, #1273c4); outline-offset: 2px; } .ds-slot input { accent-color: var(--color-brand, #1273c4); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Well-Kept Desk",
+    "overview": "Medvita is the category standard of a practice-management suite, executed at full craft and without irony: white cards on a cool slate ground, ink-dark text, one family, thin lines, and the Medvita logo blue only on what can be clicked. Nothing on a screen asks to be decoded. The receptionist sees who is here, with whom, since when and what to do next; the doctor sees the chart and what is permanent. The finish level is set by Linear (density, alignment, keyboard), Stripe Dashboard (tables, states, money) and Nubank (plain Brazilian language and trust); none of them is a look to copy.\n\nThe system is dense but calm. Colour carries meaning, never mood: five state tones with one sense each, the brand blue for action, eight appointment-type colours that always travel with the type written beside them. Depth comes from borders; shadows are hairline at most and real only on what floats. Light and dark are the same system with the same token names, dark in slate night. Paper is a first-class output: certificates, prescriptions, encounter copies and receipts print whole, without the app shell.\n\nWhat this is and is not allowed to be: the Medvita theme (`med_patients/themes/medvita/`) can change only tokens, fonts, logo and CSS over the core's stable component classes (`.card`, `.btn*`, `.badge*`, `.table-scroll`, `.table-stack`, `.page-header`, `.sidebar*`, `.message`, and the rest listed in the core's `docs/ui-design.md`). Layout, screen structure and components belong to the apps' templates and to the Skeleton core. If a screen needs a new arrangement, that is template work in an app, never a theme rule. The direction rejects the decorated medical-SaaS look: gradients, teal washes, stock illustrations, dashboards of vanity numbers.",
+    "keyCharacteristics": [
+      "Slate neutrals, ink text, white cards on a #f8fafc ground; slate night in dark mode.",
+      "The Medvita blue (#1273c4) on primary buttons, links, focus, active navigation, selected options, counters and the in-progress pill, and nowhere else.",
+      "States as soft tinted pills with a dot and dark text; markers as square-cornered labels without a dot.",
+      "One family, IBM Plex Sans (the core's), headings 600, sentence-case labels, tabular numerals.",
+      "8 px controls, 12 px cards, round pills; borders over shadows.",
+      "Every list stacks into cards on a phone; every document prints whole."
+    ],
+    "rules": [
+      {
+        "name": "The Blue Means Act Rule",
+        "body": "The Medvita blue appears only on primary buttons, links, focus rings, the active navigation item and tab, selected options, counters and the in-progress state. Headings, icons at rest, location lines, illustrations and backgrounds are never blue.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Sense Per Tone Rule",
+        "body": "Green is done, blue is in progress, amber asks for the person, red failed or cannot be undone, slate is inactive. A failure is always red; nothing else is.",
+        "section": "colors"
+      },
+      {
+        "name": "The Clinic Wins Rule",
+        "body": "The theme never declares a brand token. The blue comes from `brand_color`, so a practice with its own colour replaces it everywhere at once.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Family Rule",
+        "body": "Everything is IBM Plex Sans; hierarchy comes from 400 / 500 / 600 and size. No heading face, no font file in the theme (the test refuses Inter, Poppins and a display token).",
+        "section": "typography"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Labels are written as they are spoken, first letter capital. The theme takes the core's uppercase and wide tracking off every label it styles that way, and no app stylesheet sets uppercase.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Figures Rule",
+        "body": "Times, table cells, metadata values, stat values, queue numbers, time slots and amounts use tabular numerals, so columns of hours and reais line up. Amounts are also right-aligned and never wrap.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Sideways Page Rule",
+        "body": "A page never scrolls horizontally on a phone: lists stack, and only a declared dense table scrolls inside its card.",
+        "section": "layout"
+      },
+      {
+        "name": "The Whole Document Rule",
+        "body": "Print hides the shell and the navigation by class, never a bare `header`, `footer`, `nav`, `main`, `article` or `section`, so a certificate or receipt keeps its own header and footer.",
+        "section": "layout"
+      },
+      {
+        "name": "The Borders Over Shadows Rule",
+        "body": "A container is separated by its line and its fill. A shadow larger than a hairline means the thing floats above the page; a card never does.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** show every state through the app's tone filter and the core's `status_badge` (`{{ code|scheduling_state:\"status\"|status_badge:label }}`), and every fixed property through `marker`.",
+      "**Do** keep the Medvita blue for primary buttons, links, focus, active navigation and tabs, selected options, counters and the in-progress state.",
+      "**Do** give each region at most one `btn-primary`; open a destructive action with `btn-danger-outline` and finish it with `btn-danger` on the confirmation page.",
+      "**Do** wrap every list in `table-scroll table-stack` with a `data-label` on every cell; declare a scroll-only table with `{# table-scroll only: reason #}`.",
+      "**Do** write dates and times with `|moment`, money with `|brl` in the `amount` class, and numbers in tabular figures.",
+      "**Do** write labels in sentence case at 13 / 18 px.",
+      "**Do** colour app CSS only with tokens (`var(--color-*)`, `var(--mv-type-*)` with a core fallback); a hex value in an app stylesheet fails `tests/test_ui_conventions.py`.",
+      "**Do** write the appointment type beside its colour swatch, and the label beside every pill.",
+      "**Do** give frequent actions a 44 px target.",
+      "**Do** hide shell and navigation in print by class and keep a document's own header, footer and signature block.",
+      "**Do** change the look through the theme's tokens, logo and CSS over the core's component classes; change layout or components in the app's templates."
+    ],
+    "donts": [
+      "**Don't** hand-write a `badge`, `alert`, `empty-state` or `error-summary` in a template; use the core component.",
+      "**Don't** fix a date format (`|date:\"d/m/Y\"`, `|time:\"H:i\"`).",
+      "**Don't** label a destructive verb (Remover, Revogar, Excluir, Desativar, Descartar, Anular, Estornar, Encerrar, Cancelar a/o) on a primary, secondary or ghost button.",
+      "**Don't** hide a bare `header`, `footer`, `nav`, `main`, `article` or `section` in a print rule.",
+      "**Don't** paint headings, resting icons, the location line, backgrounds or illustrations in the brand blue.",
+      "**Don't** declare `--color-cobalt-*`, `--color-brand*`, `--color-fg-brand*` or `--color-focus` in the theme CSS; a clinic's own colour must win.",
+      "**Don't** add a second font family or a font file to the theme.",
+      "**Don't** mark an app item's type or state with a coloured side stripe; the type is a round swatch beside its written name.",
+      "**Don't** let colour carry information alone: no swatch without the type, no pill without its label.",
+      "**Don't** separate a card with a shadow larger than a hairline; real shadows are for what floats.",
+      "**Don't** use decorative gradient fills, teal or tinted washes as decoration, stock illustrations, or dashboards of vanity numbers (the edge fade of the phone tab strip is a mask, not a fill)."
+    ]
+  }
+}

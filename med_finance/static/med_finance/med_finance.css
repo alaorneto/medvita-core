@@ -1,6 +1,6 @@
 /* Finance app: amounts aligned, receipts printable. */
 .amount { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.voided-stamp { border: 2px solid var(--color-fg-danger); color: var(--color-fg-danger); display: inline-block; font-weight: 700; padding: 0.25rem 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; transform: rotate(-4deg); }
+.voided-stamp { background: var(--color-danger-soft); color: var(--color-fg-danger-strong); border: 1px solid var(--color-danger-medium); display: inline-block; font-weight: 700; padding: 0.125rem 0.625rem; border-radius: var(--radius-base, 0.5rem); }
 .print-page { max-width: 48rem; margin: 0 auto; }
 .seal-digest { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 .signature-block { margin-top: 3rem; max-width: 22rem; }

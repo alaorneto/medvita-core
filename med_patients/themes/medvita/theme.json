@@ -3,7 +3,7 @@
   "id": "io.medvita.patients.theme.medvita",
   "version": "0.1.0",
   "name": "Medvita",
-  "description": "Tema da marca Medvita: azul, verde e petróleo do logo, claro e escuro, corpo em IBM Plex Sans e títulos em Poppins.",
+  "description": "Tema da marca Medvita: o logo, neutros em ardósia e o azul do logo nas ações, claro e escuro, tudo em IBM Plex Sans.",
   "publisher": "katua-tech",
   "compatibility": {
     "skeleton": ">=0.8.0,<0.9.0"
@@ -23,13 +23,6 @@
     "logo_dark": "images/logo-dark.svg",
     "icon": "images/icon.png"
   },
-  "fonts": [
-    {
-      "family": "Poppins",
-      "file": "fonts/poppins-semibold.woff2",
-      "weight": "600",
-      "style": "normal"
-    }
-  ],
+  "fonts": [],
   "css": "theme.css"
 }
