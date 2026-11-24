@@ -252,7 +252,7 @@ def test_the_pages_publish_the_schedule_and_offer_the_kind(ready):
     org = ready.org_a.pk
     reception = Client()
     reception.force_login(ready.a.reception)
-    page = reception.get(reverse("med_scheduling:schedule", args=(org, ready.schedule.sysid))).content.decode()
+    page = reception.get(reverse("med_scheduling:schedule-online", args=(org, ready.schedule.sysid))).content.decode()
     assert "Agendamento online" in page and "Publicada no portal do paciente" in page
     with ready.as_user(ready.a.reception) as actor:
         current = service.schedule(actor=actor, schedule_id=ready.schedule.sysid)

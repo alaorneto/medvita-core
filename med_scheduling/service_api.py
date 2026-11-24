@@ -61,6 +61,7 @@ __all__ = [
     "PublicSchedule",
     "PublicType",
     "APP_ID",
+    "CHECK_IN_UNDO_MINUTES",
     "AppointmentAction",
     "AppointmentActionInfo",
     "AppointmentDetail",
@@ -407,7 +408,8 @@ class AppointmentInfo:
 
     In a walk-in appointment (``mode`` "walk_in") ``starts_at`` and ``ends_at`` are the bounds of
     its period, not a time of its own; ``duration_minutes`` is what was planned for it and
-    ``arrival_number`` its number in the session once the patient arrives.
+    ``arrival_number`` its number in the session once the patient arrives. ``arrived_at`` is when
+    the arrival was registered (``None`` before it, and again after the arrival is taken back).
     """
 
     sysid: UUID
@@ -430,6 +432,7 @@ class AppointmentInfo:
     arrival_number: int | None = None
     modality: str = "in_person"
     booked_online: bool = False
+    arrived_at: datetime | None = None
 
 
 def _planned(row: Any) -> int:
@@ -456,9 +459,12 @@ def appointment_info(row: Appointment) -> AppointmentInfo:
         row.revision,
         str(row.mode),
         _planned(row),
-        row.arrival_number,
+        # An arrival taken back keeps its number in the row, so the session never gives it again,
+        # but the appointment no longer holds it.
+        row.arrival_number if row.arrived_at is not None else None,
         str(row.modality),
         row.booked_online,
+        as_utc(row.arrived_at) if row.arrived_at else None,
     )
 
 
@@ -622,10 +628,13 @@ class PlanConflict:
 
 @dataclass(frozen=True, slots=True)
 class AppointmentActionInfo:
+    """A button of another app on an appointment; ``icon`` is the concept its icon draws (#144)."""
+
     code: str
     label: str
     url_name: str
     order: int
+    icon: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1530,6 +1539,9 @@ def _notify_arrival(actor: Any, row: Appointment) -> None:
         dedupe_key=f"arrived:{row.pk}",
     )
 
+
+# How long after the arrival the reception may take it back ("Desfazer chegada").
+CHECK_IN_UNDO_MINUTES = 10
 
 PERIODS = {"morning": (0, 12 * 60), "afternoon": (12 * 60, 18 * 60), "evening": (18 * 60, 24 * 60), "any": (0, 24 * 60)}
 
@@ -3772,6 +3784,42 @@ class SchedulingService(ServiceAPI):
         _notify_arrival(actor, row)
         return appointment_info(row)
 
+    @service_method(read_only=False, since="0.2.0")
+    def undo_check_in(self, *, actor: Any, appointment_id: UUID, expected_revision: int) -> AppointmentInfo:
+        """Take back an arrival registered by mistake, with CAS, up to ``CHECK_IN_UNDO_MINUTES`` after it.
+
+        The appointment goes back to the state before the arrival: "confirmada" when it had been
+        confirmed, "agendada" otherwise, and the time of the arrival is cleared. In a walk-in
+        session the number given stays used (the next arrival gets the one after it) and the
+        appointment no longer shows it; the priority mark stays as it is (``set_priority``).
+        Autorização: alteração na agenda, como registrar a chegada.
+        Erros: NotFound; Forbidden; Conflict("stale_revision"; "invalid_transition" fora de
+        aguardando; "undo_expired" depois do prazo).
+        Efeitos: grava a situação e apaga a hora da chegada (auditado pelo núcleo) e publica
+        ``med_scheduling.appointment_arrival_undone``, sem o paciente nem a prioridade.
+        """
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from . import transitions
+
+        _schedule_row, row = _locked(actor, appointment_id, expected_revision)
+        try:
+            transitions.target("undo_check_in", row.status)
+        except transitions.InvalidTransition:
+            raise Conflict("invalid_transition", gettext("Só se desfaz a chegada de quem está aguardando.")) from None
+        if row.arrived_at is None or timezone.now() > row.arrived_at + timedelta(minutes=CHECK_IN_UNDO_MINUTES):
+            raise Conflict(
+                "undo_expired",
+                gettext("O prazo de %(minutes)d minutos para desfazer a chegada terminou.")
+                % {"minutes": CHECK_IN_UNDO_MINUTES},
+            )
+        state = transitions.undo_target(confirmed=row.confirmed_at is not None)
+        common.apply_changes(row, {"status": state, "arrived_at": None})
+        _publish(actor, transitions.EVENT_OF["undo_check_in"], row)
+        return appointment_info(row)
+
     @service_method(read_only=False, since="0.1.0")
     def set_priority(
         self, *, actor: Any, appointment_id: UUID, priority: bool, expected_revision: int
@@ -3860,7 +3908,7 @@ class SchedulingService(ServiceAPI):
 
         row = _appointment(actor, appointment_id)
         return tuple(
-            AppointmentActionInfo(action.code, str(action.label), action.url_name, action.order)
+            AppointmentActionInfo(action.code, str(action.label), action.url_name, action.order, action.icon)
             for action in active_actions(actor, row.status)
         )
 

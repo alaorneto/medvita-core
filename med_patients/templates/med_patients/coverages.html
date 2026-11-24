@@ -1,17 +1,18 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Convênios" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load static i18n skeleton_format med_patients_labels med_icons %}{% block title %}{% translate "Convênios" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_patients/med_patients.css' %}">{% endblock %}
 {% block content %}
 {% include "med_patients/_patient_header.html" %}
-<div class="table-scroll mb-6"><table>
+<div class="table-scroll table-stack mb-6"><table>
   <caption class="sr-only">{% translate "Convênios" %}</caption>
-  <thead><tr><th scope="col">{% translate "Operadora" %}</th><th scope="col">{% translate "Plano" %}</th><th scope="col">{% translate "Carteirinha" %}</th><th scope="col" class="col-date">{% translate "Validade" %}</th>{% if patient.writable %}<th scope="col"><span class="sr-only">{% translate "Ações" %}</span></th>{% endif %}</tr></thead>
-  <tbody>{% for row in rows %}<tr><td>{{ row.insurer_name }}{% if row.is_primary %} <span class="badge badge-brand">{% translate "Principal" %}</span>{% endif %}</td><td>{{ row.plan_name|default:"—" }}</td><td>{{ row.card_number }}</td><td class="col-date">{% if row.valid_until %}{{ row.valid_until|date:"SHORT_DATE_FORMAT" }}{% else %}—{% endif %}</td>
-  {% if patient.writable %}<td><a class="btn btn-danger-outline btn-sm" href="{% url 'med_patients:coverage-remove' organization_id patient.sysid row.sysid %}">{% translate "Remover" %}<span class="sr-only"> {{ row.insurer_name }}</span></a></td>{% endif %}</tr>
-  {% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=5 message=_("Nenhum convênio cadastrado.") %}{% endfor %}</tbody>
+  <thead><tr><th scope="col">{% translate "Operadora" %}</th><th scope="col">{% translate "Plano" %}</th><th scope="col">{% translate "Carteirinha" %}</th><th scope="col" class="col-date">{% translate "Validade" %}</th>{% if patient.writable %}<th scope="col" class="col-actions"><span class="sr-only">{% translate "Ações" %}</span></th>{% endif %}</tr></thead>
+  <tbody>{% for row in rows %}<tr><td data-label="{% translate "Operadora" %}"><span class="cell-primary">{{ row.insurer_name }}</span>{% if row.is_primary %} {{ "brand"|patient_marker|marker:_("Principal") }}{% endif %}</td><td data-label="{% translate "Plano" %}">{{ row.plan_name|default:"—" }}</td><td data-label="{% translate "Carteirinha" %}"><span translate="no">{{ row.card_number }}</span></td><td class="col-date" data-label="{% translate "Validade" %}">{{ row.valid_until|moment:"date" }}{% with days=row.valid_until|patient_days_left %}{% if days is not None and days < 0 %} {{ "warning"|patient_marker|marker:_("Vencido") }}{% elif days|patient_coverage_due %}{% if days == 0 %}{% translate "Vence hoje" as due %}{% else %}{% blocktranslate count days=days asvar due %}Vence em {{ days }} dia{% plural %}Vence em {{ days }} dias{% endblocktranslate %}{% endif %} {{ "neutral"|patient_marker|marker:due }}{% endif %}{% endwith %}</td>
+  {% if patient.writable %}<td class="col-actions" data-label=""><div class="row-actions"><a class="btn btn-danger-outline btn-sm" href="{% url 'med_patients:coverage-remove' organization_id patient.sysid row.sysid %}">{% med_action_icon "trash" "size-4" %}{% translate "Remover" %}<span class="sr-only"> {{ row.insurer_name }}</span></a></div></td>{% endif %}</tr>
+  {% empty %}{% if patient.writable %}{% include "skeleton/web/components/empty-row.html" with colspan=5 message=_("Nenhum convênio cadastrado.") %}{% else %}{% include "skeleton/web/components/empty-row.html" with colspan=4 message=_("Nenhum convênio cadastrado.") %}{% endif %}{% endfor %}</tbody>
 </table></div>
 {% if patient.writable and not patient.anonymized_at %}
 <section class="card max-w-3xl" aria-labelledby="add-heading"><h2 id="add-heading">{% translate "Incluir convênio" %}</h2>
 <form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Incluir" %}</button></div></form></section>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_action_icon "plus" "size-4" %}{% translate "Incluir" %}</button></div></form></section>
 {% endif %}
 {% endblock %}

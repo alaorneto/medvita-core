@@ -4,162 +4,183 @@
  * O núcleo serve este arquivo em /brand/theme.css, depois do site.css e antes da marca da
  * organização, que vence pela ordem. Por isso nada aqui fixa a cor de marca: a escala cobalt e
  * os tokens brand, fg-brand e focus saem de tokens.brand_color (#1273c4, o azul do logo) e a
- * clínica com marca própria os troca. Este arquivo cuida do resto do sistema de design Medvita:
- * superfícies, texto, linhas, estados, sombras e a tipografia de título.
+ * clínica com marca própria os troca.
+ *
+ * Direção (DESIGN.md, #127, #128): o padrão da categoria feito com capricho. Neutros em ardósia,
+ * o azul do logo só no que se clica, estados em pílulas de fundo suave com texto escuro, uma
+ * família só (IBM Plex Sans do núcleo, títulos 600), bordas no lugar de sombras e o escuro em
+ * ardósia noturna. Régua de acabamento: Linear, Stripe Dashboard, Nubank.
  *
  * Só usa o contrato estável do núcleo: tokens --color-*, --font-*, --shadow-* e as classes de
  * componente listadas em docs/ui-design.md do Skeleton. Claro e escuro por prefers-color-scheme.
- * Valores de medvita-design/tokens.css.
  */
 
 /* ------------------------------------------------------------------ */
-/* Claro                                                               */
+/* Claro: ardósia sobre branco                                         */
 /* ------------------------------------------------------------------ */
 :root {
-  --mv-font-display: "Poppins", var(--font-sans);
-
-  /* Superfícies: surface-page, surface, surface-sunken. */
-  --color-canvas: #f3f6f7;
+  /* Superfícies: fundo da página, cartão, faixas de tabela e campos. */
+  --color-canvas: #f8fafc;
   --color-neutral-primary-soft: #ffffff;
   --color-neutral-primary: #ffffff;
   --color-neutral-primary-medium: #ffffff;
   --color-neutral-primary-strong: #ffffff;
-  --color-neutral-secondary-soft: #e9eef0;
-  --color-neutral-secondary: #e9eef0;
+  --color-neutral-secondary-soft: #f8fafc;
+  --color-neutral-secondary: #f1f5f9;
   --color-neutral-secondary-medium: #ffffff;
-  --color-neutral-secondary-strong: #e9eef0;
-  --color-neutral-secondary-strongest: #d3dcdf;
-  --color-neutral-tertiary-soft: #f3f6f7;
-  --color-neutral-tertiary: #e9eef0;
-  --color-neutral-tertiary-medium: #e9eef0;
-  --color-neutral-quaternary: #d3dcdf;
-  --color-neutral-quaternary-medium: #d3dcdf;
-  --color-muted: #f3f6f7;
-  --color-light-subtle: #e9eef0;
-  --color-light: #e9eef0;
-  --color-light-medium: #e9eef0;
-  --color-disabled: #e9eef0;
-  --color-dark-backdrop: #061e21;
+  --color-neutral-secondary-strong: #f1f5f9;
+  --color-neutral-secondary-strongest: #e2e8f0;
+  --color-neutral-tertiary-soft: #f8fafc;
+  --color-neutral-tertiary: #f1f5f9;
+  --color-neutral-tertiary-medium: #e2e8f0;
+  --color-neutral-quaternary: #e2e8f0;
+  --color-neutral-quaternary-medium: #cbd5e1;
+  --color-muted: #f8fafc;
+  --color-light-subtle: #f1f5f9;
+  --color-light: #f1f5f9;
+  --color-light-medium: #e2e8f0;
+  --color-disabled: #f1f5f9;
+  --color-dark-backdrop: #0f172a;
 
-  /* Texto: ink, ink-muted, ink-disabled. */
-  --color-heading: #0d2b2f;
-  --color-body: #0d2b2f;
-  --color-body-subtle: #4b6166;
-  --color-fg-disabled: #8a9a9e;
+  /* Texto: tinta e secundário (5,19:1 sobre o fundo, 4,95:1 sobre a faixa #f1f5f9). */
+  --color-heading: #0f172a;
+  --color-body: #0f172a;
+  --color-body-subtle: #5b6b82;
+  --color-fg-disabled: #94a3b8;
 
-  /* Linhas: line (estrutura) e line-strong (contorno de controle, 3:1). */
-  --color-default-subtle: #e9eef0;
-  --color-default: #d3dcdf;
-  --color-default-medium: #73878c;
-  --color-default-strong: #4b6166;
+  /* Linhas: estrutura, divisória e contorno de controle (3,46:1 com o branco). */
+  --color-default-subtle: #f1f5f9;
+  --color-default: #e2e8f0;
+  --color-default-medium: #7c8ba1;
+  --color-default-strong: #475569;
 
-  /* Confirmado: success (verde do logo, só preenchimento) e ink-success. */
-  --color-success: #2bb673;
-  --color-success-strong: #146c43;
-  --color-success-soft: #e1f5ea;
-  --color-success-medium: #c8ecd8;
-  --color-success-subtle: #a9dfc2;
-  --color-fg-success: #146c43;
-  --color-fg-success-strong: #105a37;
+  /* Concluído: verde. Texto escuro sobre o fundo suave. */
+  --color-success: #15803d;
+  --color-success-strong: #166534;
+  --color-success-soft: #dcfce7;
+  --color-success-medium: #bbf7d0;
+  --color-success-subtle: #86efac;
+  --color-fg-success: #166534;
+  --color-fg-success-strong: #14532d;
 
-  /* Atenção: warning e ink-warning. */
-  --color-warning: #f2b33d;
-  --color-warning-strong: #c98a12;
-  --color-warning-soft: #fcf1d9;
-  --color-warning-medium: #f9e4b5;
-  --color-warning-subtle: #ecc979;
-  --color-fg-warning: #855400;
-  --color-fg-warning-subtle: #855400;
+  /* Pede atenção: âmbar. */
+  --color-warning: #d97706;
+  --color-warning-strong: #b45309;
+  --color-warning-soft: #fef3c7;
+  --color-warning-medium: #fde68a;
+  --color-warning-subtle: #fcd34d;
+  --color-fg-warning: #92400e;
+  --color-fg-warning-subtle: #92400e;
 
-  /* Erro e alergia: danger e ink-danger. */
-  --color-danger: #c4313e;
-  --color-danger-strong: #a82733;
-  --color-danger-soft: #fbe8ea;
-  --color-danger-medium: #f7d3d7;
-  --color-danger-subtle: #eeb4ba;
-  --color-fg-danger: #b02a36;
-  --color-fg-danger-strong: #8f1f2a;
+  /* Falhou, irreversível, alergia: vermelho (4,83:1 com o branco do botão). */
+  --color-danger: #dc2626;
+  --color-danger-strong: #b91c1c;
+  --color-danger-soft: #fee2e2;
+  --color-danger-medium: #fecaca;
+  --color-danger-subtle: #fca5a5;
+  --color-fg-danger: #b91c1c;
+  --color-fg-danger-strong: #991b1b;
 
-  /* Sombra só no que flutua: cartão parado não tem sombra. */
-  --shadow-xs: 0 0 #0000;
-  --shadow-card: 0 0 #0000;
-  --shadow-pop: 0 4px 12px #0332381a, 0 1px 3px #0332380f;
+  /* Profundidade por borda; sombra mínima no cartão, sombra real só no que flutua. */
+  --shadow-xs: 0 1px 2px #0f172a0d;
+  --shadow-card: 0 1px 2px #0f172a0d;
+  --shadow-pop: 0 10px 24px -4px #0f172a1f, 0 2px 6px #0f172a14;
+
+  /* Cores dos tipos de atendimento (o ponto ao lado do tipo na agenda; o tipo sempre vem escrito). */
+  --mv-type-blue: #2563eb;
+  --mv-type-green: #16a34a;
+  --mv-type-amber: #d97706;
+  --mv-type-red: #e11d48;
+  --mv-type-purple: #7c3aed;
+  --mv-type-teal: #0d9488;
+  --mv-type-gray: #64748b;
+  --mv-type-pink: #db2777;
 }
 
 /* ------------------------------------------------------------------ */
-/* Escuro: mesmos nomes, valores do escuro do Medvita.                 */
+/* Escuro: ardósia noturna, mesmos nomes                               */
 /* ------------------------------------------------------------------ */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-canvas: #0a1416;
-    --color-neutral-primary-soft: #101d20;
-    --color-neutral-primary: #0a1416;
-    --color-neutral-primary-medium: #172a2e;
-    --color-neutral-primary-strong: #172a2e;
-    --color-neutral-secondary-soft: #070f11;
-    --color-neutral-secondary: #0a1416;
-    --color-neutral-secondary-medium: #101d20;
-    --color-neutral-secondary-strong: #172a2e;
-    --color-neutral-secondary-strongest: #22363a;
-    --color-neutral-tertiary-soft: #172a2e;
-    --color-neutral-tertiary: #172a2e;
-    --color-neutral-tertiary-medium: #22363a;
-    --color-neutral-quaternary: #22363a;
-    --color-neutral-quaternary-medium: #2c4448;
-    --color-muted: #101d20;
-    --color-light-subtle: #172a2e;
-    --color-light: #172a2e;
-    --color-light-medium: #22363a;
-    --color-disabled: #172a2e;
+    --color-canvas: #0b1120;
+    --color-neutral-primary-soft: #111827;
+    --color-neutral-primary: #0b1120;
+    --color-neutral-primary-medium: #1e293b;
+    --color-neutral-primary-strong: #1e293b;
+    --color-neutral-secondary-soft: #0f172a;
+    --color-neutral-secondary: #0b1120;
+    --color-neutral-secondary-medium: #111827;
+    --color-neutral-secondary-strong: #1e293b;
+    --color-neutral-secondary-strongest: #334155;
+    --color-neutral-tertiary-soft: #1e293b;
+    --color-neutral-tertiary: #1e293b;
+    --color-neutral-tertiary-medium: #334155;
+    --color-neutral-quaternary: #334155;
+    --color-neutral-quaternary-medium: #475569;
+    --color-muted: #111827;
+    --color-light-subtle: #1e293b;
+    --color-light: #1e293b;
+    --color-light-medium: #334155;
+    --color-disabled: #1e293b;
     --color-dark-backdrop: #000000;
 
-    --color-heading: #e6eff0;
-    --color-body: #e6eff0;
-    --color-body-subtle: #9fb4b8;
-    --color-fg-disabled: #5c7075;
+    --color-heading: #f1f5f9;
+    --color-body: #e2e8f0;
+    --color-body-subtle: #94a3b8;
+    --color-fg-disabled: #64748b;
 
-    --color-default-subtle: #172a2e;
-    --color-default: #22363a;
-    --color-default-medium: #6a8287;
-    --color-default-strong: #9fb4b8;
+    /* Estrutura visível sobre o cartão (1,69:1); a divisória fica mais quieta que ela. */
+    --color-default-subtle: #1e293b;
+    --color-default: #334155;
+    --color-default-medium: #64748b;
+    --color-default-strong: #94a3b8;
 
-    --color-success: #2bb673;
-    --color-success-strong: #5fd79b;
-    --color-success-soft: #0d3323;
-    --color-success-medium: #124430;
-    --color-success-subtle: #1f6644;
-    --color-fg-success: #5fd79b;
-    --color-fg-success-strong: #8fe5ba;
+    --color-success: #16a34a;
+    --color-success-strong: #15803d;
+    --color-success-soft: #052e16;
+    --color-success-medium: #14532d;
+    --color-success-subtle: #166534;
+    --color-fg-success: #4ade80;
+    --color-fg-success-strong: #86efac;
 
-    --color-warning: #f2b33d;
-    --color-warning-strong: #f5c566;
-    --color-warning-soft: #3a2a08;
-    --color-warning-medium: #4a360b;
-    --color-warning-subtle: #6f5416;
-    --color-fg-warning: #f5c566;
-    --color-fg-warning-subtle: #f5c566;
+    --color-warning: #f59e0b;
+    --color-warning-strong: #fbbf24;
+    --color-warning-soft: #3b2a06;
+    --color-warning-medium: #4a3508;
+    --color-warning-subtle: #78350f;
+    --color-fg-warning: #fbbf24;
+    --color-fg-warning-subtle: #fbbf24;
 
-    --color-danger: #f0707a;
-    --color-danger-strong: #f48c95;
-    --color-danger-soft: #40151a;
-    --color-danger-medium: #551d23;
-    --color-danger-subtle: #7a2f37;
-    --color-fg-danger: #f59aa1;
-    --color-fg-danger-strong: #f9c0c4;
+    /* Um preenchimento sob texto branco (4,83:1) e um contorno de 3,67:1 sobre o cartão (#124). */
+    --color-danger: #dc2626;
+    --color-danger-strong: #b91c1c;
+    --color-danger-soft: #3f0d0d;
+    --color-danger-medium: #5f1414;
+    --color-danger-subtle: #7f1d1d;
+    --color-fg-danger: #f87171;
+    --color-fg-danger-strong: #fca5a5;
 
     --shadow-xs: 0 0 #0000;
     --shadow-card: 0 0 #0000;
-    --shadow-pop: 0 4px 12px #00000080;
+    --shadow-pop: 0 12px 28px -6px #00000099, 0 2px 6px #00000066;
+
+    --mv-type-blue: #60a5fa;
+    --mv-type-green: #4ade80;
+    --mv-type-amber: #fbbf24;
+    --mv-type-red: #fb7185;
+    --mv-type-purple: #a78bfa;
+    --mv-type-teal: #2dd4bf;
+    --mv-type-gray: #94a3b8;
+    --mv-type-pink: #f472b6;
   }
 }
 
 /* ------------------------------------------------------------------ */
 /* Rótulos sem caixa alta: o Medvita escreve só a primeira letra       */
-/* maiúscula. "label" do sistema de design: 13/18, peso 500. No layer  */
-/* components do núcleo, depois das regras dele: utilitários vencem.   */
+/* maiúscula. No layer components do núcleo, depois das regras dele.   */
 /* ------------------------------------------------------------------ */
 @layer components {
-  :is(.sidebar-heading, .page-eyebrow, .table-scroll thead) {
+  :is(.sidebar-heading, .page-eyebrow, .table-scroll thead, .meta-list dt, .stat-label, .field dt, .dropdown-heading) {
     text-transform: none;
     letter-spacing: 0;
     font-size: 0.8125rem;
@@ -168,21 +189,125 @@
   .table-scroll thead {
     font-weight: 500;
   }
+  /* A section title is one step above a field label: darker, larger and heavier (finish review). */
+  .section-heading {
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--color-heading);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+  }
+  /* A table inside a card is part of the card, never a second card. */
+  .card .table-scroll {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  /* Tabs that run off a phone screen fade at the edge instead of showing a scrollbar thumb. */
+  .link-tabs {
+    scrollbar-width: none;
+  }
+  .link-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  /* A data list reads label and value on one line: the labels' column is as wide as its longest
+     label (9 to 14rem) and the value starts right after it, not at half the width (#143). */
+  @media (min-width: 40rem) {
+    .meta-list {
+      grid-template-columns: fit-content(14rem) minmax(0, 1fr);
+      align-items: baseline;
+    }
+    .meta-list dt {
+      min-width: 9rem;
+    }
+  }
+  /* On the phone a data list stacks: each label sits on its value, pairs apart from each other. */
+  @media (max-width: 39.99rem) {
+    /* Only where the strip runs off the screen; the end padding lets the last tab clear the fade. */
+    .link-tabs {
+      mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+      padding-inline-end: 2rem;
+    }
+    .meta-list {
+      row-gap: 0;
+    }
+    .meta-list dd {
+      margin-top: 0.125rem;
+      margin-bottom: 1rem;
+    }
+  }
+  /* O eyebrow do núcleo é a trilha de onde a tela fica: discreto, nunca uma chamada colorida. */
+  .page-eyebrow {
+    color: var(--color-body-subtle);
+    font-weight: 500;
+  }
+  .page-eyebrow a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .page-eyebrow a:hover {
+    color: var(--color-fg-brand);
+    text-decoration: underline;
+  }
+  /* O logo do Medvita já traz o nome escrito: o texto ao lado fica só para o leitor de tela (a imagem
+     tem alt vazio). Se a estrutura do cabeçalho do núcleo mudar, o pior caso é voltar a repetição. */
+  .app-header .brand > picture + span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /* Uma linha empilhada no celular: o rótulo da célula como está escrito, a pílula do tamanho do texto. */
+  .table-stack td[data-label]:not([data-label=""])::before {
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .table-stack td > .badge {
+    justify-self: start;
+    width: fit-content;
+  }
 }
 
 /* ------------------------------------------------------------------ */
-/* Títulos em Poppins 600 (a fonte do pacote); corpo na Inter do       */
-/* núcleo. Horários com algarismos de largura fixa.                    */
+/* Tipografia: uma família (IBM Plex Sans do núcleo); títulos 600.     */
+/* Números de tabela, horários e valores com algarismos de largura fixa.*/
 /* ------------------------------------------------------------------ */
 @layer base {
   h1,
   h2,
   h3 {
-    font-family: var(--mv-font-display);
     font-weight: 600;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
   }
-  time {
+  time,
+  td,
+  .meta-list dd {
     font-variant-numeric: tabular-nums;
+  }
+  /* As partes que o navegador desenha também levam o sistema. */
+  ::selection {
+    background: var(--color-cobalt-100, #dbeafe);
+    color: var(--color-heading);
+  }
+  :root {
+    caret-color: var(--color-brand);
+    scrollbar-color: var(--color-neutral-quaternary-medium) transparent;
+    accent-color: var(--color-brand);
+  }
+  a {
+    text-underline-offset: 0.18em;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  @layer base {
+    ::selection {
+      background: var(--color-cobalt-800, #1e3a8a);
+      color: var(--color-heading);
+    }
   }
 }

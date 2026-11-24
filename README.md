@@ -21,6 +21,10 @@ Veja o [guia de implantação](docs/deployment-guide.md): apps do núcleo, pacot
 
 Veja `docs/development.md` (ambiente, variáveis, banco de teste e comandos). As regras para agentes e desenvolvedores estão no `AGENTS.md`.
 
+## Produto e sistema de design
+
+O [`PRODUCT.md`](PRODUCT.md) registra para quem é o produto, o que o diferencia e os compromissos de marca; o [`DESIGN.md`](DESIGN.md) registra o sistema visual (cores nos dois modos, tipografia, estados, tabelas, impressão), que o tema Medvita (`med_patients/themes/medvita/`) aplica sobre os componentes do núcleo.
+
 ## Licença
 
 Software proprietário da Katuá Tech. Todos os direitos reservados; veja `LICENSE`.

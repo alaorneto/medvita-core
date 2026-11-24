@@ -1,14 +1,22 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Nova conta" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static med_icons %}{% block title %}{% translate "Nova conta" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Nova conta" %}</h1></div></div>
 {% with section="new" %}{% include "med_finance/_nav.html" %}{% endwith %}
 {% if not patient %}
-<form method="get" class="filter-bar"><div class="field"><label for="q">{% translate "Paciente (nome, CPF, código ou telefone)" %}</label><input id="q" name="q" type="search" value="{{ query }}" maxlength="200" autocomplete="off" spellcheck="false"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Buscar" %}</button></div></form>
-{% if query %}<ul>{% for item in patients %}<li><a href="?patient={{ item.sysid }}">{{ item.code }} · {{ item.display_name }}</a></li>{% empty %}<li>{% translate "Nenhum paciente encontrado." %}</li>{% endfor %}</ul>{% endif %}
+<form method="get" class="filter-bar"><div class="field"><label for="q">{% translate "Paciente (nome, CPF, código ou telefone)" %}</label><input id="q" name="q" type="search" value="{{ query }}" maxlength="200" autocomplete="off" spellcheck="false"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% med_action_icon "search" "size-4" %}{% translate "Buscar" %}</button></div></form>
+{% if query %}{% if patients %}<ul>{% for item in patients %}<li><a href="?patient={{ item.sysid }}">{{ item.code }} · {{ item.display_name }}</a></li>{% endfor %}</ul>{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum paciente encontrado.") hint=_("Confira o nome, o CPF, o código ou o telefone e busque de novo.") %}{% endif %}{% endif %}
 {% else %}
 <p class="mb-4">{% translate "Paciente:" %} <strong>{{ patient.code }} · {{ patient.display_name }}</strong> · <a href="?">{% translate "trocar" %}</a></p>
-<form method="post" class="card max-w-3xl">{% csrf_token %}<input type="hidden" name="patient" value="{{ patient.sysid }}"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
-{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Criar e confirmar a conta" %}</button></div></form>
+{% if modes %}<div class="mb-4">{% include "skeleton/web/components/segmented.html" with label=_("Tipo de item") options=modes %}</div>{% endif %}
+<form method="post" class="card max-w-3xl">{% csrf_token %}<input type="hidden" name="patient" value="{{ patient.sysid }}"><input type="hidden" name="mode" value="{{ mode }}"><input type="hidden" name="rows" value="{{ row_count }}"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/error-summary.html" with errors=item_errors title=_("Verifique os itens") %}
+<h2 class="section-heading">{% translate "Itens" %}</h2>
+<p class="helptext mb-4">{% if mode == "table" %}{% translate "O valor de cada item vem da tabela de preços. Linhas em branco são ignoradas; para mais linhas, use “Acrescentar item”." %}{% else %}{% translate "Informe a descrição e o valor de cada item. Linhas em branco são ignoradas; para mais linhas, use “Acrescentar item”." %}{% endif %}</p>
+{% for row in rows %}<fieldset class="charge-line"><legend>{% blocktranslate with number=forloop.counter %}Item {{ number }}{% endblocktranslate %}</legend>{% include "skeleton/web/components/form-fields.html" with form=row hide_marks=True %}</fieldset>
+{% endfor %}
+<h2 class="section-heading">{% translate "Pagador" %}</h2>
+{% include "skeleton/web/components/form-fields.html" %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_icon "charge" "size-4" %}{% translate "Criar e confirmar a conta" %}</button>{% if can_add %}<button type="submit" name="add_row" value="1" class="btn btn-secondary" formnovalidate>{% med_action_icon "plus" "size-4" %}{% translate "Acrescentar item" %}</button>{% endif %}</div></form>
 {% endif %}
 {% endblock %}

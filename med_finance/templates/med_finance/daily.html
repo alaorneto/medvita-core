@@ -1,16 +1,21 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format %}{% block title %}{% translate "Resumo do dia" %} · {{ site_name }}{% endblock %}
-{% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format skeleton_format med_icons %}{% block title %}{% translate "Resumo do dia" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}"><script src="{% static 'med_finance/med_finance.js' %}" defer></script>{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Relatórios" %}</p><h1>{% translate "Resumo do dia" %}</h1><p class="page-description">{{ summary.date|date:"DATE_FORMAT" }}</p></div>
-<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_finance:receivables' organization_id %}">{% translate "Contas a receber" %}</a></nav></div>
+<article class="print-page">
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Relatórios" %}</p><h1>{% translate "Resumo do dia" %}</h1><p class="page-description">{{ summary.date|moment:"date" }}</p></div>
+<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_finance:receivables' organization_id %}">{% med_icon "receivables" "size-4" %}{% translate "Contas a receber" %}</a><button type="button" class="btn btn-secondary" data-print hidden>{% med_action_icon "printer" "size-4" %}{% translate "Imprimir" %}</button></nav></div>
 {% with section="reports" %}{% include "med_finance/_nav.html" %}{% endwith %}
-<form method="get" class="filter-bar"><div class="field"><label for="date">{% translate "Dia" %}</label><input id="date" type="date" name="date" value="{{ summary.date|date:'Y-m-d' }}"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Ver" %}</button></div></form>
+<nav class="day-nav med-finance-no-print mb-4" aria-label="{% translate "Outros dias" %}"><a href="?date={{ previous_day.isoformat }}" rel="prev">{% blocktranslate with day=previous_day|moment:"date" %}Dia anterior ({{ day }}){% endblocktranslate %}</a>{% if summary.date != today %}<a href="?">{% translate "Hoje" %}</a>{% endif %}<a href="?date={{ next_day.isoformat }}" rel="next">{% blocktranslate with day=next_day|moment:"date" %}Dia seguinte ({{ day }}){% endblocktranslate %}</a></nav>
+<form method="get" class="filter-bar med-finance-no-print"><div class="field"><label for="date">{% translate "Dia" %}</label><input id="date" type="date" name="date" value="{{ summary.date.isoformat }}"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% med_action_icon "eye" "size-4" %}{% translate "Ver" %}</button></div></form>
 <dl class="meta-list">
 {% for item in summary.by_method %}<dt>{{ item.method|finance_label:"method" }} ({{ item.count }})</dt><dd class="amount">{{ item.amount|brl }}</dd>{% endfor %}
 <dt>{% translate "Recebido" %}</dt><dd class="amount"><strong>{{ summary.received|brl }}</strong></dd>
 <dt>{% translate "Estornado" %}</dt><dd class="amount">{{ summary.reversed|brl }}</dd>
-<dt>{% translate "Contas emitidas" %}</dt><dd class="amount">{{ summary.charges_created }} · {{ summary.charged|brl }}</dd>
+<dt>{% translate "Contas emitidas" %}</dt><dd class="amount">{{ summary.charges_created }}</dd>
+<dt>{% translate "Valor das contas emitidas" %}</dt><dd class="amount">{{ summary.charged|brl }}</dd>
 <dt>{% translate "Contas do dia em aberto" %}</dt><dd class="amount">{{ summary.open_due }}</dd>
 </dl>
 <p class="helptext mt-4">{% translate "A contabilidade completa (razão, demonstrativos, vencimentos) está no livro contábil." %}</p>
+<p class="helptext mt-2 med-finance-no-print">{% translate "Para imprimir, use a impressão do navegador (Ctrl+P): sai só o resumo, sem a navegação." %}</p>
+</article>
 {% endblock %}

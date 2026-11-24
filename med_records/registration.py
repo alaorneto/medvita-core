@@ -63,7 +63,12 @@ def register_contributions() -> None:
 
     register_appointment_action(
         AppointmentAction(
-            "med_records.attend", _("Atender"), "med_records:attend", statuses=("arrived", "in_progress"), order=10
+            "med_records.attend",
+            _("Atender"),
+            "med_records:attend",
+            statuses=("arrived", "in_progress"),
+            order=10,
+            icon="encounter",
         )
     )
     register_setup_step(SetupStep("med_records.archives", _("Prontuário"), "med_records:setup", _has_archive, order=30))

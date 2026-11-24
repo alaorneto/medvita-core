@@ -448,6 +448,14 @@ Start the care of an arrived patient, with CAS.
 - **Erros:** NotFound; Forbidden; Conflict("stale_revision", "invalid_transition").
 - **Efeitos:** grava a situação e a hora e publica ``med_scheduling.appointment_started``.
 
+#### `undo_check_in(*, actor, appointment_id, expected_revision) -> AppointmentInfo`
+
+Take back an arrival registered by mistake, with CAS, up to ``CHECK_IN_UNDO_MINUTES`` after it.
+
+- **Autorização:** alteração na agenda, como registrar a chegada.
+- **Erros:** NotFound; Forbidden; Conflict("stale_revision"; "invalid_transition" fora de aguardando; "undo_expired" depois do prazo).
+- **Efeitos:** grava a situação e apaga a hora da chegada (auditado pelo núcleo) e publica ``med_scheduling.appointment_arrival_undone``, sem o paciente nem a prioridade.
+
 #### `update_appointment_type(*, actor, type_id, changes, expected_revision) -> AppointmentTypeInfo`
 
 Change a kind of appointment, with CAS; the code never changes.
@@ -517,8 +525,11 @@ A button on an appointment; ``url_name`` receives ``org`` and ``appointment_id``
 | `url_name` | `str` |
 | `statuses` | `tuple[str, ...]` |
 | `order` | `int` |
+| `icon` | `str` |
 
 ### `AppointmentActionInfo`
+
+A button of another app on an appointment; ``icon`` is the concept its icon draws (#144).
 
 | Campo | Tipo |
 |---|---|
@@ -526,6 +537,7 @@ A button on an appointment; ``url_name`` receives ``org`` and ``appointment_id``
 | `label` | `str` |
 | `url_name` | `str` |
 | `order` | `int` |
+| `icon` | `str` |
 
 ### `AppointmentDetail`
 
@@ -571,6 +583,7 @@ An appointment as lists show it: never the notes of the reception nor the priori
 | `arrival_number` | `int | None` |
 | `modality` | `str` |
 | `booked_online` | `bool` |
+| `arrived_at` | `datetime | None` |
 
 ### `AppointmentTypeInfo`
 
@@ -914,6 +927,7 @@ Payload: `code`, `schedule`, `patient` (o `sysid`, em texto), `appointment_type`
 | `med_scheduling.appointment_cancelled` | `cancel`, e a consulta antiga de uma remarcação para outra agenda |
 | `med_scheduling.appointment_confirmed`, `_arrived`, `_started`, `_completed`, `_no_show` | `confirm`, `check_in`, `start`, `complete`, `mark_no_show` |
 | `med_scheduling.appointment_modality_changed` | `set_modality` que troca a modalidade |
+| `med_scheduling.appointment_arrival_undone` | `undo_check_in`: a chegada desfeita dentro do prazo (a situação volta a agendada ou confirmada) |
 
 ## Pontos de extensão
 
@@ -936,3 +950,5 @@ As rotas de `/api/v1/o/<org>/apps/med_scheduling/` estão em `docs/spec.md` (se�
 |---|---|
 | 0.1.0 | Primeira versão |
 | 0.2.0 | Agendamento online pelo portal: `public_schedules`, `public_slots` e `book_external` (`allow_external`), `set_online_booking`, `PublicSchedule`, `PublicType`; `online_booking` (e a janela) no fim de `ScheduleInfo` e `AppointmentTypeInfo`, `booked_online` no fim de `AppointmentInfo`, com padrão. Modalidade presencial ou teleconsulta: `modality` em `AppointmentTypeInfo` e `AppointmentInfo` (no fim, com padrão), em `add_appointment_type`, `book` e no filtro de `appointments`; `set_modality`; `modality` no payload dos eventos e o evento `appointment_modality_changed` |
+| 0.2.0 | Desfazer a chegada registrada por engano (#129): `undo_check_in`, com o prazo `CHECK_IN_UNDO_MINUTES` e o conflito `undo_expired`; o evento `appointment_arrival_undone`; `arrived_at` no fim de `AppointmentInfo`, com padrão (a recepção mostra há quanto tempo o paciente espera) |
+| 0.2.0 | Ícone das ações de outras apps (#144): `icon` no fim de `AppointmentAction` e `AppointmentActionInfo`, com padrão vazio (o conceito cujo ícone o botão mostra) |

@@ -15,7 +15,10 @@ urlpatterns = [
     path("setup/", views.setup_view, name="setup"),
     path("schedules/", views.schedules_view, name="schedules"),
     path("calendars/<uuid:calendar_id>/subscribe/", views.calendar_subscribe, name="calendar-subscribe"),
+    # The page of a schedule in sub-tabs (#138): the grid at the schedule's own address, then each other tab.
     path("schedules/<uuid:schedule_id>/", views.schedule_view, name="schedule"),
+    path("schedules/<uuid:schedule_id>/days/", views.schedule_days_view, name="schedule-days"),
+    path("schedules/<uuid:schedule_id>/types/", views.schedule_types_view, name="schedule-types"),
     path("schedules/<uuid:schedule_id>/week/", views.week_view, name="week"),
     path("schedules/<uuid:schedule_id>/day/", views.day_exception_view, name="day-exception"),
     path("schedules/<uuid:schedule_id>/online/", views.schedule_online, name="schedule-online"),
@@ -28,6 +31,7 @@ urlpatterns = [
     path("appointments/<uuid:appointment_id>/cancel/", views.appointment_cancel, name="cancel"),
     # Before the transitions: the arrival takes the priority mark, and the mark has a page of its own.
     path("appointments/<uuid:appointment_id>/check_in/", views.appointment_check_in, name="check-in"),
+    path("appointments/<uuid:appointment_id>/undo_check_in/", views.appointment_undo_check_in, name="undo-check-in"),
     path("appointments/<uuid:appointment_id>/priority/", views.appointment_priority, name="priority"),
     path("appointments/<uuid:appointment_id>/modality/", views.appointment_modality, name="modality"),
     path("appointments/<uuid:appointment_id>/<slug:name>/", views.appointment_transition, name="transition"),

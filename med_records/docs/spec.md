@@ -55,16 +55,18 @@ Anexos (PDF, JPEG, PNG, até 20 MB) ficam no armazenamento privado do núcleo, n
 - Só o autor altera ou descarta o rascunho; os outros leitores do arquivo o veem marcado "rascunho, não assinado".
 - `save_section` valida pelo tipo de seção, usa a revisão do **atendimento** como CAS (cada seção salva sobe a revisão) e atualiza `last_entry_at` do prontuário. `remove_section` e `discard_draft` são exclusões lógicas; atendimento assinado responde `Conflict("signed")`.
 - `encounters` devolve só cabeçalhos; `encounter` devolve o conteúdo e registra a leitura na trilha.
+- `encounter_history` (#133) devolve, pela mesma paginação por cursor, cada atendimento com os tipos das seções e a queixa principal da anamnese, cortada em 80 caracteres; como a queixa é conteúdo clínico, grava a leitura do prontuário (`view_chart`) na trilha. O atendimento não tem campo de motivo próprio: sem anamnese com queixa, a lista mostra o tipo da primeira seção.
+- `my_drafts` (#133) lista os rascunhos (atendimentos, adendos e documentos) que o **próprio ator** escreveu nos arquivos que ele lê, a última alteração primeiro, sem conteúdo clínico; com `chart_id`, só os daquele prontuário. O rascunho de outro profissional nunca aparece, nem a quem lê o mesmo arquivo.
 - O conteúdo das seções sai `[REDACTED]` na auditoria.
 - **Itens consumidos.** Uma app dona de catálogo (estoque, vacinas) registra `register_consumable_provider(code, provider)`; `provider(*, actor)` autoriza pelo serviço dela e devolve os `ConsumableItem(ref, label, unit)` que o ator pode escolher. `consumable_items` lista as ofertas das apps ativas para um rascunho (vazio no assinado e sem provedor). `add_consumption` grava um item oferecido ao ator (outro responde `InvalidInput`), com quantidade e lote, usa a revisão do atendimento como CAS e só vale no rascunho do autor; `remove_consumption` é exclusão lógica. O editor mostra a seção "Itens consumidos" só quando há provedor ativo ou item gravado.
 
 ### Assinatura, adendo e verificação
 
 - `sign_encounter`: só o autor, com pelo menos uma seção preenchida (`Conflict("empty")`) e uma ficha de profissional com conselho na agenda (`Conflict("professional_required")`). Grava `author_name` e `author_council` da ficha, sela o atendimento (`skeleton.records.sealing.seal_record`, com as referências, as seções e, quando há, os itens consumidos no `extra`) e publica `med_records.encounter_signed` e um `med_records.items_consumed` por item (`encounter`, `provider`, `item_ref`, `quantity`, `lot`: a referência do item, nunca a descrição nem o paciente). Um atendimento sem item tem o mesmo resumo de antes. Com a consulta vinculada em atendimento, tenta concluí-la; a recusa da agenda não desfaz a assinatura e `appointment_completed` diz o que aconteceu.
-- Depois de assinado, nada muda: seções, exclusão e anexos novos são recusados pelo serviço e pelo guard do banco. **Não há assinatura digital ICP-Brasil**: o selo é o resumo SHA-256 do conteúdo, que uma app de assinatura poderá assinar.
+- Depois de assinado, nada muda: seções, exclusão e anexos novos são recusados pelo serviço e pelo guard do banco. **Não há assinatura digital ICP-Brasil**: o selo é o resumo SHA-256 do conteúdo, que uma app de assinatura poderá assinar. A tela o chama de "Código de verificação" e mostra os 12 primeiros caracteres; o código inteiro está no `title`, no texto para leitor de tela e na impressão (#133).
 - `add_addendum`: qualquer profissional que altera o arquivo cria um rascunho `addendum` com texto livre apontando para o original assinado; assina-se pelo mesmo `sign_encounter`. O original nunca muda e lista os adendos assinados.
 - `verify_encounter` recalcula o resumo a partir do conteúdo gravado.
-- A ação "Atender" (`med_records.attend`) aparece nas consultas em "chegou" e "em atendimento".
+- A ação "Atender" (`med_records.attend`) aparece nas consultas em "chegou" e "em atendimento". A rota `attend` só aceita POST com CSRF (#131): ela abre o prontuário, cria o rascunho e inicia a consulta, então um GET responde 405 e não cria nada.
 
 ### Alergias, medicamentos e resumo
 
@@ -86,13 +88,14 @@ O repositório não distribui a tabela CID-10. O operador baixa a oficial (DATAS
 
 ### Trilha de leitura e anexos
 
-- A auditoria do núcleo só cobre escrita; a leitura de conteúdo clínico (`encounter`, `document`, `chart_summary`, `allergies`, `medications`, `attachment_url`) grava uma linha em `AccessLog` depois de autorizada, escrita pelo serviço (quem lê só precisa de leitura), com a origem da requisição (`origin`: `web`, `native_client` com o `client_id`, `api_token` ou `other`). A mesma pessoa lendo o mesmo alvo pela mesma origem em menos de 5 minutos gera uma linha só.
-- `access_log` exige a gestão de acesso do arquivo (dono ou administrador): o profissional comum não lê a trilha. A linha não tem caminho de alteração nem de exclusão; o guard do banco recusa mudança.
+- A auditoria do núcleo só cobre escrita; a leitura de conteúdo clínico (`encounter`, `encounter_history`, `document`, `chart_summary`, `allergies`, `medications`, `attachment_url`) grava uma linha em `AccessLog` depois de autorizada, escrita pelo serviço (quem lê só precisa de leitura), com a origem da requisição (`origin`: `web`, `native_client` com o `client_id`, `api_token` ou `other`). A mesma pessoa lendo o mesmo alvo pela mesma origem em menos de 5 minutos gera uma linha só.
+- `access_log` exige a gestão de acesso do arquivo (dono ou administrador): o profissional comum não lê a trilha. A página dá o nome de quem leu pelo filtro `person` do núcleo, com os nomes da página buscados numa consulta (`IdentityService.people`); quem não é mais membro aparece como "Pessoa indisponível", sem o identificador inteiro na tela (#133). A linha não tem caminho de alteração nem de exclusão; o guard do banco recusa mudança.
 - `attach_to_chart` e `attach_to_encounter` anexam (atendimento assinado: `Conflict("signed")`, anexe ao prontuário); `attachments` lista; `attachment_url` confere que o anexo é do alvo, devolve o endereço reautorizado pelo núcleo a cada download e grava a trilha. Revogada a concessão no arquivo, o endereço para de funcionar.
 
 ### Página do paciente
 
-- Aba "Prontuário" (`med_records.chart`, ordem 30), visível só para quem lê algum arquivo clínico (`PatientSection.visible`): a recepção não a vê.
+- Aba "Prontuário" (`med_records.chart`, ordem 30), visível só para quem lê algum arquivo clínico (`PatientSection.visible`): a recepção não a vê. A aba usa o cabeçalho do paciente do `med_patients` (`PatientService().header` e `med_patients/templates/med_patients/_patient_header.html`, #136), com o nome do arquivo e as ações "Retomar rascunho" e "Alergias e medicamentos".
+- Painel "Alergias e medicamentos" da aba Resumo (`med_records.allergies`, ordem 20, #136): as alergias ativas (graves primeiro, escritas "Alergia grave") e os medicamentos em uso dos prontuários que o ator lê, por `chart_summary` (a leitura vai para a trilha); visível só para quem lê algum arquivo clínico, então a recepção não vê alergias. Sem prontuário, o painel diz que ainda não há e leva à aba.
 - Linha do tempo: "Atendimento registrado" e "Documento emitido", sem tipo de documento nem conteúdo, só do que o ator lê.
 - Relatório do titular: data, código e profissional de cada atendimento assinado e documento emitido legível. O conteúdo clínico integral não entra no relatório automático: a cópia do prontuário é entregue pelo profissional, pela impressão dos registros.
 
@@ -120,15 +123,17 @@ O prontuário é guardado por 20 anos depois do último registro (Lei 13.787/201
 
 Emitir e substituir documento, remover seção do rascunho, marcar uma alergia como resolvida, encerrar um medicamento e desativar um modelo passam por uma página de confirmação (#119); assinar e descartar o atendimento também (#117). O documento impresso tem o timbre, a linha de assinatura e carimbo, a cidade e a data, o código de verificação e o aviso do tipo (#118).
 
+**Faixa clínica (#137).** O editor do atendimento, a página do atendimento, o editor do documento e as alergias e medicamentos abrem com a faixa `med_records/templates/med_records/_clinical_strip.html`: o paciente numa linha (nome, idade e sexo, do `PatientService().header` pelo template `med_patients/templates/med_patients/_patient_identity.html`) e as alergias ativas do prontuário com a gravidade, as graves primeiro. Com alergia, a faixa usa os tokens de perigo (`--color-danger-soft`, `--color-danger-medium`, `--color-fg-danger-strong`) e a grave é escrita "GRAVE", não só pintada; sem alergia ativa, diz "Sem alergias registradas". É uma região só, rotulada "Paciente e alergias" para o leitor de tela, sem região viva, e o nome não se repete no título da página (o `h1` do atendimento é o tipo ou "Rascunho do atendimento"). As quatro telas já exigem a leitura do prontuário: quem não lê o arquivo recebe 404 e não vê a faixa. A impressão não leva a faixa.
+
 Em `/o/<org>/apps/med_records/` (nomes `med_records:<nome>`); toda leitura e escrita passa pelo `RecordsService`. As páginas clínicas respondem `Cache-Control: no-store`; o título nunca leva o nome do paciente; o texto clínico é escapado, com as quebras de linha por CSS.
 
 | Nome | Página |
 |---|---|
-| `home`, `setup` | Arquivos clínicos legíveis; configuração inicial (administradores) |
-| `patient_section` | Aba "Prontuário" do paciente: escolha do arquivo, abrir prontuário, alergias em destaque, medicamentos, atendimentos, documentos, anexos, novo atendimento e novo documento |
-| `attend` | Entrada pela consulta: abre o prontuário e retoma (ou inicia) o rascunho da consulta |
+| `home`, `setup` | Entrada do prontuário (#133): busca de paciente pelo `PatientService` (POST, para o termo nunca ir à URL; o resultado leva à aba "Prontuário"), "Meus rascunhos" (`my_drafts`) e os arquivos clínicos legíveis; quem não lê arquivo nenhum não vê busca nem rascunhos. Configuração inicial (administradores) |
+| `patient_section` | Aba "Prontuário" do paciente: escolha do arquivo, abrir prontuário, alergias em destaque, medicamentos, atendimentos (data, tipo e queixa principal ou primeira seção, profissional e situação; 50 por página, "Atendimentos mais antigos" pelo cursor), "Retomar rascunho" quando o ator tem um rascunho naquele prontuário, documentos, anexos, novo atendimento e novo documento |
+| `attend` | Entrada pela consulta, só POST (#131): abre o prontuário e retoma (ou inicia) o rascunho da consulta |
 | `encounter`, `encounter_print` | Leitura do atendimento: seções, selo ("sem assinatura digital ICP-Brasil"), adendos, anexos; versão de impressão |
-| `encounter_edit` | Editor do rascunho, um formulário só (#117): todas as seções, acrescentar seção, busca de CID-10 com "Usar" (acrescenta o código ao primeiro campo de diagnósticos), itens consumidos, anexos e salvar como modelo. Todo botão grava antes, numa transação, as seções que mudaram; se um campo é inválido, nada é gravado e a página volta com o que foi digitado e o erro no campo. Cada seção tem o próprio prefixo (`s0`, `s1`…), sem `id` repetido. Funciona sem JavaScript |
+| `encounter_edit` | Editor do rascunho, um formulário só (#117): todas as seções (sinais vitais numa grade compacta em telas largas, #133), acrescentar seção, busca de CID-10 com "Usar" (acrescenta o código ao primeiro campo de diagnósticos), itens consumidos, anexos e salvar como modelo. Todo botão grava antes, numa transação, as seções que mudaram; se um campo é inválido, nada é gravado e a página volta com o que foi digitado e o erro no campo. Cada seção tem o próprio prefixo (`s0`, `s1`…), sem `id` repetido. Funciona sem JavaScript |
 | `encounter_sign` | Confirmação da assinatura (GET: as seções que serão seladas; POST: assina com a revisão lida). "Revisar e assinar" no editor grava o que foi digitado e leva a ela |
 | `encounter_discard` | Confirmação do descarte do rascunho, a partir da zona de perigo do editor |
 | `addendum` | Cria o rascunho de um adendo |

@@ -56,7 +56,7 @@ def test_reception_flow(ready):
     assert response.status_code == 302
     with ready.as_user(ready.a.reception) as actor:
         (summary,) = PatientService().search(actor=actor, query="joao").items
-    detail = url(ready, "detail", summary.sysid)
+    detail = url(ready, "registration", summary.sysid)
     html = assert_safe(client.get(detail))
     assert "João Teste" in html and "529.982.247-25" in html
 

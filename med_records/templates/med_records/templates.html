@@ -1,11 +1,11 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Modelos" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format med_records_labels %}{% block title %}{% translate "Modelos" %} · {{ site_name }}{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_records:home' organization_id %}">{% translate "Prontuário" %}</a></p><h1>{% translate "Modelos" %}</h1><p class="page-description">{% translate "Modelos do arquivo e os seus pessoais. Modelos de atendimento nascem do editor de um rascunho." %}</p></div></div>
-<div class="table-scroll mb-6"><table><caption class="sr-only">{% translate "Modelos" %}</caption>
-<thead><tr><th scope="col">{% translate "Nome" %}</th><th scope="col">{% translate "Tipo" %}</th><th scope="col">{% translate "Especialidade" %}</th><th scope="col"><span class="sr-only">{% translate "Ações" %}</span></th></tr></thead>
-<tbody>{% for item in templates %}<tr><td>{{ item.name }}{% if item.personal %} <span class="badge badge-neutral">{% translate "Pessoal" %}</span>{% endif %}</td><td>{% if item.kind == "encounter" %}{% translate "Atendimento" %}{% else %}{% translate "Documento" %}{% endif %}</td><td>{{ item.specialty|default:"—" }}</td>
-<td><a class="btn btn-danger-outline btn-sm" href="{% url 'med_records:template_deactivate' organization_id item.sysid %}">{% translate "Desativar" %}<span class="sr-only"> {{ item.name }}</span></a></td></tr>
-{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=4 message=_("Nenhum modelo.") %}{% endfor %}</tbody></table></div>
+<div class="table-scroll table-stack mb-6"><table><caption class="sr-only">{% translate "Modelos" %}</caption>
+<thead><tr><th scope="col">{% translate "Nome" %}</th><th scope="col">{% translate "Tipo" %}</th><th scope="col">{% translate "Especialidade" %}</th><th scope="col" class="col-actions"><span class="sr-only">{% translate "Ações" %}</span></th></tr></thead>
+<tbody>{% for item in templates %}<tr><td data-label="{% translate "Nome" %}"><span class="cell-primary">{{ item.name }}</span>{% if item.personal %} {% translate "Pessoal" as personal_label %}{{ "neutral"|records_marker|marker:personal_label }}{% endif %}</td><td data-label="{% translate "Tipo" %}">{{ item.kind|records_label:"template_kind" }}</td><td data-label="{% translate "Especialidade" %}">{{ item.specialty|default:"—" }}</td>
+<td class="col-actions" data-label=""><div class="row-actions"><a class="btn btn-danger-outline btn-sm" href="{% url 'med_records:template_deactivate' organization_id item.sysid %}">{% translate "Desativar" %}<span class="sr-only"> {{ item.name }}</span></a></div></td></tr>
+{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=4 message=_("Nenhum modelo.") hint=_("Crie um modelo de documento abaixo ou salve as seções de um atendimento em rascunho.") %}{% endfor %}</tbody></table></div>
 <section class="card max-w-3xl" aria-labelledby="new-heading"><h2 id="new-heading">{% translate "Novo modelo de documento" %}</h2>
 <form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}

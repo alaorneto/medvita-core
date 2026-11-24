@@ -29,7 +29,8 @@ class MoneyField(forms.CharField):
         text = super().clean(value)
         if text in (None, ""):
             return None
-        text = str(text).strip().replace("R$", "").replace(" ", "")
+        # "R$ 250,00" pasted from a page carries a non-breaking space since brl writes one (#122).
+        text = str(text).strip().replace("R$", "").replace(" ", "").replace("\u00a0", "")
         if "," in text:
             text = text.replace(".", "").replace(",", ".")
         try:
@@ -84,11 +85,8 @@ class CloseSessionForm(forms.Form):
 
 
 class ChargeForm(forms.Form):
-    code = forms.ChoiceField(label=_("Item da tabela de preços"), required=False)
-    description = forms.CharField(label=_("Ou descrição livre"), max_length=200, required=False)
-    unit_amount = MoneyField(label=_("Valor (para a descrição livre)"), required=False)
-    quantity = forms.IntegerField(label=_("Quantidade"), min_value=1, max_value=1000, initial=1)
-    discount_amount = MoneyField(label=_("Desconto"), required=False)
+    """Who pays the charge; its lines are ``TableItemForm`` or ``FreeItemForm`` rows (#132)."""
+
     payer_name = forms.CharField(label=_("Pagador (vazio: o paciente)"), max_length=200, required=False)
     payer_document = forms.CharField(
         label=_("CPF ou CNPJ do pagador"),
@@ -97,30 +95,77 @@ class ChargeForm(forms.Form):
         widget=forms.TextInput(attrs={"inputmode": "numeric", "autocomplete": "off", "spellcheck": "false"}),
     )
 
-    def __init__(self, *args, prices=(), **kwargs):
+
+# The most lines of one charge, as FinanceService.create_charge accepts them.
+MAX_ITEMS = 50
+
+
+class TableItemForm(forms.Form):
+    """A line priced by the desk's price list: the code, the quantity and a discount."""
+
+    code = forms.ChoiceField(label=_("Item da tabela de preços"))
+    quantity = forms.IntegerField(label=_("Quantidade"), min_value=1, max_value=1000, initial=1)
+    discount_amount = MoneyField(label=_("Desconto"), required=False)
+
+    def __init__(self, *args: Any, prices: Any = (), **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.fields["code"].choices = [
             ("", "—"),
             *((item.code, f"{item.code} · {item.description}") for item in prices),
         ]
 
-    def clean(self):
-        data = super().clean()
-        if not data.get("code") and not (data.get("description") and data.get("unit_amount") is not None):
-            raise ValidationError(_("Escolha um item da tabela ou informe descrição e valor."))
-        return data
+
+class FreeItemForm(forms.Form):
+    """A line typed by hand: what it is, its price, the quantity and a discount."""
+
+    description = forms.CharField(label=_("Descrição"), max_length=200)
+    unit_amount = MoneyField(label=_("Valor"))
+    quantity = forms.IntegerField(label=_("Quantidade"), min_value=1, max_value=1000, initial=1)
+    discount_amount = MoneyField(label=_("Desconto"), required=False)
+
+    def __init__(self, *args: Any, prices: Any = (), **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+
+# The payment methods with an authorization code, and the one paid in installments (#132).
+AUTHORIZED_METHODS = (Payment.Method.DEBIT_CARD.value, Payment.Method.CREDIT_CARD.value)
+INSTALLMENT_METHODS = (Payment.Method.CREDIT_CARD.value,)
 
 
 class PaymentForm(forms.Form):
-    method = forms.ChoiceField(label=_("Forma de pagamento"), choices=Payment.Method.choices)
+    """Installments and authorization code belong to the cards (#132).
+
+    The app's optional script folds them away for the other methods (and does not send them);
+    without it every field shows and the service refuses installments outside the credit card.
+    """
+
+    method = forms.ChoiceField(
+        label=_("Forma de pagamento"),
+        choices=Payment.Method.choices,
+        widget=forms.Select(attrs={"data-payment-method": ""}),
+    )
     amount = MoneyField(label=_("Valor"))
-    installments = forms.IntegerField(label=_("Parcelas (cartão de crédito)"), min_value=1, max_value=24, initial=1)
+    installments = forms.IntegerField(
+        label=_("Parcelas (cartão de crédito)"),
+        min_value=1,
+        max_value=24,
+        initial=1,
+        required=False,
+        help_text=_("Só o cartão de crédito é parcelado."),
+        widget=forms.NumberInput(attrs={"data-payment-only": " ".join(INSTALLMENT_METHODS)}),
+    )
     authorization_code = forms.CharField(
-        label=_("Código de autorização"),
+        label=_("Código de autorização (cartão)"),
         max_length=40,
         required=False,
-        widget=forms.TextInput(attrs={"autocomplete": "off", "spellcheck": "false"}),
+        widget=forms.TextInput(
+            attrs={"autocomplete": "off", "spellcheck": "false", "data-payment-only": " ".join(AUTHORIZED_METHODS)}
+        ),
     )
+
+    def clean_installments(self) -> int:
+        # Not sent when the script folds the field away: a single installment.
+        return self.cleaned_data.get("installments") or 1
 
 
 class ReasonForm(forms.Form):

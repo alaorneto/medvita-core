@@ -15,7 +15,7 @@ Para o operador da plataforma e para o administrador da clínica. As regras de i
    ```
 
 5. Com a cobrança da plataforma ligada, cadastre no catálogo de cobrança os produtos das quatro apps e os planos (seção 4).
-6. Ative a marca Medvita: instalar a suíte não ativa o tema. Em `/platform/appearance/`, na tabela "Temas de apps", pré-visualize o tema "Medvita" (da app Pacientes) e clique em "Ativar". Ele troca as cores nos modos claro e escuro, os títulos (Poppins), o logo, o ícone, o nome do produto e o rodapé da instância; a marca própria de cada clínica continua valendo nas telas dela. Pelo console: `python manage.py appearance show` mostra o tema ativo. Uma instância que prefere enviar o pacote encontra o `medvita-theme-<versão>.zip` anexado à release. Desinstalar o `med_patients` tira o tema do catálogo e a instância volta ao tema do núcleo (a prévia de desinstalação avisa).
+6. Ative a marca Medvita: instalar a suíte não ativa o tema. Em `/platform/appearance/`, na tabela "Temas de apps", pré-visualize o tema "Medvita" (da app Pacientes) e clique em "Ativar". Ele troca as cores nos modos claro e escuro, o logo, o ícone, o nome do produto e o rodapé da instância; a marca própria de cada clínica continua valendo nas telas dela. Pelo console: `python manage.py appearance show` mostra o tema ativo. Uma instância que prefere enviar o pacote encontra o `medvita-theme-<versão>.zip` anexado à release. Desinstalar o `med_patients` tira o tema do catálogo e a instância volta ao tema do núcleo (a prévia de desinstalação avisa).
 
 ## 2. Administrador da clínica
 

@@ -1,5 +1,5 @@
 {% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Financeiro" %} · {{ site_name }}{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Caixa" %}</h1><p class="page-description">{% translate "Nenhum caixa que você possa ver." %}</p></div></div>
-{% if manager %}<div class="empty-state"><p><a href="{% url 'med_finance:setup' organization_id %}">{% translate "Configurar o financeiro" %}</a></p></div>{% endif %}
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Caixa" %}</h1></div></div>
+{% if manager %}{% url 'med_finance:setup' organization_id as setup_url %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum caixa que você possa ver.") hint=_("Configure o financeiro para criar o caixa e a tabela de preços.") action_url=setup_url action_label=_("Configurar o financeiro") %}{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum caixa que você possa ver.") hint=_("Peça a quem administra a organização acesso a um caixa.") %}{% endif %}
 {% endblock %}

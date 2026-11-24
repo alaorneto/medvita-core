@@ -96,6 +96,8 @@ __all__ = [
     "ConsumptionInfo",
     "ConsumptionInput",
     "register_consumable_provider",
+    "DraftInfo",
+    "EncounterLine",
 ]
 
 
@@ -212,6 +214,42 @@ class EncounterInfo:
     writable: bool
     appointment_completed: bool = False
     consumption: tuple[ConsumptionInfo, ...] = ()
+
+
+# The chief complaint shown in the chart's history: a line, never the whole anamnesis.
+REASON_LENGTH = 80
+
+
+@dataclass(frozen=True, slots=True)
+class EncounterLine:
+    """A line of the chart's history: the header, the types of its sections and the chief complaint.
+
+    ``section_types`` are the codes of the sections, in the order of the record; ``reason`` is the
+    "Queixa principal" of the anamnesis, cut to 80 characters ("" without one). Clinical content.
+    """
+
+    header: EncounterHeader
+    section_types: tuple[str, ...]
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class DraftInfo:
+    """A draft the actor wrote and has not signed or issued, without clinical content.
+
+    ``kind`` is ``"encounter"`` (an addendum included) or ``"document"``; ``subtype`` is the kind of
+    encounter (``consultation``, ``addendum``...) or the code of the document kind; ``title`` is the
+    document's title ("" for an encounter).
+    """
+
+    sysid: UUID
+    kind: str
+    chart_id: UUID
+    patient_id: UUID
+    code: str
+    subtype: str
+    title: str
+    updated_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -1241,6 +1279,88 @@ class RecordsService(ServiceAPI):
         return paginate(
             rows, convert=encounter_header, cursor=cursor, page_size=page_size, key=("-occurred_at", "-sysid")
         )
+
+    @service_method(read_only=True, since="0.2.0")
+    def encounter_history(
+        self, *, actor: Any, chart_id: UUID, cursor: str | None = None, page_size: int = 50
+    ) -> Page[EncounterLine]:
+        """The chart's encounters, newest first, each with its section types and chief complaint.
+
+        Autorização: leitura do arquivo do prontuário.
+        Erros: NotFound para prontuário ilegível; InvalidInput para cursor ou tamanho inválidos.
+        Efeitos: registra a leitura do prontuário na trilha (a queixa principal é conteúdo clínico).
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        from .trail import record_access
+
+        chart = _chart(actor, chart_id)
+        rows = (
+            authorized_queryset(Encounter, user=actor, action="read")
+            .filter(chart=chart)
+            .order_by("-occurred_at", "-sysid")
+        )
+        page = paginate(
+            rows, convert=lambda row: row, cursor=cursor, page_size=page_size, key=("-occurred_at", "-sysid")
+        )
+        record_access(actor, chart, "view_chart")
+        sections: dict[UUID, list[EncounterSection]] = {}
+        found = authorized_queryset(EncounterSection, user=actor, action="read").filter(
+            encounter_id__in=[row.pk for row in page.items]
+        )
+        for section in found.order_by("position", "section_type", "sysid"):
+            sections.setdefault(section.encounter_id, []).append(section)
+        lines = []
+        for row in page.items:
+            own = sections.get(row.pk, [])
+            reason = next(
+                (
+                    str(item.data.get("chief_complaint") or "").strip()
+                    for item in own
+                    if item.section_type == "med_records.anamnesis" and isinstance(item.data, dict)
+                ),
+                "",
+            )
+            if len(reason) > REASON_LENGTH:
+                reason = reason[: REASON_LENGTH - 1].rstrip() + "…"
+            types = tuple(dict.fromkeys(item.section_type for item in own))
+            lines.append(EncounterLine(encounter_header(row), types, reason))
+        return Page(tuple(lines), page.next_cursor, page.page_size)
+
+    @service_method(read_only=True, since="0.2.0")
+    def my_drafts(self, *, actor: Any, chart_id: UUID | None = None, limit: int = 50) -> tuple[DraftInfo, ...]:
+        """The actor's own drafts (encounters and documents), latest change first; with ``chart_id``, that chart's.
+
+        Autorização: leitura do arquivo de cada rascunho, e só os do próprio ator: o rascunho de
+        outro profissional nunca aparece, nem a quem lê o mesmo arquivo.
+        Erros: NotFound para prontuário ilegível; InvalidInput para ``limit`` fora de 1 a 100.
+        Efeitos: nenhum (sem conteúdo clínico).
+        """
+        from skeleton.access.policies import authorized_queryset
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise InvalidInput({"limit": [gettext("Informe um limite de 1 a 100.")]})
+        encounters = authorized_queryset(Encounter, user=actor, action="read").filter(
+            author_id=actor.pk, sealed_at__isnull=True
+        )
+        documents = authorized_queryset(ClinicalDocument, user=actor, action="read").filter(
+            author_id=actor.pk, sealed_at__isnull=True
+        )
+        if chart_id is not None:
+            chart = _chart(actor, chart_id)
+            encounters = encounters.filter(chart=chart)
+            documents = documents.filter(chart=chart)
+        drafts = [
+            DraftInfo(row.pk, "encounter", row.chart_id, row.patient_id, row.code, row.kind, "", as_utc(row.updated_at))
+            for row in encounters.order_by("-updated_at", "-sysid")[:limit]
+        ] + [
+            DraftInfo(
+                row.pk, "document", row.chart_id, row.patient_id, row.code, row.kind, row.title, as_utc(row.updated_at)
+            )
+            for row in documents.order_by("-updated_at", "-sysid")[:limit]
+        ]
+        drafts.sort(key=lambda item: (item.updated_at, str(item.sysid)), reverse=True)
+        return tuple(drafts[:limit])
 
     @service_method(read_only=False, since="0.1.0")
     def save_section(

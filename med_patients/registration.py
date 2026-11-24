@@ -305,6 +305,33 @@ def _has_registry(*, actor) -> bool:
     return bool(PatientService().registries(actor=actor))
 
 
+def register_summary_panels() -> None:
+    """The panel of this app on the "Resumo" tab (#136): the primary health plan card and its validity."""
+    from django.utils.translation import gettext_lazy
+
+    from .extension import SummaryPanel, register_summary_panel
+
+    register_summary_panel(
+        SummaryPanel(
+            "med_patients.coverage",
+            gettext_lazy("Convênio"),
+            "med_patients/_summary_coverage.html",
+            order=40,
+            context=coverage_summary,
+            icon="coverages",
+        )
+    )
+
+
+def coverage_summary(*, actor, patient_id) -> dict:
+    """The primary card (or the first one, when none is primary) and how many the patient has."""
+    from .service_api import PatientService
+
+    rows = PatientService().coverages(actor=actor, patient_id=patient_id)
+    primary = next((row for row in rows if row.is_primary), rows[0] if rows else None)
+    return {"coverage": primary, "coverage_count": len(rows)}
+
+
 def register_quota_metrics() -> None:
     """The number of active patients: measured for the plans, never limited by this app."""
     from skeleton.service_api.billing import register_quota_metric

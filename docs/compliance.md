@@ -30,6 +30,7 @@ O que o produto faz e o que não faz em relação às normas que se aplicam a um
 - Nada é apagado fisicamente. Paciente com prontuário não é excluído nem anonimizado antes do fim da guarda; a regra é implementada por guardas de retenção registradas pelas apps.
 - A leitura de prontuário é registrada numa trilha própria do `med_records`: a auditoria do núcleo só cobre escrita.
 - **Computador compartilhado do balcão.** Os campos de dado pessoal (nome, CPF, CNS, telefone, email, endereço) e as buscas de paciente levam `autocomplete="off"`, para o navegador não guardar no histórico de formulário o que foi digitado de um paciente e oferecer ao próximo; os números abrem o teclado numérico (`inputmode`) e os telefones são `type="tel"` (#120). Limite conhecido: as buscas de paciente são GET, e o termo digitado (nome, CPF ou telefone) vai na URL da busca; os logs do proxy devem descartar a query string dessas rotas.
+- **Anonimização vetada.** A aba Privacidade consulta as guardas de retenção antes da tentativa (`PatientService.anonymization_vetoes`) e, havendo veto, mostra o motivo no lugar do formulário; `anonymize` consulta de novo ao gravar (#134).
 - **Ações irreversíveis.** Cancelar, marcar falta, assinar, emitir, anular, estornar, fechar o caixa, revogar e remover passam por uma página de confirmação com o alvo e a consequência, com a mesma autorização da ação: quem não alcança o alvo recebe o mesmo 404 no GET e no POST (#119).
 
 ## O que o produto cobre

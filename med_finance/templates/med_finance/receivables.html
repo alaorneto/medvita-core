@@ -1,10 +1,10 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format %}{% block title %}{% translate "Contas a receber" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format skeleton_format %}{% block title %}{% translate "Contas a receber" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Relatórios" %}</p><h1>{% translate "Contas a receber" %}</h1><p class="page-description">{% blocktranslate with day=report.as_of|date:"DATE_FORMAT" %}Saldos em aberto em {{ day }}, por atraso.{% endblocktranslate %}</p></div></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Relatórios" %}</p><h1>{% translate "Contas a receber" %}</h1><p class="page-description">{% blocktranslate with day=report.as_of|moment:"date" %}Saldos em aberto em {{ day }}, por atraso.{% endblocktranslate %}</p></div></div>
 {% with section="reports" %}{% include "med_finance/_nav.html" %}{% endwith %}
-<div class="table-scroll"><table><caption class="sr-only">{% translate "Contas a receber por atraso" %}</caption>
-<thead><tr><th scope="col">{% translate "Atraso" %}</th><th scope="col" class="amount">{% translate "Contas" %}</th><th scope="col" class="amount">{% translate "Saldo" %}</th></tr></thead>
-<tbody>{% for item in report.buckets %}<tr><td>{% if item.name == "current" %}{% translate "A vencer" %}{% else %}{% blocktranslate with days=item.name %}{{ days }} dias{% endblocktranslate %}{% endif %}</td><td class="amount">{{ item.count }}</td><td class="amount">{{ item.amount|brl }}</td></tr>{% endfor %}
-<tr><td><strong>{% translate "Total" %}</strong></td><td></td><td class="amount"><strong>{{ report.total|brl }}</strong></td></tr></tbody></table></div>
+<div class="table-scroll table-stack"><table><caption class="sr-only">{% translate "Contas a receber por atraso" %}</caption>
+<thead><tr><th scope="col">{% translate "Atraso" %}</th><th scope="col" class="amount col-num">{% translate "Contas" %}</th><th scope="col" class="amount col-num">{% translate "Saldo" %}</th></tr></thead>
+<tbody>{% for item in buckets %}<tr><td data-label="{% translate "Atraso" %}">{% with label=item.bucket.name|finance_label:"aging" %}{% if item.bucket.count %}<a class="cell-primary" href="{% url 'med_finance:charges' organization_id %}?{{ item.query }}">{{ label }}<span class="sr-only"> · {% translate "ver as contas" %}</span></a>{% else %}{{ label }}{% endif %}{% endwith %}</td><td class="amount col-num" data-label="{% translate "Contas" %}">{{ item.bucket.count }}</td><td class="amount col-num" data-label="{% translate "Saldo" %}">{{ item.bucket.amount|brl }}</td></tr>{% endfor %}</tbody>
+<tfoot><tr><th scope="row" colspan="2">{% translate "Total" %}</th><td class="amount col-num" data-label="{% translate "Saldo" %}"><strong>{{ report.total|brl }}</strong></td></tr></tfoot></table></div>
 {% endblock %}

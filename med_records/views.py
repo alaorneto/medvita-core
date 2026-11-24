@@ -103,10 +103,20 @@ def _uuid(value: Any) -> UUID:
 
 
 def _patient(request: HttpRequest, patient_id: UUID) -> Any:
+    """The patient header of med_patients (#136): name, code, age, sex, status and warnings; None if unreadable."""
     try:
-        return PatientService().summary(actor=request.user, patient_id=patient_id)
+        return PatientService().header(actor=request.user, patient_id=patient_id)
     except (NotFound, Forbidden):
         return None
+
+
+def _strip_allergies(request: HttpRequest, chart_id: UUID) -> tuple[Any, ...]:
+    """The active allergies of the chart for the clinical strip (#137), severe first; the read is in the trail."""
+    try:
+        rows = _service().allergies(actor=request.user, chart_id=chart_id)
+    except (NotFound, Forbidden):
+        return ()
+    return tuple(row for row in rows if row.status == "active")
 
 
 def _rendered_panels(request: HttpRequest, organization_id: UUID, panels: Any, **target: UUID) -> list[dict[str, Any]]:
@@ -157,11 +167,17 @@ def _section_rows(section: Any) -> list[dict[str, Any]]:
         elif field.kind == "choice":
             value = str(dict(field.choices).get(value, value))
         elif field.unit:
-            value = f"{value} {field.unit}"
-        rows.append({"label": field.label, "value": value})
+            value = f"{value} {field.unit}"  # The unit never wraps away from its number.
+        # A date stays in ISO: the template shows it with |moment.
+        rows.append({"label": field.label, "value": value, "kind": field.kind})
     if section.section_type == "med_records.vitals" and body_mass_index(data):
         rows.append({"label": gettext("IMC (calculado)"), "value": body_mass_index(data)})
     return rows
+
+
+def _section_label(code: str) -> str:
+    kind = SECTION_TYPES.get(code)
+    return str(kind.label) if kind else code
 
 
 def _sections(info: Any) -> list[dict[str, Any]]:
@@ -177,13 +193,59 @@ def _sections(info: Any) -> list[dict[str, Any]]:
 # ------------------------------------------------------------------------------------ home and setup
 
 
+SEARCH_LENGTH = 100
+
+
+def _draft_rows(request: HttpRequest, organization_id: UUID, drafts: tuple[Any, ...]) -> list[dict[str, Any]]:
+    """The actor's drafts with the patient each one is about (by PatientService) and the page that resumes it."""
+    from django.urls import reverse
+
+    names = {}
+    if drafts:
+        try:
+            patients = PatientService().summaries(
+                actor=request.user, patient_ids=tuple(dict.fromkeys(item.patient_id for item in drafts))[:200]
+            )
+        except (Forbidden, InvalidInput):
+            patients = ()
+        names = {item.sysid: item for item in patients}
+    kinds = {kind.code: kind.label for kind in active_document_kinds(request.user)}
+    rows = []
+    for item in drafts:
+        if item.kind == "encounter":
+            label = ""  # The template names the kind of encounter (records_label "encounter_kind").
+            url = reverse("med_records:encounter_edit", args=(organization_id, item.sysid))
+        else:
+            label = item.title or str(kinds.get(item.subtype, item.subtype))
+            url = reverse("med_records:document_edit", args=(organization_id, item.sysid))
+        rows.append({"draft": item, "label": label, "url": url, "patient": names.get(item.patient_id)})
+    return rows
+
+
 @tenant_page()
 def home(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    """The entry of the records (#133): find a patient, resume one's own drafts.
+
+    The search goes by POST so the term (a name, a CPF) never lands in the URL, the history or a
+    server log; the page title never carries it. Who reads no clinical archive sees neither.
+    """
     from skeleton.service_api.access import AccessService
 
     archives = _service().archives(actor=request.user)
     manager = "access.manage" in AccessService().capabilities(actor=request.user)
-    return render(request, "med_records/home.html", _context(organization_id, archives=archives, manager=manager))
+    context = _context(organization_id, archives=archives, manager=manager, query="", results=None, search_error="")
+    if archives:
+        query = (request.POST.get("q") or "").strip()[:SEARCH_LENGTH] if request.method == "POST" else ""
+        if query:
+            context["query"] = query
+            try:
+                context["results"] = PatientService().search(actor=request.user, query=query, page_size=20).items
+            except Forbidden:
+                context["search_error"] = gettext("Você não tem acesso ao cadastro de pacientes.")
+            except InvalidInput as error:
+                context["search_error"] = _errors(error)
+        context["drafts"] = _draft_rows(request, organization_id, _service().my_drafts(actor=request.user))
+    return render(request, "med_records/home.html", context)
 
 
 @tenant_page()
@@ -240,18 +302,64 @@ def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUI
             url = reverse(tab.url_name, args=(organization_id, patient_id))
         except NoReverseMatch:
             continue
-        tabs.append({"label": tab.label, "url": url, "current": tab.code == "med_records.chart"})
+        tabs.append({"label": tab.label, "icon": tab.icon, "url": url, "current": tab.code == "med_records.chart"})
     chosen = request.GET.get("archive")
     archive = next((item for item in archives if str(item.sysid) == chosen), archives[0])
     charts = {
         chart.archive_id: chart for chart in _service().charts_for_patient(actor=request.user, patient_id=patient_id)
     }
     chart = charts.get(archive.sysid)
-    context = _context(organization_id, patient=patient, tabs=tabs, archives=archives, archive=archive, chart=chart)
+    context = _context(
+        organization_id,
+        patient=patient,
+        patient_header=patient,
+        header_actions=[],
+        tabs=tabs,
+        archives=archives,
+        archive=archive,
+        chart=chart,
+    )
     if chart is not None:
+        try:
+            history = _service().encounter_history(
+                actor=request.user, chart_id=chart.sysid, cursor=request.GET.get("cursor") or None, page_size=50
+            )
+        except InvalidInput:
+            raise Http404 from None
+        next_url = ""
+        if history.next_cursor:
+            query = request.GET.copy()
+            query["cursor"] = history.next_cursor
+            next_url = f"?{query.urlencode()}#encounters-heading"  # The cursor is opaque text: always encoded.
+        drafts = _service().my_drafts(actor=request.user, chart_id=chart.sysid, limit=1)
+        resume_url = ""
+        if drafts:
+            name = "med_records:encounter_edit" if drafts[0].kind == "encounter" else "med_records:document_edit"
+            resume_url = reverse(name, args=(organization_id, drafts[0].sysid))
+        if resume_url:
+            context["header_actions"].append(
+                {"label": gettext("Retomar rascunho"), "url": resume_url, "icon": "encounter"}
+            )
+        context["header_actions"].append(
+            {
+                "label": gettext("Alergias e medicamentos"),
+                "url": reverse("med_records:lists", args=(organization_id, chart.sysid)),
+                "icon": "allergy",
+            }
+        )
         context.update(
             summary=_service().chart_summary(actor=request.user, chart_id=chart.sysid),
-            encounters=_service().encounters(actor=request.user, chart_id=chart.sysid, page_size=50).items,
+            encounters=[
+                {
+                    "line": line,
+                    "header": line.header,
+                    "first_section": _section_label(line.section_types[0]) if line.section_types else "",
+                }
+                for line in history.items
+            ],
+            next_url=next_url,
+            paged=bool(request.GET.get("cursor")),
+            resume_url=resume_url,
             documents=_service().documents(actor=request.user, chart_id=chart.sysid),
             attachments=_service().attachments(actor=request.user, chart_id=chart.sysid),
             encounter_form=record_forms.NewEncounterForm(
@@ -351,10 +459,14 @@ def encounter_new(request: HttpRequest, organization_id: UUID, chart_id: UUID) -
     return redirect("med_records:encounter_edit", organization_id, info.header.sysid)
 
 
-@never_cache
+@require_POST
 @tenant_page()
 def attend(request: HttpRequest, organization_id: UUID, appointment_id: UUID) -> HttpResponse:
-    """From an appointment: open (or resume) the actor's draft encounter of that appointment."""
+    """From an appointment: open (or resume) the actor's draft encounter of that appointment.
+
+    POST only, with CSRF (#131): it creates the chart and the draft and starts the appointment, so a
+    GET (a prefetch, a crawler, a link) answers 405 and creates nothing.
+    """
     from applications.med_scheduling.service_api import SchedulingService
 
     try:
@@ -377,7 +489,9 @@ def attend(request: HttpRequest, organization_id: UUID, appointment_id: UUID) ->
 # ------------------------------------------------------------------------------------ encounters
 
 
-def _encounter_context(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> dict[str, Any]:
+def _encounter_context(
+    request: HttpRequest, organization_id: UUID, encounter_id: UUID, *, strip: bool = False
+) -> dict[str, Any]:
     try:
         info = _service().encounter(actor=request.user, encounter_id=encounter_id)
         attachments = _service().attachments(actor=request.user, encounter_id=encounter_id)
@@ -390,13 +504,14 @@ def _encounter_context(request: HttpRequest, organization_id: UUID, encounter_id
         sections=_sections(info),
         attachments=attachments,
         patient=_patient(request, info.header.patient_id),
+        strip_allergies=_strip_allergies(request, info.header.chart_id) if strip else (),
     )
 
 
 @never_cache
 @tenant_page()
 def encounter_view(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
-    context = _encounter_context(request, organization_id, encounter_id)
+    context = _encounter_context(request, organization_id, encounter_id, strip=True)
     try:
         panels = _service().encounter_panels(actor=request.user, encounter_id=encounter_id)
     except (NotFound, Forbidden):
@@ -646,7 +761,7 @@ def _editor_page(
 @tenant_page()
 def encounter_edit(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
     """The draft editor: one form for every section; each button saves what was typed, then acts."""
-    context = _encounter_context(request, organization_id, encounter_id)
+    context = _encounter_context(request, organization_id, encounter_id, strip=True)
     info = context["info"]
     if not info.writable:
         return redirect("med_records:encounter", organization_id, encounter_id)
@@ -676,7 +791,7 @@ def encounter_edit(request: HttpRequest, organization_id: UUID, encounter_id: UU
     else:
         if response is not None:
             return response
-        context = _encounter_context(request, organization_id, encounter_id)
+        context = _encounter_context(request, organization_id, encounter_id, strip=True)
         pending = tuple(card for card in cards if card.get("pending"))
         return _editor_page(request, organization_id, encounter_id, context, types, pending=pending, query=query)
     # One transaction: nothing was saved. The page keeps what was typed, with the reason.
@@ -874,6 +989,7 @@ def lists_view(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> H
             messages.error(request, _errors(error))
         except Conflict as error:
             messages.error(request, conflict_text(error))
+    allergies = _service().allergies(actor=request.user, chart_id=chart_id)
     return render(
         request,
         "med_records/lists.html",
@@ -881,7 +997,8 @@ def lists_view(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> H
             organization_id,
             chart=chart,
             patient=_patient(request, chart.patient_id),
-            allergies=_service().allergies(actor=request.user, chart_id=chart_id),
+            allergies=allergies,
+            strip_allergies=tuple(row for row in allergies if row.status == "active"),
             medications=_service().medications(actor=request.user, chart_id=chart_id),
             allergy_form=allergy_form,
             medication_form=medication_form,
@@ -1005,7 +1122,7 @@ def document_new(request: HttpRequest, organization_id: UUID, chart_id: UUID) ->
 
 
 def _document_context(
-    request: HttpRequest, organization_id: UUID, document_id: UUID, *, printing: bool = False
+    request: HttpRequest, organization_id: UUID, document_id: UUID, *, printing: bool = False, strip: bool = False
 ) -> dict[str, Any]:
     try:
         info = _service().document(actor=request.user, document_id=document_id, printing=printing)
@@ -1018,6 +1135,7 @@ def _document_context(
         header=info.header,
         kind_label=kind.label if kind else info.header.kind,
         patient=_patient(request, info.header.patient_id),
+        strip_allergies=_strip_allergies(request, info.header.chart_id) if strip else (),
         idempotency_key=uuid.uuid4().hex,
     )
 
@@ -1052,7 +1170,7 @@ def document_print(request: HttpRequest, organization_id: UUID, document_id: UUI
 @never_cache
 @tenant_page()
 def document_edit(request: HttpRequest, organization_id: UUID, document_id: UUID) -> HttpResponse:
-    context = _document_context(request, organization_id, document_id)
+    context = _document_context(request, organization_id, document_id, strip=True)
     info = context["info"]
     if not info.writable:
         return redirect("med_records:document", organization_id, document_id)
@@ -1260,7 +1378,7 @@ def _origin(entry: Any) -> str:
 @never_cache
 @tenant_page()
 def access_log_view(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> HttpResponse:
-    from skeleton.service_api.organizations import OrganizationService
+    from skeleton.service_api.identity import IdentityService
 
     try:
         chart = _service().chart(actor=request.user, chart_id=chart_id)
@@ -1269,20 +1387,29 @@ def access_log_view(request: HttpRequest, organization_id: UUID, chart_id: UUID)
         )
     except (NotFound, Forbidden, InvalidInput):
         raise Http404 from None
-    names = {
-        member.sysid: member.display_name
-        for member in OrganizationService().members(actor=request.user, page_size=100).items
-    }
+    # The names of the readers on this page, one lookup (#133): the core's |person shows a member by
+    # name and anyone else (who left, or never was a member) as "Pessoa indisponível".
+    try:
+        found = IdentityService().people(
+            actor=request.user, user_ids=tuple(dict.fromkeys(entry.actor_id for entry in page.items))
+        )
+    except (Forbidden, InvalidInput):
+        found = ()
+    people = {str(person.sysid): person.display_name for person in found}
+    next_url = ""
+    if page.next_cursor:
+        query = request.GET.copy()
+        query["cursor"] = page.next_cursor
+        next_url = f"?{query.urlencode()}"  # The cursor is opaque text: always encoded (#123).
     return render(
         request,
         "med_records/access_log.html",
         _context(
             organization_id,
             chart=chart,
-            entries=[
-                {"entry": entry, "name": names.get(entry.actor_id, ""), "origin": _origin(entry)}
-                for entry in page.items
-            ],
+            entries=[{"entry": entry, "origin": _origin(entry)} for entry in page.items],
+            people=people,
             page=page,
+            next_url=next_url,
         ),
     )

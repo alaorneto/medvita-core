@@ -59,3 +59,102 @@ for (const group of document.querySelectorAll("[data-period-lines]")) {
     if (!folded.length) button.remove();
   });
 }
+
+
+// Booking and rescheduling (#130): the submit button says the choice made ("Marcar consulta às 09:30");
+// each choice carries the words in data-submit-label, and the server writes them for a choice it already knows.
+for (const button of document.querySelectorAll("[data-slot-submit]")) {
+  const form = button.form;
+  if (!form) continue;
+  form.addEventListener("change", event => {
+    const choice = event.target;
+    if (choice.name === "slot" && choice.checked && choice.dataset.submitLabel) {
+      button.textContent = choice.dataset.submitLabel;
+    }
+  });
+}
+
+// Booking (#130): the time of a fit-in shows only while "Encaixe" is ticked; the server checks it either way.
+for (const box of document.querySelectorAll("[data-fit-in-toggle]")) {
+  const only = box.form && box.form.querySelector("[data-fit-in-only]");
+  if (!only) continue;
+  const fold = () => {
+    only.hidden = !box.checked;
+    for (const input of only.querySelectorAll("input")) input.disabled = !box.checked;
+  };
+  box.addEventListener("change", fold);
+  fold();
+}
+
+// Reception (#129): the board refreshes in place, without reloading the page. It asks the same
+// address again, takes the board of the answer and puts it where the old one was, keeping the
+// scroll and the focused link or button; it waits while someone types in a field and while the
+// tab is hidden, and says what changed in the polite live region. Without this file the page
+// stays as it is until "Atualizar", a plain link to itself.
+for (const first of document.querySelectorAll("[data-reception-board]")) {
+  const seconds = Math.max(15, Number(first.dataset.refreshSeconds) || 60);
+  const announce = document.querySelector("[data-reception-announce]");
+  let board = first;
+  let summary = board.dataset.summary || "";
+  let busy = false;
+
+  const typing = () => {
+    const active = document.activeElement;
+    return Boolean(active && active.closest('input:not([type="hidden"]), select, textarea, [contenteditable]'));
+  };
+  // A focused link is found again by its address; a button by its form's address and its place in it.
+  const placeOf = element => {
+    if (!element || !board.contains(element)) return null;
+    if (element.matches("a[href]")) return { selector: `a[href="${CSS.escape(element.getAttribute("href"))}"]`, index: 0 };
+    const form = element.closest("form[action]");
+    if (!form || !element.matches("button")) return null;
+    return {
+      selector: `form[action="${CSS.escape(form.getAttribute("action"))}"] button`,
+      index: [...form.querySelectorAll("button")].indexOf(element),
+    };
+  };
+  const refresh = async asked => {
+    if (busy || document.hidden || typing()) return;
+    busy = true;
+    try {
+      const address = window.location.pathname + window.location.search;
+      const response = await fetch(address, { credentials: "same-origin", cache: "no-store" });
+      // A session that ended answers with the login page: the board stays as it was.
+      if (!response.ok || response.redirected) return;
+      const page = new DOMParser().parseFromString(await response.text(), "text/html");
+      const fresh = page.querySelector("[data-reception-board]");
+      if (!fresh || typing()) return;
+      const place = placeOf(document.activeElement);
+      const [x, y] = [window.scrollX, window.scrollY];
+      const next = document.importNode(fresh, true);
+      board.replaceWith(next);
+      board = next;
+      window.scrollTo(x, y);
+      if (place) {
+        const again = board.querySelectorAll(place.selector)[place.index];
+        if (again) again.focus({ preventScroll: true });
+      }
+      const text = board.dataset.summary || "";
+      if (announce && text && (asked || text !== summary)) announce.textContent = text;
+      summary = text;
+      bind();
+    } catch {
+      // Offline or refused: the link "Atualizar" still reloads the page.
+    } finally {
+      busy = false;
+    }
+  };
+  const bind = () => {
+    for (const link of board.querySelectorAll("[data-reception-refresh]")) {
+      link.addEventListener("click", event => {
+        event.preventDefault();
+        refresh(true);
+      });
+    }
+  };
+  bind();
+  window.setInterval(() => refresh(false), seconds * 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refresh(false);
+  });
+}

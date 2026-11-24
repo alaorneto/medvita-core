@@ -21,13 +21,17 @@ _PLUMBING = ("applications.med_scheduling.extension", "applications.med_scheduli
 
 @dataclass(frozen=True)
 class AppointmentAction:
-    """A button on an appointment; ``url_name`` receives ``org`` and ``appointment_id``."""
+    """A button on an appointment; ``url_name`` receives ``org`` and ``appointment_id``.
+
+    ``icon`` names the concept whose icon the button shows (#144), as ``PatientSection.icon``.
+    """
 
     code: str
     label: Any
     url_name: str
     statuses: tuple[str, ...]
     order: int = 100
+    icon: str = ""
 
 
 _actions: dict[str, AppointmentAction] = {}

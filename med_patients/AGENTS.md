@@ -16,7 +16,7 @@ Cadastro do paciente como registro da organização (nunca um usuário): identif
 
 ## Serviços e pontos de extensão
 
-- Oferece `PatientService` e os registries `register_patient_section`, `register_timeline_provider`, `register_consent_purpose`, `register_retention_guard`, `register_patient_data_provider` e `register_setup_step` (`docs/extension-points.md` da raiz).
+- Oferece `PatientService` e os registries `register_patient_section`, `register_summary_panel`, `register_timeline_provider`, `register_consent_purpose`, `register_retention_guard`, `register_patient_data_provider` e `register_setup_step` (`docs/extension-points.md` da raiz).
 - Publica `patient_created`, `patient_updated`, `patient_status_changed` e `consent_changed`.
 - Consome só serviços do núcleo.
 

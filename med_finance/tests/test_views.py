@@ -9,6 +9,7 @@ from django.test import Client
 from django.urls import reverse
 
 from ..service_api import FinanceService
+from ..templatetags.med_finance_format import brl
 from .helpers import add_price, book, new_patient, prepare
 
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)", re.IGNORECASE)
@@ -61,14 +62,14 @@ def test_desk_flow_through_the_pages(ready):
     assert_safe(client.get(url(ready, "charge_new") + f"?patient={patient.sysid}"))
     created = client.post(
         url(ready, "charge_new") + f"?patient={patient.sysid}",
-        {"patient": patient.sysid, "code": "C1", "quantity": 1, "idempotency_key": "c"},
+        {"patient": patient.sysid, "rows": 1, "item-0-code": "C1", "item-0-quantity": 1, "idempotency_key": "c"},
     )
     assert created.status_code == 302
     charge_id = created["Location"].rstrip("/").split("/")[-1]
     with ready.as_user(ready.a.reception) as actor:
         charge = FinanceService().charge(actor=actor, charge_id=charge_id).charge
     page = assert_safe(client.get(url(ready, "charge", charge_id)))
-    assert "R$ 250,00" in page
+    assert brl(25000) in page  # #122: a non-breaking space after "R$".
     for method, amount, key in (("cash", "100,00", "p1"), ("pix", "150,00", "p2")):
         with ready.as_user(ready.a.reception) as actor:
             charge = FinanceService().charge(actor=actor, charge_id=charge_id).charge
@@ -82,7 +83,7 @@ def test_desk_flow_through_the_pages(ready):
                 "idempotency_key": key,
             },
         )
-        assert response.status_code == 302
+        assert response.status_code == 302 and "/receipts/" in response["Location"]  # #132: straight to the receipt.
     with ready.as_user(ready.a.reception) as actor:
         charge = FinanceService().charge(actor=actor, charge_id=charge_id).charge
         receipts = FinanceService().receipts(actor=actor, charge_id=charge_id).items
@@ -102,15 +103,18 @@ def test_desk_flow_through_the_pages(ready):
     values = {"counted_amount": "140,00", "note": "", "revision": session.revision}
     # #119: the first POST shows expected, counted and difference; nothing is closed yet.
     asked = assert_safe(client.post(url(ready, "session_close", session.sysid), values))
-    assert "Esperado em dinheiro: R$ 150,00" in asked or "Esperado em dinheiro: R$ 150,00" in asked
+    assert f"Esperado em dinheiro: {brl(15000)}" in asked
     assert "Faltam" in asked and 'name="confirmed"' in asked
     with ready.as_user(ready.a.reception) as actor:
         assert FinanceService().current_session(actor=actor) is not None
     closed = client.post(url(ready, "session_close", session.sysid), {**values, "confirmed": "1"})
     assert closed.status_code == 302
     report = assert_safe(client.get(closed["Location"]))
-    assert "R$ 150,00" in report and "-R$ 10,00" in report
+    assert brl(15000) in report and brl(-1000) in report
     assert_safe(client.get(url(ready, "charges")))
+    # #123: the filter lists every status of the model (draft too) and offers to clear an applied filter.
+    listing = assert_safe(client.get(url(ready, "charges") + "?status=draft"))
+    assert '<option value="draft" selected>' in listing and 'href="?"' in listing
     assert_safe(client.get(url(ready, "prices")))
 
 
@@ -120,10 +124,16 @@ def test_collect_and_patient_tab(ready):
     client = client_for(ready.a.reception)
     page = client.get(reverse("med_scheduling:appointment", args=(ready.org_a.pk, appointment.sysid)))
     assert url(ready, "collect", appointment.sysid) in page.content.decode()
-    response = client.get(url(ready, "collect", appointment.sysid))
+    # #131: "Receber" creates the charge by POST only; a GET answers 405 and creates nothing.
+    assert client.get(url(ready, "collect", appointment.sysid)).status_code == 405
+    with ready.as_user(ready.a.reception) as actor:
+        assert not FinanceService().charges_for_origin(
+            actor=actor, origin_app="med_scheduling", origin_key=str(appointment.sysid)
+        )
+    response = client.post(url(ready, "collect", appointment.sysid))
     assert response.status_code == 302 and "/charges/" in response["Location"]
-    assert client.get(url(ready, "collect", appointment.sysid))["Location"] == response["Location"]
-    assert "R$ 250,00" in assert_safe(client.get(url(ready, "patient_section", patient.sysid)))
+    assert client.post(url(ready, "collect", appointment.sysid))["Location"] == response["Location"]
+    assert brl(25000) in assert_safe(client.get(url(ready, "patient_section", patient.sysid)))
 
 
 def test_who_sees_what(ready):

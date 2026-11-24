@@ -1,7 +1,7 @@
-{% load i18n %}<nav class="link-tabs" aria-label="{% translate "Financeiro" %}">
-<a href="{% url 'med_finance:desk' organization_id %}"{% if section == "desk" %} aria-current="page"{% endif %}>{% translate "Caixa" %}</a>
-<a href="{% url 'med_finance:charges' organization_id %}"{% if section == "charges" %} aria-current="page"{% endif %}>{% translate "Contas" %}</a>
-<a href="{% url 'med_finance:charge_new' organization_id %}"{% if section == "new" %} aria-current="page"{% endif %}>{% translate "Nova conta" %}</a>
-<a href="{% url 'med_finance:prices' organization_id %}"{% if section == "prices" %} aria-current="page"{% endif %}>{% translate "Preços" %}</a>
-<a href="{% url 'med_finance:daily' organization_id %}"{% if section == "reports" %} aria-current="page"{% endif %}>{% translate "Relatórios" %}</a>
+{% load i18n med_icons %}<nav class="link-tabs" aria-label="{% translate "Financeiro" %}">
+<a href="{% url 'med_finance:desk' organization_id %}"{% if section == "desk" %} aria-current="page"{% endif %}>{% med_icon "cash_desk" "size-4" %}{% translate "Caixa" %}</a>
+<a href="{% url 'med_finance:charges' organization_id %}"{% if section == "charges" %} aria-current="page"{% endif %}>{% med_icon "charge" "size-4" %}{% translate "Contas" %}</a>
+<a href="{% url 'med_finance:charge_new' organization_id %}"{% if section == "new" %} aria-current="page"{% endif %}>{% med_action_icon "plus" "size-4" %}{% translate "Nova conta" %}</a>
+<a href="{% url 'med_finance:prices' organization_id %}"{% if section == "prices" %} aria-current="page"{% endif %}>{% med_icon "prices" "size-4" %}{% translate "Preços" %}</a>
+<a href="{% url 'med_finance:daily' organization_id %}"{% if section == "reports" %} aria-current="page"{% endif %}>{% med_icon "daily_report" "size-4" %}{% translate "Relatórios" %}</a>
 </nav>

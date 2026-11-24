@@ -1,0 +1,31 @@
+{% extends "med_scheduling/schedule.html" %}{% load i18n skeleton_format med_scheduling_labels med_icons %}
+{% block tab %}
+<h2 class="section-heading">{% translate "Grade semanal" %}</h2>
+<p class="helptext mb-4">{% translate "Os períodos de atendimento de cada dia da semana, no horário do consultório. Cada período diz como atende, com hora marcada ou por ordem de chegada, e os tipos de atendimento que recebe." %}</p>
+<div class="week-grid mb-6">{% for day in week %}
+<section class="week-day" aria-labelledby="weekday-{{ day.number }}"><h3 id="weekday-{{ day.number }}">{{ day.label }}</h3>
+{% for item in day.periods %}<div class="period-card{% if item.ended %} period-ended{% endif %}">
+<p class="period-hours">{{ item.start }}–{{ item.end }}</p>
+<p>{{ item.rule.mode|scheduling_label:"mode" }}{% if item.walk_in %} · {% if item.rule.capacity %}{% blocktranslate count counter=item.rule.capacity %}{{ counter }} vaga{% plural %}{{ counter }} vagas{% endblocktranslate %}{% else %}{% translate "sem limite de vagas" %}{% endif %}{% endif %}</p>
+<p>{% for kind in item.kinds %}{{ kind.name }}{% if not kind.taken %} {{ "warning"|scheduling_marker|marker:_("a agenda não atende mais") }}{% endif %}{% if not forloop.last %}, {% endif %}{% empty %}{% translate "Todos os tipos da agenda" %}{% endfor %}</p>
+{% if item.starts %}<p class="helptext">{% blocktranslate with day=item.starts|moment:"date" %}A partir de {{ day }}{% endblocktranslate %}</p>{% endif %}
+{% if item.until %}<p class="helptext">{% if item.ended %}{% blocktranslate with day=item.until|moment:"date" %}Encerrado em {{ day }}{% endblocktranslate %}{% else %}{% blocktranslate with day=item.until|moment:"date" %}Até {{ day }}{% endblocktranslate %}{% endif %}</p>{% endif %}
+{% if schedule.writable %}<div class="period-actions"><a class="btn btn-secondary" href="{% url 'med_scheduling:period-edit' organization_id schedule.sysid item.rule.sysid %}">{% med_action_icon "pencil" "size-4" %}{% translate "Editar" %}<span class="sr-only"> {% blocktranslate with day=day.label start=item.start end=item.end %}o período de {{ day }}, {{ start }}–{{ end }}{% endblocktranslate %}</span></a>
+<a class="btn btn-danger-outline btn-sm" href="{% url 'med_scheduling:period-remove' organization_id schedule.sysid item.rule.sysid %}">{% med_action_icon "trash" "size-4" %}{% translate "Remover" %}<span class="sr-only"> {% blocktranslate with day=day.label start=item.start end=item.end %}o período de {{ day }}, {{ start }}–{{ end }}{% endblocktranslate %}</span></a></div>{% endif %}
+</div>{% empty %}<p class="helptext">{% translate "Sem atendimento" %}</p>{% endfor %}
+</section>{% endfor %}</div>
+{% if schedule.writable %}
+<section class="card max-w-3xl" aria-labelledby="periods-heading"><h2 id="periods-heading">{% translate "Adicionar períodos" %}</h2>
+<p class="helptext">{% translate "Marque os dias da semana, informe os horários e diga como o período atende: cada horário vira um período em cada dia marcado. Os períodos que já existem continuam como estão." %}</p>
+<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="form" value="periods"><input type="hidden" name="revision" value="{{ schedule.revision }}">
+{% include "skeleton/web/components/form-errors.html" with form=periods_form %}
+{% include "med_scheduling/_boxes.html" with field=periods_form.weekdays %}
+<fieldset class="mb-4" data-period-lines data-add-label="{% translate "Adicionar outro horário" %}"><legend>{% translate "Horários" %}</legend>
+{% for line in periods_form.lines %}<div class="period-line" data-period-line{% if line.empty %} data-empty{% endif %}>{% include "skeleton/web/components/form-field.html" with field=line.start hide_marks=True %}{% include "skeleton/web/components/form-field.html" with field=line.end hide_marks=True %}</div>{% endfor %}
+<p class="helptext">{% translate "O primeiro horário é obrigatório; os outros são para o dia que tem mais de um período, como manhã e tarde. Fim às 00:00 vale o fim do dia." %}</p></fieldset>
+<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=periods_form.mode hide_marks=True %}<div data-walk-in-only>{% include "skeleton/web/components/form-field.html" with field=periods_form.capacity %}</div></div>
+{% if periods_form.kinds.field.choices %}{% include "med_scheduling/_boxes.html" with field=periods_form.kinds %}{% endif %}
+<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=periods_form.valid_from %}{% include "skeleton/web/components/form-field.html" with field=periods_form.valid_until %}</div>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_action_icon "plus" "size-4" %}{% translate "Adicionar à grade" %}</button></div></form></section>
+{% endif %}
+{% endblock %}

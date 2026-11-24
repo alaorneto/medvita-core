@@ -72,12 +72,12 @@ The panels other apps add to the charge page, in order; only active apps.
 - **Erros:** NotFound para conta inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
-#### `charges(*, actor, patient_id=None, status=None, desk_id=None, start=None, end=None, cursor=None, page_size=50) -> Page[ChargeInfo]`
+#### `charges(*, actor, patient_id=None, status=None, desk_id=None, start=None, end=None, outstanding=False, cursor=None, page_size=50) -> Page[ChargeInfo]`
 
-Charges of the desks the actor reads, newest first, filtered by patient, status, desk or due date.
+Charges of the desks the actor reads, newest first, by patient, status, desk, due date or balance to receive.
 
 - **Autorização:** leitura de cada caixa.
-- **Erros:** InvalidInput para situação, datas, cursor ou tamanho inválidos.
+- **Erros:** InvalidInput para situação, datas, ``outstanding``, cursor ou tamanho inválidos.
 - **Efeitos:** nenhum.
 
 #### `charges_for_origin(*, actor, origin_app, origin_key) -> tuple[ChargeInfo, ...]`
@@ -316,11 +316,15 @@ Void a receipt: it stays intact, marked as voided; the number is never reused.
 
 ### `AgingRow`
 
+One bucket of the receivables; ``due_from`` and ``due_to`` (both included, ``None`` = open) are its due dates.
+
 | Campo | Tipo |
 |---|---|
 | `name` | `str` |
 | `amount` | `int` |
 | `count` | `int` |
+| `due_from` | `date | None` |
+| `due_to` | `date | None` |
 
 ### `ChargeDetail`
 

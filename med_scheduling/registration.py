@@ -223,6 +223,7 @@ APPOINTMENT_EVENTS = (
     "no_show",
     "cancelled",
     "modality_changed",
+    "arrival_undone",
 )
 APPOINTMENT_PAYLOAD = (
     "code",

@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -96,8 +96,15 @@ class ConsentPurpose:
 class PatientSection:
     """A tab or shortcut on the patient page; ``url_name`` receives ``org`` and ``patient_id``.
 
+    The tabs go by use (#136): Resumo is 0 and the app's own tabs are 50 (Cadastro) to 55
+    (Privacidade); an ``order`` below 50 puts the section before Cadastro (the suite uses 20, 30
+    and 40), one above 55 after Privacidade.
+
     ``visible(actor=..., patient_id=...)``, when given, hides the tab from who would only find an
     empty page (a clinical tab for the reception, for example); a failure hides it too.
+
+    ``icon`` names the concept whose icon the tab shows (#144): one of the suite
+    (``med_icons.MED_CONCEPT_ICONS``) or of the core (``"privacy"|concept_icon``); empty, no icon.
     """
 
     code: str
@@ -105,6 +112,37 @@ class PatientSection:
     url_name: str
     order: int = 100
     visible: Callable[..., bool] | None = None
+    icon: str = ""
+
+
+@dataclass(frozen=True)
+class SummaryPanel:
+    """A panel of the "Resumo" tab, the first one of the patient page (#136).
+
+    ``template`` is rendered in the page with ``panel``, ``organization_id``, ``patient_id`` and what
+    ``context(actor=..., patient_id=...)`` returns (a mapping of names to values, read by the
+    app's own service with the actor's access). ``visible(actor=..., patient_id=...)``, when given,
+    hides the panel from who would read nothing in it (the allergies from the reception, for
+    example); a failure of either, or of the template, hides the panel too.
+    """
+
+    code: str
+    label: Any  # Lazy gettext text.
+    template: str
+    order: int = 100
+    visible: Callable[..., bool] | None = None
+    context: Callable[..., Mapping[str, Any]] | None = None
+    icon: str = ""  # The concept whose icon the panel title shows (#144), as PatientSection.icon.
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.template, str) or not self.template.endswith(".html"):
+            raise ValueError(f"SummaryPanel {self.code!r}: template is the name of an .html template.")
+        if type(self.order) is not int:
+            raise ValueError(f"SummaryPanel {self.code!r}: order is an integer.")
+        for name in ("visible", "context"):
+            value = getattr(self, name)
+            if value is not None and not callable(value):
+                raise ValueError(f"SummaryPanel {self.code!r}: {name} is a callable.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +175,7 @@ TIMELINE_PROVIDERS = Registry("timeline provider")
 DATA_PROVIDERS = Registry("patient data provider")
 SETUP_STEPS = Registry("setup step")
 PORTAL_PATIENTS = Registry("portal patients resolver")
+SUMMARY_PANELS = Registry("summary panel")
 REGISTRIES = [
     CONSENT_PURPOSES,
     RETENTION_GUARDS,
@@ -145,6 +184,7 @@ REGISTRIES = [
     DATA_PROVIDERS,
     SETUP_STEPS,
     PORTAL_PATIENTS,
+    SUMMARY_PANELS,
 ]
 
 
@@ -171,6 +211,13 @@ def register_patient_section(section: PatientSection) -> PatientSection:
     if not isinstance(section, PatientSection):
         raise TypeError("register_patient_section takes a PatientSection.")
     return PATIENT_SECTIONS.add(section.code, section, caller=_caller_label())
+
+
+def register_summary_panel(panel: SummaryPanel) -> SummaryPanel:
+    """Add a panel to the "Resumo" tab of the patient page."""
+    if not isinstance(panel, SummaryPanel):
+        raise TypeError("register_summary_panel takes a SummaryPanel.")
+    return SUMMARY_PANELS.add(panel.code, panel, caller=_caller_label())
 
 
 def register_timeline_provider(code: str, provider: Callable[..., tuple[TimelineEntry, ...]]) -> Callable[..., Any]:
@@ -222,6 +269,40 @@ def call_safely(code: str, function: Callable[..., Any], **arguments: Any) -> tu
     except Exception as exc:  # noqa: BLE001 - one app's failure never breaks the patient page
         logger.warning("med_patients.contribution_failed", extra={"contribution": code, "error": type(exc).__name__})
         return False, None
+
+
+def _app_enabled(actor: Any, code: str) -> bool:
+    from skeleton.service_api.applications import ApplicationService
+
+    return ApplicationService().is_enabled(actor=actor, app_id=code.split(".", 1)[0])
+
+
+# Names the summary page gives every panel template: a panel context never overrides them.
+RESERVED_PANEL_NAMES = frozenset({"panel", "organization_id", "patient_id", "request", "csrf_token"})
+
+
+def summary_panel_context(*, actor: Any, patient_id: Any, code: str) -> dict[str, Any] | None:
+    """What the panel ``code`` of the "Resumo" tab shows for the actor and the patient (#136).
+
+    Call it only for a panel ``PatientService().summary_panels`` returned (it authorized the
+    patient and applied ``visible``). The panel's ``context`` reads with its own app's service and
+    the actor's access. ``None`` when the panel is gone, its app is not active, or its ``context`` fails or is not a
+    mapping of names (logged by code and error type only): the page then leaves the panel out.
+    """
+    panel = dict(SUMMARY_PANELS.all()).get(code)
+    if panel is None or not _app_enabled(actor, code):
+        return None
+    if panel.context is None:
+        return {}
+    ok, values = call_safely(code, panel.context, actor=actor, patient_id=patient_id)
+    if not ok:
+        return None
+    if not isinstance(values, Mapping) or not all(
+        isinstance(name, str) and name.isidentifier() and name not in RESERVED_PANEL_NAMES for name in values
+    ):
+        logger.warning("med_patients.contribution_failed", extra={"contribution": code, "error": "context"})
+        return None
+    return dict(values)
 
 
 def retention_vetoes(*, actor: Any, patient: Any) -> list[str]:

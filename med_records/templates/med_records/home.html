@@ -1,6 +1,27 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Prontuário" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_records_labels med_icons %}{% block title %}{% translate "Prontuário" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_records/med_records.css' %}">{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Prontuário" %}</p><h1>{% translate "Arquivos clínicos" %}</h1><p class="page-description">{% translate "Quem lê um arquivo clínico lê os prontuários dele. O prontuário de cada paciente fica na página do paciente." %}</p></div>
-<nav class="toolbar" aria-label="{% translate "Ações" %}">{% if archives %}<a class="btn btn-secondary" href="{% url 'med_records:templates' organization_id %}">{% translate "Modelos" %}</a>{% endif %}{% if manager and not archives %}<a class="btn btn-primary" href="{% url 'med_records:setup' organization_id %}">{% translate "Configurar o prontuário" %}</a>{% endif %}</nav></div>
-<ul>{% for item in archives %}<li>{{ item.name }}{% if item.is_default %} <span class="badge badge-neutral">{% translate "Padrão" %}</span>{% endif %}</li>{% empty %}<li>{% translate "Nenhum arquivo clínico que você possa ler." %}</li>{% endfor %}</ul>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Prontuário" %}</p><h1>{% translate "Prontuário" %}</h1><p class="page-description">{% if archives %}{% translate "Ache o paciente para abrir o prontuário dele, ou retome um rascunho seu." %}{% else %}{% translate "Quem lê um arquivo clínico lê os prontuários dele." %}{% endif %}</p></div>
+<nav class="toolbar" aria-label="{% translate "Ações" %}">{% if archives %}<a class="btn btn-secondary" href="{% url 'med_records:templates' organization_id %}">{% med_icon "record_template" "size-4" %}{% translate "Modelos" %}</a>{% endif %}{% if manager and not archives %}<a class="btn btn-primary" href="{% url 'med_records:setup' organization_id %}">{% med_icon "configuration" "size-4" %}{% translate "Configurar o prontuário" %}</a>{% endif %}</nav></div>
+{% if archives %}
+{# POST, not GET (#133): the term (a name, a CPF) stays out of the URL, the history and the server logs. #}
+<form method="post" class="filter-bar mb-4" role="search" aria-label="{% translate "Buscar paciente" %}">{% csrf_token %}<div class="field"><label for="q">{% translate "Paciente (nome, CPF, código ou telefone)" %}</label><input id="q" name="q" type="search" value="{{ query }}" maxlength="100" autocomplete="off" spellcheck="false"></div><div class="filter-actions"><button type="submit" class="btn btn-primary">{% med_action_icon "search" "size-4" %}{% translate "Buscar" %}</button></div></form>
+{% if search_error %}{% include "skeleton/web/components/error-summary.html" with message=search_error title=_("Não foi possível buscar") extra_class="mb-4" %}
+{% elif results is not None %}
+<h2 class="section-heading" id="results-heading">{% translate "Pacientes encontrados" %}</h2>
+<div class="table-scroll table-stack mb-6"><table aria-labelledby="results-heading">
+<thead><tr><th scope="col">{% translate "Paciente" %}</th><th scope="col" class="col-date">{% translate "Nascimento" %}</th></tr></thead>
+<tbody>{% for item in results %}<tr><td data-label="{% translate "Paciente" %}"><a class="cell-primary" href="{% url 'med_records:patient_section' organization_id item.sysid %}">{{ item.display_name }}</a><span class="cell-secondary" translate="no">{{ item.code }}</span></td><td class="col-date" data-label="{% translate "Nascimento" %}">{% if item.birth_date %}{{ item.birth_date|moment:"date" }}{% else %}—{% endif %}</td></tr>
+{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=2 message=_("Nenhum paciente encontrado.") hint=_("Confira a grafia ou busque pelo CPF ou pelo código.") %}{% endfor %}</tbody></table></div>
+{% if results|length == 20 %}<p class="helptext mb-6">{% translate "Mostrando os 20 primeiros. Refine a busca para achar outro." %}</p>{% endif %}
+{% endif %}
+<h2 class="section-heading" id="drafts-heading">{% translate "Meus rascunhos" %}</h2>
+<div class="table-scroll table-stack mb-6"><table aria-labelledby="drafts-heading">
+<thead><tr><th scope="col">{% translate "Rascunho" %}</th><th scope="col">{% translate "Paciente" %}</th><th scope="col" class="col-date">{% translate "Última alteração" %}</th></tr></thead>
+<tbody>{% for row in drafts %}<tr><td data-label="{% translate "Rascunho" %}"><a class="cell-primary" href="{{ row.url }}">{% if row.draft.kind == "encounter" %}{{ row.draft.subtype|records_label:"encounter_kind" }}{% else %}{{ row.label }}{% endif %}</a><span class="cell-secondary" translate="no">{{ row.draft.code }}</span></td><td data-label="{% translate "Paciente" %}">{% if row.patient %}<a href="{% url 'med_records:patient_section' organization_id row.patient.sysid %}">{{ row.patient.display_name }}</a>{% else %}<span class="text-body-subtle">{% translate "Paciente não disponível" %}</span>{% endif %}</td><td class="col-date" data-label="{% translate "Última alteração" %}">{{ row.draft.updated_at|moment }}</td></tr>
+{% empty %}{% include "skeleton/web/components/empty-row.html" with colspan=3 message=_("Nenhum rascunho seu.") hint=_("Atendimentos e documentos que você começar e não assinar aparecem aqui.") %}{% endfor %}</tbody></table></div>
+<h2 class="section-heading" id="archives-heading">{% translate "Arquivos clínicos que você lê" %}</h2>
+<ul class="item-list" aria-labelledby="archives-heading">{% for item in archives %}<li><span>{{ item.name }}{% if item.is_default %} {{ "default"|marker }}{% endif %}</span></li>{% endfor %}</ul>
+{% elif manager %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum arquivo clínico que você possa ler.") hint=_("Configure o prontuário para a clínica começar a registrar atendimentos.") %}
+{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum arquivo clínico que você possa ler.") hint=_("Peça a quem administra a clínica acesso a um arquivo clínico.") %}{% endif %}
 {% endblock %}

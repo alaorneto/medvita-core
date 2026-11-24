@@ -1,0 +1,20 @@
+{% extends "med_scheduling/schedule.html" %}{% load i18n skeleton_format med_scheduling_labels %}
+{% block tab %}
+<h2 class="section-heading">{% translate "Tipos atendidos nesta agenda" %}</h2>
+{% if every_kind %}<p class="helptext">{% translate "Esta agenda atende todos os tipos de atendimento ativos do consultório." %}</p>{% endif %}
+{% if taken %}<ul class="mb-6">{% for item in taken %}<li>{{ item.kind.name }} · {{ item.kind.payment_kind|scheduling_label:"payment_kind" }} · {% blocktranslate with minutes=item.minutes %}{{ minutes }} min{% endblocktranslate %}{% if item.taken.own_duration %} · <span class="text-body-subtle">{% translate "Duração desta agenda" %}</span>{% endif %}{% if not item.taken.allow_walk_in %} {{ "neutral"|scheduling_marker|marker:_("só com hora marcada") }}{% elif not item.taken.allow_booked %} {{ "neutral"|scheduling_marker|marker:_("só por ordem de chegada") }}{% endif %}</li>{% endfor %}</ul>{% else %}{% url 'med_scheduling:settings' organization_id as settings_url %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum tipo de atendimento ativo.") action_url=settings_url action_label=_("Cadastrar em Configuração") class="mb-6" %}{% endif %}
+{% if schedule.writable %}
+<section class="card max-w-3xl" aria-labelledby="types-heading"><h2 id="types-heading">{% translate "Escolher os tipos desta agenda" %}</h2>
+<p class="helptext">{% translate "Ao marcar uma consulta, só os tipos que a agenda atende aparecem. A duração nesta agenda é opcional: em branco, vale a duração do tipo. Cada tipo pode ser atendido com hora marcada, por ordem de chegada ou dos dois modos." %}</p>
+{% if types_form.kinds %}
+<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="form" value="types"><input type="hidden" name="revision" value="{{ schedule.revision }}">
+{% include "skeleton/web/components/form-errors.html" with form=types_form %}
+<fieldset class="mb-4"><legend>{{ types_form.scope.label }}</legend>{% for radio in types_form.scope %}<div class="form-field form-field-check">{{ radio.tag }}<label for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label></div>{% endfor %}{{ types_form.scope.errors }}</fieldset>
+{# table-scroll only: inline edit of each type (checkboxes and a duration field per row), compared row by row #}
+<div class="table-scroll mb-4"><table><caption class="sr-only">{% translate "Tipos de atendimento desta agenda" %}</caption>
+<thead><tr><th scope="col">{% translate "Atende" %}</th><th scope="col">{% translate "Tipo de atendimento" %}</th><th scope="col">{% translate "Forma de pagamento" %}</th><th scope="col" class="col-num">{% translate "Duração do tipo" %}</th><th scope="col">{% translate "Duração nesta agenda (minutos)" %}</th><th scope="col">{% translate "Hora marcada" %}</th><th scope="col">{% translate "Ordem de chegada" %}</th></tr></thead>
+<tbody>{% for row in types_form.rows %}<tr><td>{{ row.on }}<label class="sr-only" for="{{ row.on.id_for_label }}">{{ row.on.label }}</label></td><td>{{ row.kind.name }}</td><td>{{ row.kind.payment_kind|scheduling_label:"payment_kind" }}</td><td class="col-num">{% blocktranslate with minutes=row.kind.duration_minutes %}{{ minutes }} min{% endblocktranslate %}</td><td><label class="sr-only" for="{{ row.minutes.id_for_label }}">{{ row.minutes.label }}</label>{{ row.minutes }}{{ row.minutes.errors }}</td><td>{{ row.booked }}<label class="sr-only" for="{{ row.booked.id_for_label }}">{{ row.booked.label }}</label>{{ row.booked.errors }}</td><td>{{ row.walk_in }}<label class="sr-only" for="{{ row.walk_in.id_for_label }}">{{ row.walk_in.label }}</label></td></tr>{% endfor %}</tbody></table></div>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Salvar tipos" %}</button></div></form>
+{% else %}<p class="mt-3">{% translate "O consultório ainda não tem tipos de atendimento ativos." %} <a href="{% url 'med_scheduling:settings' organization_id %}">{% translate "Cadastrar em Configuração" %}</a></p>{% endif %}</section>
+{% endif %}
+{% endblock %}
