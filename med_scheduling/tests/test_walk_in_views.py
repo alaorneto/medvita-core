@@ -129,7 +129,8 @@ def test_the_grid_editor_takes_the_mode_and_the_capacity_of_a_period(ready, subt
         html = response.content.decode()
         assert response.status_code == 400 and "A agenda não atende por ordem de chegada: Consulta." in html
         assert 'href="#id_periods-kinds_0"' in html
-        assert "só com hora marcada" in assert_safe(client.get(page))
+        types = url(ready, "schedule-types", ready.schedule.sysid)  # The sub-tab "Tipos" (#138).
+        assert "só com hora marcada" in assert_safe(client.get(types))
         take(ready)
     assert modes() == saved
     with subtests.test("a period changes its mode on its own page and keeps its row"):
@@ -159,7 +160,7 @@ def test_the_grid_editor_takes_the_mode_and_the_capacity_of_a_period(ready, subt
 def test_the_kinds_of_a_schedule_say_how_they_are_taken(ready, subtests):
     insured = add_kind(ready)
     client = client_for(ready.a.reception)
-    page = url(ready, "schedule", ready.schedule.sysid)
+    page = url(ready, "schedule-types", ready.schedule.sysid)  # The sub-tab "Tipos" (#138).
 
     def name(prefix, kind):
         return f"types-{prefix}_{kind.sysid.hex}"

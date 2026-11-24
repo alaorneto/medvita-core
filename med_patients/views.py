@@ -7,6 +7,7 @@ readable message. Validation errors are put on the form fields; they never echo 
 
 from __future__ import annotations
 
+import logging
 import posixpath
 import uuid
 from datetime import date
@@ -19,7 +20,6 @@ from django.db import transaction
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import NoReverseMatch, reverse
-from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils.translation import gettext
 from django.views.decorators.http import require_POST
@@ -43,8 +43,10 @@ from .service_api import (
     PatientInput,
     PatientService,
     PatientSummary,
+    summary_panel_context,
 )
 
+logger = logging.getLogger(__name__)
 PAGE_SIZE = 25
 INPUT_FIELDS = tuple(PatientInput.__dataclass_fields__)
 
@@ -112,13 +114,6 @@ def _key(request: HttpRequest) -> str:
     return (request.POST.get("idempotency_key") or "")[:150] or uuid.uuid4().hex
 
 
-def _age(born: date | None) -> int | None:
-    if born is None:
-        return None
-    today = timezone.localdate()
-    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
-
-
 def _bad_request(request: HttpRequest, organization_id: UUID, detail: str) -> HttpResponse:
     return render(
         request, "med_patients/bad_request.html", {"organization_id": organization_id, "detail": detail}, status=400
@@ -139,16 +134,30 @@ def _tabs(request: HttpRequest, organization_id: UUID, patient: Any, active: str
             url = reverse(tab.url_name, args=(organization_id, patient.sysid))
         except NoReverseMatch:
             continue
-        tabs.append({"code": tab.code, "label": tab.label, "url": url, "current": tab.code == active})
+        tabs.append({"code": tab.code, "label": tab.label, "icon": tab.icon, "url": url, "current": tab.code == active})
     return tabs
 
 
 def patient_context(request: HttpRequest, organization_id: UUID, patient: Any, active: str) -> dict[str, Any]:
-    """Header and tabs of a patient page; other apps' sections render their tab with it too."""
+    """Header and tabs of a patient page (``med_patients/_patient_header.html``, the same in every app)."""
+    try:
+        header = _service().header(actor=request.user, patient_id=patient.sysid)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    actions = []
+    if header.writable and not header.anonymized:
+        actions.append(
+            {
+                "label": gettext("Alterar cadastro"),
+                "url": reverse("med_patients:edit", args=(organization_id, header.sysid)),
+                "icon": "patient_registration",
+            }
+        )
     return {
         "organization_id": organization_id,
         "patient": patient,
-        "age": _age(patient.birth_date),
+        "patient_header": header,
+        "header_actions": actions,
         "tabs": _tabs(request, organization_id, patient, active),
     }
 
@@ -278,9 +287,42 @@ def patient_create(request: HttpRequest, organization_id: UUID) -> HttpResponse:
 
 
 @tenant_page()
+def patient_summary(request: HttpRequest, organization_id: UUID, patient_id: UUID) -> HttpResponse:
+    """The "Resumo" tab, where the patient opens (#136): the panels of the active apps the actor sees."""
+    from django.template.loader import render_to_string
+
+    try:
+        summary = _service().summary(actor=request.user, patient_id=patient_id)
+        panels = _service().summary_panels(actor=request.user, patient_id=patient_id)
+    except (NotFound, Forbidden, InvalidInput):
+        raise Http404 from None
+    shown = []
+    for panel in panels:
+        found = summary_panel_context(actor=request.user, patient_id=summary.sysid, code=panel.code)
+        if found is None:
+            continue
+        values = {
+            **found,
+            "panel": panel,
+            "organization_id": organization_id,
+            "patient_id": summary.sysid,
+        }
+        try:
+            html = render_to_string(panel.template, values, request=request)
+        except Exception as exc:  # noqa: BLE001 - one app's panel never breaks the patient page
+            logger.warning("med_patients.panel_failed", extra={"contribution": panel.code, "error": type(exc).__name__})
+            continue
+        shown.append({"code": panel.code, "label": panel.label, "icon": panel.icon, "html": html})
+    context = patient_context(request, organization_id, summary, "summary")
+    context["panels"] = shown
+    return render(request, "med_patients/summary.html", context)
+
+
+@tenant_page()
 def patient_detail(request: HttpRequest, organization_id: UUID, patient_id: UUID) -> HttpResponse:
+    """The "Cadastro" tab: the registration data and, behind a disclosure, the status change."""
     patient = _patient_or_404(request, patient_id)
-    context = patient_context(request, organization_id, patient, "detail")
+    context = patient_context(request, organization_id, patient, "registration")
     context["status_form"] = patient_forms.StatusForm(
         initial={"status": patient.status, "deceased_on": patient.deceased_on}
     )
@@ -316,7 +358,7 @@ def patient_edit(request: HttpRequest, organization_id: UUID, patient_id: UUID) 
                 form.add_error(None, conflict_text(error))
             else:
                 messages.success(request, gettext("Cadastro atualizado."))
-                return redirect("med_patients:detail", organization_id, patient_id)
+                return redirect("med_patients:registration", organization_id, patient_id)
     return render(
         request,
         "med_patients/form.html",
@@ -331,10 +373,10 @@ def patient_status(request: HttpRequest, organization_id: UUID, patient_id: UUID
     form = patient_forms.StatusForm(request.POST)
     if not form.is_valid():
         messages.error(request, gettext("Escolha uma situação válida."))
-        return redirect("med_patients:detail", organization_id, patient_id)
+        return redirect("med_patients:registration", organization_id, patient_id)
     if form.cleaned_data["status"] == "deceased" and not form.cleaned_data["deceased_on"]:
         messages.error(request, gettext("Informe a data do óbito."))
-        return redirect("med_patients:detail", organization_id, patient_id)
+        return redirect("med_patients:registration", organization_id, patient_id)
     if form.cleaned_data["status"] == "deceased" and request.POST.get("confirmed") != "1":
         from django.urls import reverse
 
@@ -349,7 +391,7 @@ def patient_status(request: HttpRequest, organization_id: UUID, patient_id: UUID
             )
             % {"when": f"{when:%d/%m/%Y}"},
             submit_label=gettext("Registrar o óbito"),
-            cancel_url=reverse("med_patients:detail", args=(organization_id, patient_id)),
+            cancel_url=reverse("med_patients:registration", args=(organization_id, patient_id)),
             hidden={
                 "confirmed": "1",
                 "status": "deceased",
@@ -375,7 +417,7 @@ def patient_status(request: HttpRequest, organization_id: UUID, patient_id: UUID
         messages.error(request, conflict_text(error))
     else:
         messages.success(request, gettext("Situação atualizada."))
-    return redirect("med_patients:detail", organization_id, patient_id)
+    return redirect("med_patients:registration", organization_id, patient_id)
 
 
 def _child_page(

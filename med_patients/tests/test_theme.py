@@ -73,3 +73,9 @@ def test_the_body_uses_the_core_ibm_plex_sans():
     assert manifest["fonts"] == []  # One family (DESIGN.md): headings are IBM Plex Sans 600 too (#128).
     css = THEME.joinpath("theme.css").read_text(encoding="utf-8")
     assert "Inter" not in css and "Poppins" not in css and "--mv-font-display" not in css
+
+
+def test_a_data_list_keeps_label_and_value_close():
+    """The labels' column of a data list is as wide as its labels, not half the page (#143)."""
+    css = THEME.joinpath("theme.css").read_text(encoding="utf-8")
+    assert "grid-template-columns: fit-content(14rem) minmax(0, 1fr);" in css

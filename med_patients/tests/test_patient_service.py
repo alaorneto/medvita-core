@@ -250,3 +250,41 @@ def test_audit_redacts_personal_data(ready):
     values = {str(value) for entry in entries for change in entry.changes for value in (change.old, change.new)}
     assert not {"Nome Secreto", CPF, "11988887777", "Cidade", "Outra"} & values
     assert any("REDACTED" in value for value in values)
+
+
+def test_header_and_summary_panels_follow_the_contract(ready, subtests):
+    """#136: the header and the summary of a patient are read like the patient itself."""
+    born = date(date.today().year - 8, 1, 1)
+    own = new_patient(ready, full_name="Criança Própria", social_name="Cris", birth_date=born, sex="female")
+    foreign = new_patient(ready, ready.b, full_name="Estrangeira Única")
+    reception = ready.a.reception
+    with subtests.test("header"), ready.as_user(reception) as actor:
+        header = service().header(actor=actor, patient_id=own.sysid)
+        assert (header.code, header.display_name, header.full_name, header.sex) == (
+            own.code,
+            "Cris",
+            "Criança Própria",
+            "female",
+        )
+        assert header.age in (7, 8) and header.needs_guardian and header.writable
+        assert not header.processing_restricted and not header.anonymized and header.status == "active"
+        assert not hasattr(header, "cpf") and not hasattr(header, "phone")
+    with subtests.test("finance reads the header and does not write"), ready.as_user(ready.a.finance) as actor:
+        assert not service().header(actor=actor, patient_id=own.sysid).writable
+    for name in ("header", "summary_panels"):
+        with subtests.test(f"{name}: A/B"):
+            assert_denied_as_not_found(
+                ready.caller(
+                    lambda actor, n=name: getattr(service(), n)(actor=actor, patient_id=foreign.sysid), reception
+                ),
+                missing=ready.caller(
+                    lambda actor, n=name: getattr(service(), n)(actor=actor, patient_id=uuid4()), reception
+                ),
+            )
+        with subtests.test(f"{name}: app disabled"):
+            assert_unavailable_when_disabled(
+                ready.caller(lambda actor, n=name: getattr(service(), n)(actor=actor, patient_id=own.sysid), reception),
+                disabled=lambda: ready.app_disabled("med_patients"),
+            )
+        with subtests.test(f"{name}: other actor"), ready.as_user(reception):
+            assert_rejects_other_actor(lambda n=name: getattr(service(), n)(actor=ready.a.doctor, patient_id=own.sysid))

@@ -1,0 +1,5 @@
+{% load i18n med_finance_format med_icons %}{# #136: the panel of the "Resumo" tab of the patient page; integration.summary_context gives the values. #}<dl class="meta-list">
+<dt>{% translate "Saldo em aberto" %}</dt><dd class="amount">{{ balance|brl }}</dd>
+</dl>
+<p class="mt-3"><a href="{% url 'med_finance:patient_section' organization_id patient_id %}">{% translate "Ver contas" %}</a></p>
+{% if can_charge %}<p class="mt-3"><a class="btn btn-secondary btn-sm" href="{% url 'med_finance:charge_new' organization_id %}?patient={{ patient_id }}">{% med_action_icon "plus" "size-4" %}{% translate "Nova conta" %}</a></p>{% endif %}

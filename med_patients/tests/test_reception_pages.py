@@ -132,14 +132,14 @@ def test_any_other_way_back_is_ignored(ready, back):
 
 def test_the_status_change_waits_behind_a_disclosure(ready):
     patient = new_patient(ready)
-    html = assert_safe(client_for(ready.a.reception).get(url(ready, "detail", patient.sysid)))
+    html = assert_safe(client_for(ready.a.reception).get(url(ready, "registration", patient.sysid)))
     disclosure = re.search(
         r'<details class="patient-disclosure[^"]*">\s*<summary>(.*?)</summary>(.*?)</details>', html, re.S
     )
     assert disclosure and disclosure.group(1) == "Alterar situação"
     assert reverse("med_patients:status", args=(ready.org_a.pk, patient.sysid)) in disclosure.group(2)
     assert " open" not in disclosure.group(0).split(">", 1)[0]
-    reader = client_for(ready.a.finance).get(url(ready, "detail", patient.sysid)).content.decode()
+    reader = client_for(ready.a.finance).get(url(ready, "registration", patient.sysid)).content.decode()
     assert "Alterar situação" not in reader
 
 

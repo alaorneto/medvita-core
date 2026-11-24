@@ -1,4 +1,4 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_patients_labels %}{% block title %}{% translate "Privacidade" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_patients_labels med_icons %}{% block title %}{% translate "Privacidade" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_patients/med_patients.css' %}">{% endblock %}
 {% block content %}
 {% include "med_patients/_patient_header.html" %}
@@ -43,7 +43,7 @@
 {% else %}
 <form method="post" action="{% url 'med_patients:anonymize' organization_id patient.sysid %}" class="mt-3 flex flex-col gap-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ patient.revision }}">
 <div class="field"><label for="confirm-code">{% blocktranslate with code=patient.code %}Digite {{ code }} para confirmar{% endblocktranslate %}</label><input id="confirm-code" name="confirm_code" autocomplete="off" maxlength="20"></div>
-<div><button type="submit" class="btn btn-danger">{% translate "Anonimizar" %}</button></div></form>
+<div><button type="submit" class="btn btn-danger">{% med_icon "privacy" "size-4" %}{% translate "Anonimizar" %}</button></div></form>
 {% endif %}</section>
 </div>
 {% endif %}

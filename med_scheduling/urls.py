@@ -15,7 +15,10 @@ urlpatterns = [
     path("setup/", views.setup_view, name="setup"),
     path("schedules/", views.schedules_view, name="schedules"),
     path("calendars/<uuid:calendar_id>/subscribe/", views.calendar_subscribe, name="calendar-subscribe"),
+    # The page of a schedule in sub-tabs (#138): the grid at the schedule's own address, then each other tab.
     path("schedules/<uuid:schedule_id>/", views.schedule_view, name="schedule"),
+    path("schedules/<uuid:schedule_id>/days/", views.schedule_days_view, name="schedule-days"),
+    path("schedules/<uuid:schedule_id>/types/", views.schedule_types_view, name="schedule-types"),
     path("schedules/<uuid:schedule_id>/week/", views.week_view, name="week"),
     path("schedules/<uuid:schedule_id>/day/", views.day_exception_view, name="day-exception"),
     path("schedules/<uuid:schedule_id>/online/", views.schedule_online, name="schedule-online"),

@@ -910,11 +910,12 @@ def price_deactivate(request: HttpRequest, organization_id: UUID, item_id: UUID)
 def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUID) -> HttpResponse:
     """The "Financeiro" tab of the patient page."""
     from django.urls import NoReverseMatch, reverse
+    from django.utils.http import urlencode
 
     if not _service().desks(actor=request.user):
         raise Http404
     try:
-        patient = PatientService().summary(actor=request.user, patient_id=patient_id)
+        patient = PatientService().header(actor=request.user, patient_id=patient_id)
         tabs = PatientService().page_tabs(actor=request.user, patient_id=patient_id)
     except (NotFound, Forbidden):
         raise Http404 from None
@@ -924,13 +925,21 @@ def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUI
             url = reverse(tab.url_name, args=(organization_id, patient_id))
         except NoReverseMatch:
             continue
-        navigation.append({"label": tab.label, "url": url, "current": tab.code == "med_finance.account"})
+        navigation.append(
+            {"label": tab.label, "icon": tab.icon, "url": url, "current": tab.code == "med_finance.account"}
+        )
+    # The patient header is the one of med_patients (#136); this tab adds its main action.
+    new_charge = f"{reverse('med_finance:charge_new', args=(organization_id,))}?{urlencode({'patient': patient.sysid})}"
     return render(
         request,
         "med_finance/patient_section.html",
         _context(
             organization_id,
             patient=patient,
+            patient_header=patient,
+            header_actions=[
+                {"label": gettext("Nova conta"), "url": new_charge, "primary": True, "action_icon": "plus"}
+            ],
             tabs=navigation,
             charges=_service().charges(actor=request.user, patient_id=patient_id, page_size=100).items,
             balance=_service().patient_balance(actor=request.user, patient_id=patient_id),

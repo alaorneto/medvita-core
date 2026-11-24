@@ -3,7 +3,7 @@
 import pytest
 
 from applications.med_finance.service_api import FinanceService
-from applications.med_patients.service_api import PatientService
+from applications.med_patients.service_api import PatientService, summary_panel_context
 from applications.med_records.service_api import ConsumptionInput, RecordsService
 from applications.med_scheduling.service_api import SchedulingService
 from skeleton.service_api import Conflict
@@ -51,6 +51,10 @@ def test_patient_page_registries(ready):
         timeline = [entry.source for entry in PatientService().timeline(actor=actor, patient_id=patient.sysid).items]
     assert "med_example.notes" in tabs and "med_example.reminders" in purposes
     assert "med_example.notes" in timeline
+    with clinic.as_user(clinic.a.reception) as actor:
+        panels = [row.code for row in PatientService().summary_panels(actor=actor, patient_id=patient.sysid)]
+        shown = summary_panel_context(actor=actor, patient_id=patient.sysid, code="med_example.notes")
+    assert "med_example.notes" in panels and shown == {"note_count": 1}
     with clinic.as_user(clinic.a.admin) as admin:
         steps = [step.code for step in PatientService().setup_steps(actor=admin)]
         report = PatientService().data_report(actor=admin, patient_id=patient.sysid)
@@ -58,6 +62,8 @@ def test_patient_page_registries(ready):
     with clinic.app_disabled("med_example"), clinic.as_user(clinic.a.reception) as actor:
         tabs = [tab.code for tab in PatientService().page_tabs(actor=actor, patient_id=patient.sysid)]
         assert "med_example.notes" not in tabs
+        panels = [row.code for row in PatientService().summary_panels(actor=actor, patient_id=patient.sysid)]
+        assert "med_example.notes" not in panels
 
 
 def test_retention_guard(ready):

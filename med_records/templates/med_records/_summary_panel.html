@@ -1,0 +1,6 @@
+{% load i18n med_records_labels %}{# #136: the panel of the "Resumo" tab, only for who reads a clinical archive; integration.summary_context gives the values. #}{% if has_chart %}<dl class="meta-list">
+<dt>{% translate "Alergias" %}</dt><dd>{% if allergies %}<ul>{% for item in allergies %}<li>{{ item.substance }} · {% if item.severity == "severe" %}<strong>{% translate "Alergia grave" %}</strong>{% else %}{{ item.severity|records_label:"allergy_severity" }}{% endif %}</li>{% endfor %}</ul>{% else %}{% translate "Sem alergias registradas" %}{% endif %}</dd>
+<dt>{% translate "Medicamentos em uso" %}</dt><dd>{% if medications %}<ul>{% for item in medications %}<li>{{ item.name }}{% if item.dose %} {{ item.dose }}{% endif %}</li>{% endfor %}</ul>{% else %}{% translate "Nenhum medicamento em uso" %}{% endif %}</dd>
+</dl>
+<p class="mt-3"><a href="{% url 'med_records:patient_section' organization_id patient_id %}">{% translate "Abrir o prontuário" %}</a></p>
+{% else %}<p>{% translate "Este paciente ainda não tem prontuário." %}</p><p class="mt-3"><a href="{% url 'med_records:patient_section' organization_id patient_id %}">{% translate "Ir ao prontuário" %}</a></p>{% endif %}

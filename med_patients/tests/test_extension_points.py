@@ -11,9 +11,11 @@ from ..extension import (
     PATIENT_SECTIONS,
     RETENTION_GUARDS,
     SETUP_STEPS,
+    SUMMARY_PANELS,
     TIMELINE_PROVIDERS,
     PatientSection,
     SetupStep,
+    SummaryPanel,
     TimelineEntry,
     isolated_registries,
 )
@@ -126,3 +128,70 @@ def test_delete_consults_every_retention_guard(ready):
             PatientService().delete(actor=actor, patient_id=patient.sysid, expected_revision=1)
         RETENTION_GUARDS.restore({})
         PatientService().delete(actor=actor, patient_id=patient.sysid, expected_revision=1)
+
+
+def test_summary_panels_follow_active_apps_and_hide_what_fails(ready, caplog):
+    """#136: in order, only active apps; ``visible`` false hides the panel; a failing or bad ``context`` gives None."""
+    from ..extension import summary_panel_context
+
+    patient = new_patient(ready, full_name="Nome Que Não Vai Ao Log")
+    template = "med_patients/_summary_coverage.html"
+
+    def explode(**kwargs):
+        raise RuntimeError("no")
+
+    for panel in (
+        SummaryPanel("med_patients.own", "Própria", template, order=50, context=lambda **kw: {"coverage": None}),
+        SummaryPanel("med_scheduling.first", "Primeira", template, order=10),
+        SummaryPanel("med_patients.hidden", "Escondida", template, visible=lambda **kw: False),
+        SummaryPanel("med_patients.blind", "Cega", template, visible=explode),
+        SummaryPanel("med_patients.broken", "Quebrada", template, order=60, context=explode),
+        SummaryPanel("med_patients.bad", "Errada", template, order=61, context=lambda **kw: {"panel": "outro"}),
+        SummaryPanel("med_patients.notmap", "Lista", template, order=62, context=lambda **kw: [("a", 1)]),
+    ):
+        SUMMARY_PANELS.add(panel.code, panel, caller=None)
+    with caplog.at_level(logging.WARNING), ready.as_user(ready.a.reception) as actor:
+        rows = PatientService().summary_panels(actor=actor, patient_id=patient.sysid)
+        assert [row.code for row in rows] == [
+            "med_scheduling.first",
+            "med_patients.own",
+            "med_patients.broken",
+            "med_patients.bad",
+            "med_patients.notmap",
+        ]
+        assert rows[1].label == "Própria" and rows[1].template == template
+        contexts = {
+            row.code: summary_panel_context(actor=actor, patient_id=patient.sysid, code=row.code) for row in rows
+        }
+    assert contexts == {
+        "med_scheduling.first": {},
+        "med_patients.own": {"coverage": None},
+        "med_patients.broken": None,
+        "med_patients.bad": None,
+        "med_patients.notmap": None,
+    }
+    logged = " ".join(f"{record.getMessage()} {record.__dict__}" for record in caplog.records)
+    assert "med_patients.broken" in logged and "med_patients.bad" in logged and "med_patients.blind" in logged
+    assert "Nome Que" not in logged
+    with ready.app_disabled("med_scheduling"), ready.as_user(ready.a.reception) as actor:
+        rows = PatientService().summary_panels(actor=actor, patient_id=patient.sysid)
+        assert "med_scheduling.first" not in [row.code for row in rows]
+        assert summary_panel_context(actor=actor, patient_id=patient.sysid, code="med_scheduling.first") is None
+
+
+def test_the_summary_page_survives_a_panel_whose_template_fails(ready):
+    from django.test import Client
+    from django.urls import reverse
+
+    patient = new_patient(ready)
+    SUMMARY_PANELS.add(
+        "med_patients.missing",
+        SummaryPanel("med_patients.missing", "Sem template", "med_patients/does_not_exist.html"),
+        caller=None,
+    )
+    client = Client()
+    client.force_login(ready.a.reception)
+    response = client.get(reverse("med_patients:detail", args=(ready.org_a.pk, patient.sysid)))
+    html = response.content.decode()
+    assert response.status_code == 200 and "Sem template" not in html
+    assert "Nada a resumir para você." in html

@@ -525,8 +525,11 @@ A button on an appointment; ``url_name`` receives ``org`` and ``appointment_id``
 | `url_name` | `str` |
 | `statuses` | `tuple[str, ...]` |
 | `order` | `int` |
+| `icon` | `str` |
 
 ### `AppointmentActionInfo`
+
+A button of another app on an appointment; ``icon`` is the concept its icon draws (#144).
 
 | Campo | Tipo |
 |---|---|
@@ -534,6 +537,7 @@ A button on an appointment; ``url_name`` receives ``org`` and ``appointment_id``
 | `label` | `str` |
 | `url_name` | `str` |
 | `order` | `int` |
+| `icon` | `str` |
 
 ### `AppointmentDetail`
 
@@ -947,3 +951,4 @@ As rotas de `/api/v1/o/<org>/apps/med_scheduling/` estão em `docs/spec.md` (se�
 | 0.1.0 | Primeira versão |
 | 0.2.0 | Agendamento online pelo portal: `public_schedules`, `public_slots` e `book_external` (`allow_external`), `set_online_booking`, `PublicSchedule`, `PublicType`; `online_booking` (e a janela) no fim de `ScheduleInfo` e `AppointmentTypeInfo`, `booked_online` no fim de `AppointmentInfo`, com padrão. Modalidade presencial ou teleconsulta: `modality` em `AppointmentTypeInfo` e `AppointmentInfo` (no fim, com padrão), em `add_appointment_type`, `book` e no filtro de `appointments`; `set_modality`; `modality` no payload dos eventos e o evento `appointment_modality_changed` |
 | 0.2.0 | Desfazer a chegada registrada por engano (#129): `undo_check_in`, com o prazo `CHECK_IN_UNDO_MINUTES` e o conflito `undo_expired`; o evento `appointment_arrival_undone`; `arrived_at` no fim de `AppointmentInfo`, com padrão (a recepção mostra há quanto tempo o paciente espera) |
+| 0.2.0 | Ícone das ações de outras apps (#144): `icon` no fim de `AppointmentAction` e `AppointmentActionInfo`, com padrão vazio (o conceito cujo ícone o botão mostra) |

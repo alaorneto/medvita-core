@@ -94,7 +94,8 @@ O repositório não distribui a tabela CID-10. O operador baixa a oficial (DATAS
 
 ### Página do paciente
 
-- Aba "Prontuário" (`med_records.chart`, ordem 30), visível só para quem lê algum arquivo clínico (`PatientSection.visible`): a recepção não a vê.
+- Aba "Prontuário" (`med_records.chart`, ordem 30), visível só para quem lê algum arquivo clínico (`PatientSection.visible`): a recepção não a vê. A aba usa o cabeçalho do paciente do `med_patients` (`PatientService().header` e `med_patients/templates/med_patients/_patient_header.html`, #136), com o nome do arquivo e as ações "Retomar rascunho" e "Alergias e medicamentos".
+- Painel "Alergias e medicamentos" da aba Resumo (`med_records.allergies`, ordem 20, #136): as alergias ativas (graves primeiro, escritas "Alergia grave") e os medicamentos em uso dos prontuários que o ator lê, por `chart_summary` (a leitura vai para a trilha); visível só para quem lê algum arquivo clínico, então a recepção não vê alergias. Sem prontuário, o painel diz que ainda não há e leva à aba.
 - Linha do tempo: "Atendimento registrado" e "Documento emitido", sem tipo de documento nem conteúdo, só do que o ator lê.
 - Relatório do titular: data, código e profissional de cada atendimento assinado e documento emitido legível. O conteúdo clínico integral não entra no relatório automático: a cópia do prontuário é entregue pelo profissional, pela impressão dos registros.
 
@@ -121,6 +122,8 @@ O prontuário é guardado por 20 anos depois do último registro (Lei 13.787/201
 ### Páginas
 
 Emitir e substituir documento, remover seção do rascunho, marcar uma alergia como resolvida, encerrar um medicamento e desativar um modelo passam por uma página de confirmação (#119); assinar e descartar o atendimento também (#117). O documento impresso tem o timbre, a linha de assinatura e carimbo, a cidade e a data, o código de verificação e o aviso do tipo (#118).
+
+**Faixa clínica (#137).** O editor do atendimento, a página do atendimento, o editor do documento e as alergias e medicamentos abrem com a faixa `med_records/templates/med_records/_clinical_strip.html`: o paciente numa linha (nome, idade e sexo, do `PatientService().header` pelo template `med_patients/templates/med_patients/_patient_identity.html`) e as alergias ativas do prontuário com a gravidade, as graves primeiro. Com alergia, a faixa usa os tokens de perigo (`--color-danger-soft`, `--color-danger-medium`, `--color-fg-danger-strong`) e a grave é escrita "GRAVE", não só pintada; sem alergia ativa, diz "Sem alergias registradas". É uma região só, rotulada "Paciente e alergias" para o leitor de tela, sem região viva, e o nome não se repete no título da página (o `h1` do atendimento é o tipo ou "Rascunho do atendimento"). As quatro telas já exigem a leitura do prontuário: quem não lê o arquivo recebe 404 e não vê a faixa. A impressão não leva a faixa.
 
 Em `/o/<org>/apps/med_records/` (nomes `med_records:<nome>`); toda leitura e escrita passa pelo `RecordsService`. As páginas clínicas respondem `Cache-Control: no-store`; o título nunca leva o nome do paciente; o texto clínico é escapado, com as quebras de linha por CSS.
 

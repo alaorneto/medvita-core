@@ -49,6 +49,12 @@ def _notes_of(*, actor, patient_id, before, limit):
     )
 
 
+def _note_count(*, actor, patient_id):
+    from .service_api import ExampleService
+
+    return {"note_count": len(ExampleService().notes(actor=actor, patient_id=patient_id))}
+
+
 def _now():
     from django.utils import timezone
 
@@ -104,12 +110,14 @@ class MedExampleConfig(AppConfig):
             ConsentPurpose,
             PatientSection,
             SetupStep,
+            SummaryPanel,
             register_consent_purpose,
             register_patient_data_provider,
             register_patient_section,
             register_portal_patients,
             register_retention_guard,
             register_setup_step,
+            register_summary_panel,
             register_timeline_provider,
         )
         from applications.med_records.service_api import (
@@ -157,6 +165,11 @@ class MedExampleConfig(AppConfig):
         )
         register_consumer("med_records.encounter_signed", "med_example.note_on_signed", on_encounter_signed)
         register_patient_section(PatientSection("med_example.notes", "Notas", "med_example:notes", order=90))
+        register_summary_panel(
+            SummaryPanel(
+                "med_example.notes", "Notas de exemplo", "med_example/summary_panel.html", order=90, context=_note_count
+            )
+        )
         register_timeline_provider("med_example.notes", _notes_of)
         register_portal_patients("med_example.portal", _portal_patients)
         register_consent_purpose(ConsentPurpose("med_example.reminders", "Lembretes de exemplo"))

@@ -32,6 +32,9 @@ class MedPatientsConfig(AppConfig):
         from .registration import register_setup_steps
 
         register_setup_steps()
+        from .registration import register_summary_panels
+
+        register_summary_panels()
         from .registration import register_quota_metrics
 
         register_quota_metrics()

@@ -15,6 +15,13 @@ from ..service_api import CHECK_IN_UNDO_MINUTES, AppointmentActionInfo, Scheduli
 from ..views import _waited, desk_state
 from .booking import SP, at, prepare
 
+# The decorative icons before a label (#144) are left out of markup comparisons.
+ICON = re.compile(r"<svg\b[^>]*>.*?</svg>", re.S)
+
+
+def without_icons(html):
+    return ICON.sub("", html)
+
 
 @pytest.fixture
 def ready(clinic):
@@ -34,7 +41,7 @@ def url(ready, name, *args, organization=None):
 def page(client, address, **query):
     response = client.get(address, query)
     assert response.status_code == 200, response.status_code
-    return response.content.decode()
+    return without_icons(response.content.decode())
 
 
 def content(html):
@@ -185,7 +192,7 @@ def test_an_arrival_is_undone_from_the_board_within_the_window(ready, afternoon,
         assert f'action="{undo}"' in board and "Desfazer chegada" in board
         response = client.post(undo, {"revision": revision(), "next": "reception"}, follow=True)
         assert response.redirect_chain[-1][0] == reception
-        assert "Chegada desfeita: a consulta voltou a ficar confirmada." in response.content.decode()
+        assert "Chegada desfeita: a consulta voltou a ficar confirmada." in without_icons(response.content.decode())
         detail = row_of(ready, appointment.sysid)
         assert (detail.appointment.status, detail.arrived_at) == ("confirmed", None)
     with subtests.test("not after the window"):
@@ -193,7 +200,7 @@ def test_an_arrival_is_undone_from_the_board_within_the_window(ready, afternoon,
         afternoon.now += timedelta(minutes=CHECK_IN_UNDO_MINUTES, seconds=1)
         assert f'action="{undo}"' not in content(page(client, reception))
         response = client.post(undo, {"revision": revision(), "next": "reception"}, follow=True)
-        assert "para desfazer a chegada terminou" in response.content.decode()
+        assert "para desfazer a chegada terminou" in without_icons(response.content.decode())
         assert row_of(ready, appointment.sysid).appointment.status == "arrived"
     with subtests.test("a GET does nothing"):
         assert client.get(undo).status_code == 405
@@ -274,7 +281,7 @@ def test_the_waitlist_says_when_someone_leaves_it(ready):
         )
     client = client_for(ready.a.reception)
     response = client.post(url(ready, "waitlist-cancel", entry.sysid), {"revision": entry.revision}, follow=True)
-    assert "Paciente tirado da lista de espera." in response.content.decode()
+    assert "Paciente tirado da lista de espera." in without_icons(response.content.decode())
 
 
 # ------------------------------------------------------------------------ the appointment page (#131)

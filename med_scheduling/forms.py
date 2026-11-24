@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -35,6 +36,83 @@ COLOR_LABELS = {
     "gray": _("Cinza"),
     "pink": _("Rosa"),
 }
+# The time zones of Brazil the practice chooses from (#138), as the IANA database names them; the form refuses any
+# other. Each label says where it holds and its offset from UTC.
+TIMEZONES = (
+    ("America/Sao_Paulo", _("Horário de Brasília: Sul, Sudeste, Goiás e Distrito Federal (UTC−3)")),
+    ("America/Bahia", _("Bahia (UTC−3)")),
+    ("America/Fortaleza", _("Ceará, Maranhão, Piauí, Rio Grande do Norte e Paraíba (UTC−3)")),
+    ("America/Recife", _("Pernambuco (UTC−3)")),
+    ("America/Maceio", _("Alagoas e Sergipe (UTC−3)")),
+    ("America/Araguaina", _("Tocantins (UTC−3)")),
+    ("America/Belem", _("Amapá e leste do Pará (UTC−3)")),
+    ("America/Santarem", _("Oeste do Pará (UTC−3)")),
+    ("America/Noronha", _("Fernando de Noronha (UTC−2)")),
+    ("America/Cuiaba", _("Mato Grosso (UTC−4)")),
+    ("America/Campo_Grande", _("Mato Grosso do Sul (UTC−4)")),
+    ("America/Porto_Velho", _("Rondônia (UTC−4)")),
+    ("America/Boa_Vista", _("Roraima (UTC−4)")),
+    ("America/Manaus", _("Amazonas (UTC−4)")),
+    ("America/Eirunepe", _("Oeste do Amazonas (UTC−5)")),
+    ("America/Rio_Branco", _("Acre (UTC−5)")),
+)
+# The 27 units of the federation by name, with the code the service stores (validators.STATES).
+STATE_NAMES = {
+    "AC": "Acre",
+    "AL": "Alagoas",
+    "AP": "Amapá",
+    "AM": "Amazonas",
+    "BA": "Bahia",
+    "CE": "Ceará",
+    "DF": "Distrito Federal",
+    "ES": "Espírito Santo",
+    "GO": "Goiás",
+    "MA": "Maranhão",
+    "MT": "Mato Grosso",
+    "MS": "Mato Grosso do Sul",
+    "MG": "Minas Gerais",
+    "PA": "Pará",
+    "PB": "Paraíba",
+    "PR": "Paraná",
+    "PE": "Pernambuco",
+    "PI": "Piauí",
+    "RJ": "Rio de Janeiro",
+    "RN": "Rio Grande do Norte",
+    "RS": "Rio Grande do Sul",
+    "RO": "Rondônia",
+    "RR": "Roraima",
+    "SC": "Santa Catarina",
+    "SP": "São Paulo",
+    "SE": "Sergipe",
+    "TO": "Tocantins",
+}
+
+
+def _plain(text: str) -> str:
+    """The text without accents, to put names in the order of the alphabet ("Pará" before "Paraíba")."""
+    return "".join(char for char in unicodedata.normalize("NFKD", text) if not unicodedata.combining(char))
+
+
+STATE_CHOICES = tuple(
+    (code, f"{name} ({code})") for code, name in sorted(STATE_NAMES.items(), key=lambda item: _plain(item[1]))
+)
+
+
+def state_field(label: str) -> forms.ChoiceField:
+    """A UF chosen from the 27 (#138); optional, and anything else is refused."""
+    return forms.ChoiceField(label=label, choices=(("", "—"), *STATE_CHOICES), required=False)
+
+
+def timezone_field(**options: Any) -> forms.ChoiceField:
+    """The practice's time zone, one of Brazil's (#138); anything else is refused."""
+    return forms.ChoiceField(
+        label=_("Fuso horário"),
+        choices=(("", _("Escolha o fuso horário")), *TIMEZONES),
+        help_text=_("As horas da agenda, das consultas e dos bloqueios são as deste fuso."),
+        **options,
+    )
+
+
 WEEKDAYS = (
     (0, _("Segunda")),
     (1, _("Terça")),
@@ -156,8 +234,8 @@ class PracticeForm(forms.Form):
     email = forms.EmailField(label=_("Email"), required=False)
     address = forms.CharField(label=_("Endereço"), max_length=300, required=False)
     city = forms.CharField(label=_("Cidade"), max_length=80, required=False)
-    state = forms.CharField(label=_("UF"), max_length=2, required=False)
-    timezone = forms.CharField(label=_("Fuso horário"), max_length=64)
+    state = state_field(_("UF"))
+    timezone = timezone_field()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -170,7 +248,7 @@ class ProfessionalForm(forms.Form):
     display_name = forms.CharField(label=_("Nome"), max_length=200)
     council = forms.ChoiceField(label=_("Conselho"), choices=Professional.Council.choices)
     council_number = forms.CharField(label=_("Número no conselho"), max_length=20, required=False)
-    council_state = forms.CharField(label=_("UF do conselho"), max_length=2, required=False)
+    council_state = state_field(_("UF do conselho"))
     specialty = forms.CharField(label=_("Especialidade"), max_length=120, required=False)
     member = forms.ChoiceField(label=_("Pessoa da organização"), required=False)
     create_schedule = forms.BooleanField(
@@ -791,11 +869,36 @@ class DayPickForm(forms.Form):
 
 
 class BlockForm(forms.Form):
+    """A block of a schedule: hours of a day, or the whole day with both hours blank (#138)."""
+
     day = forms.DateField(label=_("Dia"), widget=_date())
-    start = forms.TimeField(label=_("Início"), widget=_time())
-    end = forms.TimeField(label=_("Fim"), widget=_time())
+    start = forms.TimeField(label=_("Início"), widget=_time(), required=False)
+    end = forms.TimeField(
+        label=_("Fim"),
+        widget=_time(),
+        required=False,
+        help_text=_("Início e fim em branco bloqueiam o dia inteiro. Fim às 00:00 vale o fim do dia."),
+    )
     reason = forms.ChoiceField(label=_("Motivo"), choices=ScheduleBlock.Reason.choices)
     note = forms.CharField(label=_("Observação"), max_length=200, required=False)
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean()
+        start, end = cleaned.get("start"), cleaned.get("end")
+        if "start" not in self.errors and "end" not in self.errors and (start is None) != (end is None):
+            self.add_error(
+                "end" if end is None else "start",
+                gettext("Informe o início e o fim, ou deixe os dois em branco para bloquear o dia inteiro."),
+            )
+        return cleaned
+
+    def bounds(self, zone) -> tuple[datetime, datetime]:
+        """The instants of the block on the practice's clock: the whole day without hours; an end at 00:00 is midnight."""
+        day, start, end = (self.cleaned_data[name] for name in ("day", "start", "end"))
+        first = datetime.combine(day, start or time(), tzinfo=zone)
+        if end is None or end == time():
+            return first, datetime.combine(day + timedelta(days=1), time(), tzinfo=zone)
+        return first, datetime.combine(day, end, tzinfo=zone)
 
 
 class WaitlistForm(forms.Form):
@@ -816,7 +919,7 @@ class WaitlistForm(forms.Form):
 
 class SetupForm(forms.Form):
     practice_name = forms.CharField(label=_("Nome do consultório"), max_length=120)
-    timezone = forms.CharField(label=_("Fuso horário"), max_length=64, initial="America/Sao_Paulo")
+    timezone = timezone_field(initial="America/Sao_Paulo")
     reader_groups = forms.MultipleChoiceField(
         label=_("Grupos que consultam a configuração"), required=False, widget=forms.CheckboxSelectMultiple
     )

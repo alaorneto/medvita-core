@@ -72,6 +72,9 @@ def test_every_page_renders_safe_html(ready, subtests):
         "type-edit": url(ready, "type-edit", ready.kind.sysid),
         "schedules": url(ready, "schedules"),
         "schedule": url(ready, "schedule", ready.schedule.sysid),
+        "schedule-days": url(ready, "schedule-days", ready.schedule.sysid),
+        "schedule-types": url(ready, "schedule-types", ready.schedule.sysid),
+        "schedule-online": url(ready, "schedule-online", ready.schedule.sysid),
         "period-edit": url(ready, "period-edit", ready.schedule.sysid, grid(ready)[0].sysid),
         "day-exception": url(ready, "day-exception", ready.schedule.sysid) + f"?date={ready.monday:%Y-%m-%d}",
         "setup": url(ready, "setup"),
@@ -544,7 +547,7 @@ def test_a_kind_is_added_and_changed_through_the_settings_pages(ready, subtests)
 def test_the_kinds_of_a_schedule_are_chosen_on_its_page(ready, subtests):
     insured = add_kind(ready)
     client = client_for(ready.a.reception)
-    page = url(ready, "schedule", ready.schedule.sysid)
+    page = url(ready, "schedule-types", ready.schedule.sysid)  # The sub-tab "Tipos" (#138).
     on, minutes = f"types-on_{insured.sysid.hex}", f"types-minutes_{insured.sysid.hex}"
     # The two modes come ticked on the page; their own cases are in test_walk_in_views.
     modes = {f"types-booked_{insured.sysid.hex}": "on", f"types-walk_in_{insured.sysid.hex}": "on"}

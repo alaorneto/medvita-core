@@ -628,10 +628,13 @@ class PlanConflict:
 
 @dataclass(frozen=True, slots=True)
 class AppointmentActionInfo:
+    """A button of another app on an appointment; ``icon`` is the concept its icon draws (#144)."""
+
     code: str
     label: str
     url_name: str
     order: int
+    icon: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -3905,7 +3908,7 @@ class SchedulingService(ServiceAPI):
 
         row = _appointment(actor, appointment_id)
         return tuple(
-            AppointmentActionInfo(action.code, str(action.label), action.url_name, action.order)
+            AppointmentActionInfo(action.code, str(action.label), action.url_name, action.order, action.icon)
             for action in active_actions(actor, row.status)
         )
 

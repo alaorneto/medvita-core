@@ -1,4 +1,5 @@
-{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{% translate "Linha do tempo" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load static i18n skeleton_format %}{% block title %}{% translate "Linha do tempo" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_patients/med_patients.css' %}">{% endblock %}
 {% block content %}
 {% include "med_patients/_patient_header.html" %}
 {% if page.unavailable %}<div class="message warning mb-4" role="status">{% include "skeleton/web/components/icon.html" with name="warning" %}<div class="min-w-0">{% translate "Parte da linha do tempo está indisponível agora." %}</div></div>{% endif %}

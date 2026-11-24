@@ -1,4 +1,4 @@
-"""Contributions of the scheduling app to the patient page (tab, timeline, data report, setup step).
+"""Contributions of the scheduling app to the patient page (tab, summary panel, timeline, data report, setup step).
 
 Each contribution authorizes with the actor's own access: a schedule the actor does not read adds
 nothing. Titles and report lines carry dates and statuses only, never notes.
@@ -100,19 +100,89 @@ def practice_is_set_up(*, actor: Any) -> bool:
     return True
 
 
+def reads_a_schedule(*, actor: Any, patient_id: UUID) -> bool:
+    """The summary panel shows only to who reads some schedule (finance reads none)."""
+    from .service_api import SchedulingService
+
+    return bool(SchedulingService().schedules(actor=actor))
+
+
+def summary_context(*, actor: Any, patient_id: UUID) -> dict[str, Any]:
+    """The next appointment still to happen and the last one done, on the schedules the actor reads (#136).
+
+    Read by ``SchedulingService`` with the actor's access: ``AppointmentInfo`` never carries the
+    notes nor the priority mark. Times are shown in the practice's time zone.
+    """
+    from django.utils import timezone
+
+    from skeleton.service_api import Forbidden, NotFound
+
+    from .service_api import SchedulingService
+
+    service = SchedulingService()
+    now = timezone.now()
+    schedules = {row.sysid: row for row in service.schedules(actor=actor, active_only=False)}
+    upcoming = service.appointments(actor=actor, patient_id=patient_id, start=now, page_size=50).items
+    following = next((row for row in upcoming if row.status in WAITING), None)
+    last, cursor = None, None
+    for _page in range(40):  # Oldest first: the last page holds the most recent one.
+        page = service.appointments(
+            actor=actor, patient_id=patient_id, end=now, status="completed", cursor=cursor, page_size=100
+        )
+        last = page.items[-1] if page.items else last
+        cursor = page.next_cursor
+        if not cursor:
+            break
+    try:
+        zone = service.practice(actor=actor).timezone
+    except (NotFound, Forbidden):
+        zone = "UTC"
+
+    def schedule_name(row: Any) -> str:
+        schedule = schedules.get(row.schedule_id) if row is not None else None
+        return schedule.name if schedule is not None else ""
+
+    return {
+        "next_appointment": following,
+        "next_walk_in": following is not None and following.mode == "walk_in",
+        "next_schedule": schedule_name(following),
+        "last_appointment": last,
+        "last_schedule": schedule_name(last),
+        "can_book": any(row.writable and row.is_active for row in schedules.values()),
+        "zone": zone,
+    }
+
+
 def register() -> None:
     from applications.med_patients.service_api import (
         PatientSection,
         SetupStep,
+        SummaryPanel,
         register_patient_data_provider,
         register_patient_section,
         register_setup_step,
+        register_summary_panel,
         register_timeline_provider,
     )
 
     register_patient_section(
         PatientSection(
-            "med_scheduling.appointments", gettext_lazy("Consultas"), "med_scheduling:patient_section", order=20
+            "med_scheduling.appointments",
+            gettext_lazy("Consultas"),
+            "med_scheduling:patient_section",
+            order=20,
+            icon="appointment",
+        )
+    )
+    register_summary_panel(
+        SummaryPanel(
+            "med_scheduling.appointments",
+            gettext_lazy("Consultas"),
+            "med_scheduling/_summary_panel.html",
+            order=10,
+            visible=reads_a_schedule,
+            context=summary_context,
+            icon="appointment",
         )
     )
     register_timeline_provider("med_scheduling.appointments", timeline_provider)

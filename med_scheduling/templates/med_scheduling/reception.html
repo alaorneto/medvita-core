@@ -1,8 +1,8 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_scheduling_labels %}{% block title %}{% translate "Recepção" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_scheduling_labels med_icons %}{% block title %}{% translate "Recepção" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}"><script src="{% static 'med_scheduling/med_scheduling.js' %}" defer></script>{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Recepção" %}</p><h1>{{ today|scheduling_long_date }}</h1></div>
-<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{{ filters.upcoming }}">{% translate "Registrar chegada" %}</a><a class="btn btn-primary" href="{% url 'med_scheduling:book' organization_id %}">{% translate "Marcar consulta" %}</a></nav></div>
+<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{{ filters.upcoming }}">{% med_icon "arrival" "size-4" %}{% translate "Registrar chegada" %}</a><a class="btn btn-primary" href="{% url 'med_scheduling:book' organization_id %}">{% med_icon "booking" "size-4" %}{% translate "Marcar consulta" %}</a></nav></div>
 {% include "med_scheduling/_nav.html" %}
 {% comment %}The optional script swaps the board below in place and says here, politely, what changed; without it the page stays as it is until "Atualizar".{% endcomment %}<p class="sr-only" aria-live="polite" data-reception-announce></p>
 <div id="board" data-reception-board data-refresh-seconds="60" data-summary="{{ summary }}">

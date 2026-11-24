@@ -1,0 +1,8 @@
+{% extends "med_scheduling/schedule.html" %}{% load i18n skeleton_format med_scheduling_labels %}
+{% block tab %}
+<h2 class="section-heading">{% translate "Agendamento online" %}</h2>
+<p class="mb-2">{% if schedule.online_booking %}{% blocktranslate with notice=schedule.online_min_notice_hours horizon=schedule.online_horizon_days %}Publicada no portal do paciente: de {{ notice }}&nbsp;h a {{ horizon }}&nbsp;dias à frente.{% endblocktranslate %}{% else %}{% translate "Fora do agendamento online." %}{% endif %}</p>
+<p class="helptext mb-2">{% translate "O portal oferece só os horários livres dos tipos marcados para o agendamento online, com hora marcada. Os compromissos pessoais do profissional no calendário não são conferidos no portal: use bloqueios." %}</p>
+{% if online_kinds %}<ul class="mb-4">{% for kind in online_kinds %}<li>{{ kind.name }}</li>{% endfor %}</ul>{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum tipo desta agenda está marcado para o agendamento online.") hint=_("O tipo é marcado na página dele, em Configuração.") class="mb-4" %}{% endif %}
+{% if schedule.writable %}<form method="post" class="card max-w-3xl mb-6" action="{% url 'med_scheduling:schedule-online' organization_id schedule.sysid %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ schedule.revision }}">{% include "skeleton/web/components/form-fields.html" with form=online_form %}<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Salvar o agendamento online" %}</button></div></form>{% endif %}
+{% endblock %}

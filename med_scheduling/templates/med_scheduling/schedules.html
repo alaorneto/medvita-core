@@ -1,4 +1,5 @@
-{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format med_scheduling_labels %}{% block title %}{% translate "Agendas" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load static i18n skeleton_format med_scheduling_labels med_icons %}{% block title %}{% translate "Agendas" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}">{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Agenda médica" %}</p><h1>{% translate "Agendas" %}</h1><p class="page-description">{% translate "As agendas que você vê; cada uma tem um calendário com o mesmo acesso." %}</p></div></div>
 {% include "med_scheduling/_nav.html" %}
@@ -12,7 +13,7 @@
 <ul class="calendar-list">{% for row in calendars.others %}<li>{{ row.entry.name }} {% if row.entry.is_own %}{{ "neutral"|scheduling_marker|marker:_("Seu calendário") }}{% elif row.entry.kind == "personal" %}{{ "neutral"|scheduling_marker|marker:_("Pessoal") }}{% else %}{{ "neutral"|scheduling_marker|marker:_("Compartilhado") }}{% endif %}{% if row.ics_url %} · <a href="{{ row.ics_url }}">{% translate "Baixar .ics" %}<span class="sr-only"> {% blocktranslate with name=row.entry.name %}de {{ name }}{% endblocktranslate %}</span></a>{% endif %} · <a href="{{ row.subscribe_url }}">{% translate "Assinar no celular" %}<span class="sr-only"> {% blocktranslate with name=row.entry.name %}o calendário {{ name }}{% endblocktranslate %}</span></a></li>{% endfor %}</ul>{% endif %}
 <p class="helptext">{% translate "Assinar no celular leva à página do calendário em que você cria o seu link só daquele calendário, para o aplicativo de calendário do celular. O link é seu: quem o tiver lê aquele calendário como você, então não o repasse. Ele acompanha o seu acesso: se você deixar de ler a agenda, o link para de trazer os eventos dela." %}</p>
 {% if calendars.pending %}<form method="post" class="message warning mb-4" role="status">{% include "skeleton/web/components/icon.html" with name="warning" %}<div class="min-w-0">{% csrf_token %}<input type="hidden" name="form" value="claim"><p>{% blocktranslate count counter=calendars.pending %}{{ counter }} agenda foi criada antes de o calendário reconhecer as agendas de atendimento. Vincule o calendário dela à agenda médica, para que o acesso dele só mude junto com o da agenda.{% plural %}{{ counter }} agendas foram criadas antes de o calendário reconhecer as agendas de atendimento. Vincule os calendários delas à agenda médica, para que o acesso deles só mude junto com o das agendas.{% endblocktranslate %}</p><div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Vincular à agenda médica" %}</button></div></div></form>{% endif %}
-{% if calendars.open_url or calendars.shared_url %}<div class="form-actions">{% if calendars.open_url %}<a class="btn btn-secondary" href="{{ calendars.open_url }}">{% translate "Abrir o calendário" %}</a>{% endif %}{% if calendars.shared_url %}<a class="btn btn-secondary" href="{{ calendars.shared_url }}">{% translate "Calendários compartilhados" %}</a>{% endif %}</div>{% endif %}
+{% if calendars.open_url or calendars.shared_url %}<div class="form-actions">{% if calendars.open_url %}<a class="btn btn-secondary" href="{{ calendars.open_url }}">{% med_icon "calendar" "size-4" %}{% translate "Abrir o calendário" %}</a>{% endif %}{% if calendars.shared_url %}<a class="btn btn-secondary" href="{{ calendars.shared_url }}">{% med_icon "calendar" "size-4" %}{% translate "Calendários compartilhados" %}</a>{% endif %}</div>{% endif %}
 {% if calendars.shared_url %}<p class="helptext">{% translate "Os calendários da clínica e de pessoas (reuniões, férias, plantões) são criados em Calendários compartilhados. O acesso ao calendário de uma agenda de atendimento só muda aqui, junto com o da agenda." %}</p>{% endif %}
 </section>
 {% endif %}
@@ -20,6 +21,6 @@
 <section class="card max-w-3xl" aria-labelledby="new-heading"><h2 id="new-heading">{% translate "Nova agenda" %}</h2>
 <form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Criar agenda" %}</button></div></form></section>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_icon "schedule" "size-4" %}{% translate "Criar agenda" %}</button></div></form></section>
 {% endif %}
 {% endblock %}

@@ -103,10 +103,20 @@ def _uuid(value: Any) -> UUID:
 
 
 def _patient(request: HttpRequest, patient_id: UUID) -> Any:
+    """The patient header of med_patients (#136): name, code, age, sex, status and warnings; None if unreadable."""
     try:
-        return PatientService().summary(actor=request.user, patient_id=patient_id)
+        return PatientService().header(actor=request.user, patient_id=patient_id)
     except (NotFound, Forbidden):
         return None
+
+
+def _strip_allergies(request: HttpRequest, chart_id: UUID) -> tuple[Any, ...]:
+    """The active allergies of the chart for the clinical strip (#137), severe first; the read is in the trail."""
+    try:
+        rows = _service().allergies(actor=request.user, chart_id=chart_id)
+    except (NotFound, Forbidden):
+        return ()
+    return tuple(row for row in rows if row.status == "active")
 
 
 def _rendered_panels(request: HttpRequest, organization_id: UUID, panels: Any, **target: UUID) -> list[dict[str, Any]]:
@@ -292,14 +302,23 @@ def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUI
             url = reverse(tab.url_name, args=(organization_id, patient_id))
         except NoReverseMatch:
             continue
-        tabs.append({"label": tab.label, "url": url, "current": tab.code == "med_records.chart"})
+        tabs.append({"label": tab.label, "icon": tab.icon, "url": url, "current": tab.code == "med_records.chart"})
     chosen = request.GET.get("archive")
     archive = next((item for item in archives if str(item.sysid) == chosen), archives[0])
     charts = {
         chart.archive_id: chart for chart in _service().charts_for_patient(actor=request.user, patient_id=patient_id)
     }
     chart = charts.get(archive.sysid)
-    context = _context(organization_id, patient=patient, tabs=tabs, archives=archives, archive=archive, chart=chart)
+    context = _context(
+        organization_id,
+        patient=patient,
+        patient_header=patient,
+        header_actions=[],
+        tabs=tabs,
+        archives=archives,
+        archive=archive,
+        chart=chart,
+    )
     if chart is not None:
         try:
             history = _service().encounter_history(
@@ -317,6 +336,17 @@ def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUI
         if drafts:
             name = "med_records:encounter_edit" if drafts[0].kind == "encounter" else "med_records:document_edit"
             resume_url = reverse(name, args=(organization_id, drafts[0].sysid))
+        if resume_url:
+            context["header_actions"].append(
+                {"label": gettext("Retomar rascunho"), "url": resume_url, "icon": "encounter"}
+            )
+        context["header_actions"].append(
+            {
+                "label": gettext("Alergias e medicamentos"),
+                "url": reverse("med_records:lists", args=(organization_id, chart.sysid)),
+                "icon": "allergy",
+            }
+        )
         context.update(
             summary=_service().chart_summary(actor=request.user, chart_id=chart.sysid),
             encounters=[
@@ -459,7 +489,9 @@ def attend(request: HttpRequest, organization_id: UUID, appointment_id: UUID) ->
 # ------------------------------------------------------------------------------------ encounters
 
 
-def _encounter_context(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> dict[str, Any]:
+def _encounter_context(
+    request: HttpRequest, organization_id: UUID, encounter_id: UUID, *, strip: bool = False
+) -> dict[str, Any]:
     try:
         info = _service().encounter(actor=request.user, encounter_id=encounter_id)
         attachments = _service().attachments(actor=request.user, encounter_id=encounter_id)
@@ -472,13 +504,14 @@ def _encounter_context(request: HttpRequest, organization_id: UUID, encounter_id
         sections=_sections(info),
         attachments=attachments,
         patient=_patient(request, info.header.patient_id),
+        strip_allergies=_strip_allergies(request, info.header.chart_id) if strip else (),
     )
 
 
 @never_cache
 @tenant_page()
 def encounter_view(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
-    context = _encounter_context(request, organization_id, encounter_id)
+    context = _encounter_context(request, organization_id, encounter_id, strip=True)
     try:
         panels = _service().encounter_panels(actor=request.user, encounter_id=encounter_id)
     except (NotFound, Forbidden):
@@ -728,7 +761,7 @@ def _editor_page(
 @tenant_page()
 def encounter_edit(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
     """The draft editor: one form for every section; each button saves what was typed, then acts."""
-    context = _encounter_context(request, organization_id, encounter_id)
+    context = _encounter_context(request, organization_id, encounter_id, strip=True)
     info = context["info"]
     if not info.writable:
         return redirect("med_records:encounter", organization_id, encounter_id)
@@ -758,7 +791,7 @@ def encounter_edit(request: HttpRequest, organization_id: UUID, encounter_id: UU
     else:
         if response is not None:
             return response
-        context = _encounter_context(request, organization_id, encounter_id)
+        context = _encounter_context(request, organization_id, encounter_id, strip=True)
         pending = tuple(card for card in cards if card.get("pending"))
         return _editor_page(request, organization_id, encounter_id, context, types, pending=pending, query=query)
     # One transaction: nothing was saved. The page keeps what was typed, with the reason.
@@ -956,6 +989,7 @@ def lists_view(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> H
             messages.error(request, _errors(error))
         except Conflict as error:
             messages.error(request, conflict_text(error))
+    allergies = _service().allergies(actor=request.user, chart_id=chart_id)
     return render(
         request,
         "med_records/lists.html",
@@ -963,7 +997,8 @@ def lists_view(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> H
             organization_id,
             chart=chart,
             patient=_patient(request, chart.patient_id),
-            allergies=_service().allergies(actor=request.user, chart_id=chart_id),
+            allergies=allergies,
+            strip_allergies=tuple(row for row in allergies if row.status == "active"),
             medications=_service().medications(actor=request.user, chart_id=chart_id),
             allergy_form=allergy_form,
             medication_form=medication_form,
@@ -1087,7 +1122,7 @@ def document_new(request: HttpRequest, organization_id: UUID, chart_id: UUID) ->
 
 
 def _document_context(
-    request: HttpRequest, organization_id: UUID, document_id: UUID, *, printing: bool = False
+    request: HttpRequest, organization_id: UUID, document_id: UUID, *, printing: bool = False, strip: bool = False
 ) -> dict[str, Any]:
     try:
         info = _service().document(actor=request.user, document_id=document_id, printing=printing)
@@ -1100,6 +1135,7 @@ def _document_context(
         header=info.header,
         kind_label=kind.label if kind else info.header.kind,
         patient=_patient(request, info.header.patient_id),
+        strip_allergies=_strip_allergies(request, info.header.chart_id) if strip else (),
         idempotency_key=uuid.uuid4().hex,
     )
 
@@ -1134,7 +1170,7 @@ def document_print(request: HttpRequest, organization_id: UUID, document_id: UUI
 @never_cache
 @tenant_page()
 def document_edit(request: HttpRequest, organization_id: UUID, document_id: UUID) -> HttpResponse:
-    context = _document_context(request, organization_id, document_id)
+    context = _document_context(request, organization_id, document_id, strip=True)
     info = context["info"]
     if not info.writable:
         return redirect("med_records:document", organization_id, document_id)

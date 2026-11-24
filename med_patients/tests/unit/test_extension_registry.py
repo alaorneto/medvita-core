@@ -52,3 +52,40 @@ def test_wrong_types_are_refused(subtests):
             with subtests.test(name), pytest.raises(TypeError):
                 call()
         assert register_setup_step(SetupStep("med_patients.x", "X", "x", lambda **kw: True)).code == "med_patients.x"
+
+
+def test_summary_panels_follow_the_same_rules(subtests):
+    """#136: the code is ``<app_label>.<name>`` of the calling app; the same code with another panel is refused."""
+    from ...extension import SUMMARY_PANELS, SummaryPanel, register_summary_panel
+
+    panel = SummaryPanel("med_patients.extra", "Extra", "med_patients/_summary_coverage.html", order=5)
+    with isolated_registries():
+        for name, call in (
+            ("other app", lambda: register_summary_panel(SummaryPanel("med_records.x", "X", "x.html"))),
+            ("no dot", lambda: register_summary_panel(SummaryPanel("nodot", "X", "x.html"))),
+            ("uppercase", lambda: register_summary_panel(SummaryPanel("med_patients.Bad", "X", "x.html"))),
+        ):
+            with subtests.test(name), pytest.raises(ValueError):
+                call()
+        register_summary_panel(panel)
+        register_summary_panel(panel)
+        assert dict(SUMMARY_PANELS.all())["med_patients.extra"] is panel
+        with subtests.test("duplicate"), pytest.raises(ValueError):
+            register_summary_panel(SummaryPanel("med_patients.extra", "Outro", "med_patients/_summary_coverage.html"))
+        with subtests.test("not a panel"), pytest.raises(TypeError):
+            register_summary_panel("med_patients.extra")
+    assert "med_patients.extra" not in dict(SUMMARY_PANELS.all())
+
+
+def test_a_summary_panel_is_checked_when_built(subtests):
+    from ...extension import SummaryPanel
+
+    for name, values in (
+        ("no template", {"template": ""}),
+        ("not a template", {"template": "med_patients/panel.txt"}),
+        ("order", {"template": "x.html", "order": "1"}),
+        ("visible", {"template": "x.html", "visible": True}),
+        ("context", {"template": "x.html", "context": {"a": 1}}),
+    ):
+        with subtests.test(name), pytest.raises(ValueError):
+            SummaryPanel("med_patients.x", "X", **values)

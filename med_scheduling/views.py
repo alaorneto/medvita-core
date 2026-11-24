@@ -33,6 +33,7 @@ from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
 from skeleton.web.confirm import Confirmation, confirmation_step
 from skeleton.web.views import tenant_page
 
+from . import board
 from . import forms as scheduling_forms
 from .service_api import (
     CHECK_IN_UNDO_MINUTES,
@@ -49,6 +50,14 @@ TRANSITION_LABELS = {
     "start": gettext("Iniciar atendimento"),
     "complete": gettext("Concluir"),
     "mark_no_show": gettext("Marcar falta"),
+}
+# The icon of each transition (#144): a suite concept, or a core action icon drawn by name.
+TRANSITION_ICONS = {
+    "confirm": ("", "check"),
+    "check_in": ("arrival", ""),
+    "start": ("encounter", ""),
+    "complete": ("", "check-circle"),
+    "mark_no_show": ("no_show", ""),
 }
 # Transitions that end the appointment: they ask first (#119); the others stay one click.
 FINAL_TRANSITIONS = {
@@ -410,8 +419,168 @@ def home(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     return redirect("med_scheduling:day", organization_id)
 
 
+def _book_url(organization_id: UUID, schedule_id: UUID, day: date, slot: str) -> str:
+    """The booking page opened on a schedule, a day and a choice of its slot picker (#130): a free time or a period."""
+    return "{}?{}".format(
+        reverse("med_scheduling:book", args=(organization_id,)),
+        urlencode({"schedule": schedule_id, "day": day.isoformat(), "slot": slot}),
+    )
+
+
+def _free_items(organization_id: UUID, schedule: Any, day: date, free: Any, zone: ZoneInfo) -> list[dict[str, Any]]:
+    """The free times of a schedule on a day; each opens the booking page on it for whoever writes the schedule.
+
+    The service gives no free time that has passed, that a block takes or past the horizon of the
+    schedule, so an ended period or a blocked day offers no link.
+    """
+    return [
+        {
+            "starts_at": slot.starts_at,
+            "ends_at": slot.ends_at,
+            "local": slot.starts_at.astimezone(zone),
+            "url": _book_url(organization_id, schedule.sysid, day, slot.starts_at.isoformat())
+            if schedule.writable
+            else "",
+        }
+        for slot in free
+    ]
+
+
+def _block_url(organization_id: UUID, schedule: Any, day: date) -> str:
+    """Where a day of a schedule is blocked (#138): its "Dias e bloqueios" with the day filled; empty as for a change."""
+    if not schedule.writable or day < dj_timezone.localdate():
+        return ""
+    return "{}?{}#block-heading".format(
+        reverse("med_scheduling:schedule-days", args=(organization_id, schedule.sysid)),
+        urlencode({"date": day.isoformat()}),
+    )
+
+
+def _local_minute(moment: datetime, day: date, zone: ZoneInfo) -> int:
+    """The minute of ``day`` an instant falls on, on the practice's clock: 0 before the day, 1440 after it."""
+    local = moment.astimezone(zone)
+    if local.date() < day:
+        return 0
+    if local.date() > day:
+        return board.DAY_MINUTES
+    return local.hour * 60 + local.minute
+
+
+def _day_items(
+    request: HttpRequest,
+    organization_id: UUID,
+    agenda: Any,
+    day: date,
+    zone: ZoneInfo,
+    names: dict[UUID, Any],
+    kind_names: dict[UUID, str],
+    colors: dict[UUID, str],
+) -> list[dict[str, Any]]:
+    """What a schedule shows on the board of a day, each with its bounds in minutes of the day.
+
+    A period of booked time is a band behind its free times and appointments; a walk-in period is
+    its session card, which books on it while it is open; a block shows over what it takes.
+    """
+    schedule, now = agenda.schedule, dj_timezone.now()
+    start = datetime.combine(day, time(), tzinfo=zone)
+    try:
+        periods = _service().day_plan(actor=request.user, schedule_id=schedule.sysid, start_date=day, end_date=day)
+        blocks = _service().blocks(
+            actor=request.user, schedule_id=schedule.sysid, start=start, end=start + timedelta(days=1)
+        )
+    except (NotFound, Forbidden):
+        periods, blocks = (), ()
+
+    def bounds(first: datetime, last: datetime) -> dict[str, int]:
+        return {"start": _local_minute(first, day, zone), "end": _local_minute(last, day, zone)}
+
+    items: list[dict[str, Any]] = []
+    for period in periods:
+        if period.mode != WALK_IN:
+            items.append(
+                {
+                    "kind": "band",
+                    **bounds(period.starts_at, period.ends_at),
+                    "hours": _span(period.starts_at, period.ends_at, zone),
+                    "ended": period.ends_at <= now,
+                    "blocked": period.open_minutes <= 0,
+                }
+            )
+    for card in _session_cards(agenda.sessions, schedule, organization_id, zone, names, kind_names, colors):
+        session = card["session"]
+        open_now = schedule.writable and session.ends_at > now and session.open_minutes > 0
+        slot = scheduling_forms.BookForm.walk_in_value(session.starts_at)
+        items.append(
+            {
+                "kind": "session",
+                **bounds(session.starts_at, session.ends_at),
+                "card": card,
+                "ended": session.ends_at <= now,
+                "url": _book_url(organization_id, schedule.sysid, day, slot) if open_now else "",
+            }
+        )
+    for item in _free_items(organization_id, schedule, day, agenda.free, zone):
+        items.append({"kind": "free", **bounds(item["starts_at"], item["ends_at"]), "slot": item})
+    for item in _with_patients(request, _timed(agenda.appointments), zone, colors, names, kind_names):
+        items.append({"kind": "appointment", **bounds(item["row"].starts_at, item["row"].ends_at), "item": item})
+    for block in blocks:
+        items.append(
+            {
+                "kind": "block",
+                **bounds(block.starts_at, block.ends_at),
+                "block": block,
+                "hours": _span(max(block.starts_at, start), min(block.ends_at, start + timedelta(days=1)), zone),
+            }
+        )
+    return items
+
+
+# The order of the items that start on the same row: the band first (it is behind), then what is on it.
+BOARD_ORDER = {"band": 0, "block": 1, "session": 2, "appointment": 3, "free": 4}
+
+
+def _board(columns: list[dict[str, Any]]) -> dict[str, Any]:
+    """The rows of the board shared by the columns, and where each item of each column sits (``board.py``).
+
+    A block does not stretch the axis: it shows over the periods it takes. The items of a column
+    are in the order of their rows, which is the order of the list a phone shows.
+    """
+    axis = board.axis_of(
+        (item["start"], item["end"]) for column in columns for item in column["items"] if item["kind"] != "block"
+    )
+    for column in columns:
+        placed = []
+        for item in column["items"]:
+            spot = axis.place(item["start"], item["end"]) if axis else None
+            if spot is not None:
+                placed.append({**item, "row": spot[0], "span": spot[1], "lane": 0})
+        placed.sort(key=lambda item: (item["row"], BOARD_ORDER[item["kind"]], item["start"]))
+        front = [item for item in placed if item["kind"] != "band"]
+        found, count = board.lanes([(item["row"], item["span"]) for item in front])
+        for item, lane in zip(front, found, strict=True):
+            # Only what crosses another item takes a lane; the rest keeps the width of the column.
+            crosses = any(
+                other is not item
+                and other["row"] < item["row"] + item["span"]
+                and item["row"] < other["row"] + other["span"]
+                for other in front
+            )
+            item["lane"] = lane if crosses and count > 1 else 0
+        column["items"], column["lanes"] = placed, count
+    if axis is None:
+        return {"rows": 0, "span": 1, "step": 0, "hours": []}
+    return {
+        "rows": axis.rows,
+        "span": axis.rows + 1,  # The row of the heads, then the rows of the hours.
+        "step": axis.step,
+        # On the axis the hours sit under the row of the heads.
+        "hours": [{"label": label, "row": row + 1, "span": span} for label, row, span in axis.hours()],
+    }
+
+
 @practice_page
 def day_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    """The day as a board (#135): a column per schedule on one axis of hours, the free times leading to booking."""
     practice = _practice_or_none(request)
     if practice is None:
         return redirect("med_scheduling:home", organization_id)
@@ -426,12 +595,9 @@ def day_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     columns = [
         {
             "schedule": agenda.schedule,
-            "appointments": _with_patients(request, _timed(agenda.appointments), zone, colors, names, kind_names),
-            "sessions": _session_cards(
-                agenda.sessions, agenda.schedule, organization_id, zone, names, kind_names, colors
-            ),
-            "free": [slot.starts_at.astimezone(zone) for slot in agenda.free],
+            "items": _day_items(request, organization_id, agenda, day, zone, names, kind_names, colors),
             "change_url": _day_change_url(organization_id, agenda.schedule, day),
+            "block_url": _block_url(organization_id, agenda.schedule, day),
         }
         for agenda in agendas
     ]
@@ -446,6 +612,7 @@ def day_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             previous=day - timedelta(days=1),
             following=day + timedelta(days=1),
             columns=columns,
+            board=_board(columns),
             practice=practice,
         ),
     )
@@ -482,7 +649,8 @@ def week_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) ->
                 "sessions": _session_cards(
                     agenda.sessions if agenda else (), schedule, organization_id, zone, names, kind_names, colors
                 ),
-                "free": [slot.starts_at.astimezone(zone) for slot in (agenda.free if agenda else ())],
+                # Each free time opens the booking on it, as on the board of the day (#135).
+                "free": _free_items(organization_id, schedule, day, agenda.free if agenda else (), zone),
                 "changed": day in changed,
                 "change_url": _day_change_url(organization_id, schedule, day),
             }
@@ -955,6 +1123,7 @@ def appointment_view(
                 {
                     "code": action.code,
                     "label": action.label,
+                    "icon": action.icon,
                     "url": reverse(action.url_name, args=(organization_id, row.sysid)),
                 }
             )
@@ -962,7 +1131,14 @@ def appointment_view(
             continue
     attends = any(action["code"] == ATTEND_ACTION for action in registered)
     transitions = [
-        {"name": name, "label": TRANSITION_LABELS[name], "final": name in FINAL_TRANSITIONS, "primary": False}
+        {
+            "name": name,
+            "label": TRANSITION_LABELS[name],
+            "icon": TRANSITION_ICONS[name][0],
+            "action_icon": TRANSITION_ICONS[name][1],
+            "final": name in FINAL_TRANSITIONS,
+            "primary": False,
+        }
         for name in actions_from(row.status)
         if name in TRANSITION_LABELS
         and not (name == "mark_no_show" and _too_early_for_no_show(row))
@@ -1626,7 +1802,13 @@ def settings_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                         request, gettext("Profissional cadastrado com a agenda dele. Monte a grade semanal a seguir.")
                     )
                     return redirect("med_scheduling:schedule", organization_id, schedule.sysid)
-                messages.success(request, gettext("Configuração salva."))
+                saved = {
+                    "practice": gettext("Dados do consultório salvos."),
+                    "professional": gettext("Profissional cadastrado."),
+                    "room": gettext("Sala ou equipamento cadastrado."),
+                    "type": gettext("Tipo de atendimento cadastrado."),
+                }
+                messages.success(request, saved[kind])
                 return redirect("med_scheduling:settings", organization_id)
     return render(
         request,
@@ -1950,14 +2132,74 @@ def _week(rules: Any, every: tuple[Any, ...], offered: set[UUID], today: date) -
     ]
 
 
-@require_POST
+# The sub-tabs of the page of a schedule (#138), in order: the route of each and its label. "Grade" is the
+# schedule's own address, the one every link had before the split.
+SCHEDULE_TABS = (
+    ("grid", "med_scheduling:schedule", gettext_noop("Grade")),
+    ("days", "med_scheduling:schedule-days", gettext_noop("Dias e bloqueios")),
+    ("types", "med_scheduling:schedule-types", gettext_noop("Tipos")),
+    ("online", "med_scheduling:schedule-online", gettext_noop("Marcação online")),
+)
+# The concept whose icon each sub-tab shows (#144).
+SCHEDULE_TAB_ICONS = {"grid": "week", "days": "block", "types": "appointment_type", "online": "online_booking"}
+# The sub-tab of each form of the page: a form is shown, and comes back after saving, on its own.
+FORM_TABS = {"periods": "grid", "block": "days", "types": "types"}
+
+
+def _schedule_tab_url(tab: str, organization_id: UUID, schedule_id: UUID) -> str:
+    name = next(route for code, route, _label in SCHEDULE_TABS if code == tab)
+    return reverse(name, args=(organization_id, schedule_id))
+
+
+def _schedule_tabs(organization_id: UUID, schedule_id: UUID, current: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": gettext(label),
+            "icon": SCHEDULE_TAB_ICONS[code],
+            "url": reverse(route, args=(organization_id, schedule_id)),
+            "current": code == current,
+        }
+        for code, route, label in SCHEDULE_TABS
+    ]
+
+
+def _block_day(request: HttpRequest, today: date) -> date:
+    """The day the form "Novo bloqueio" comes with: the one the board asked (``?date=``), never before today."""
+    try:
+        asked = date.fromisoformat(request.GET.get("date", ""))
+    except ValueError:
+        return today
+    return max(asked, today)
+
+
+@practice_page
+def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
+    """The weekly grid of a schedule, its first sub-tab and its old address: every form of the page still posts here."""
+    return _schedule_page(request, organization_id, schedule_id, "grid")
+
+
+@practice_page
+def schedule_days_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
+    """The changed days and the blocks of a schedule, with the form that blocks a day first."""
+    return _schedule_page(request, organization_id, schedule_id, "days")
+
+
+@practice_page
+def schedule_types_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
+    """The kinds of appointment a schedule takes, and the form that chooses them."""
+    return _schedule_page(request, organization_id, schedule_id, "types")
+
+
 @practice_page
 def schedule_online(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
-    """Publish the schedule for online booking in the patient portal, or take it off."""
+    """The online booking of a schedule: shown on GET; POST publishes it in the patient portal, or takes it off."""
+    if request.method != "POST":
+        return _schedule_page(request, organization_id, schedule_id, "online")
+    here = _schedule_tab_url("online", organization_id, schedule_id)
     form = scheduling_forms.OnlineBookingForm(request.POST)
     if not form.is_valid():
         messages.error(request, " ".join(str(error) for errors in form.errors.values() for error in errors))
-        return redirect("med_scheduling:schedule", organization_id, schedule_id)
+        return redirect(here)
     values = form.cleaned_data
     try:
         with transaction.atomic():
@@ -1982,13 +2224,19 @@ def schedule_online(request: HttpRequest, organization_id: UUID, schedule_id: UU
             if values["enabled"]
             else gettext("Agenda fora do agendamento online."),
         )
-    return redirect("med_scheduling:schedule", organization_id, schedule_id)
+    return redirect(here)
 
 
-@practice_page
-def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
+def _schedule_page(request: HttpRequest, organization_id: UUID, schedule_id: UUID, tab: str) -> HttpResponse:
+    """A sub-tab of the page of a schedule (#138): Grade, Dias e bloqueios, Tipos, Marcação online.
+
+    Each sub-tab reads only what it shows. A form posted to any of them is the form of its own
+    sub-tab (``FORM_TABS``): with an error the page is that sub-tab, and after saving it goes back there.
+    """
     practice = _practice_or_none(request)
     schedule, rules = _grid_or_404(request, schedule_id)
+    if practice is None:
+        raise Http404
     zone = ZoneInfo(practice.timezone)
     today = dj_timezone.localdate()
     every = _all_kinds(request)
@@ -2019,17 +2267,8 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
             initial={"valid_from": today}, prefix="periods", kinds=offered, existing=rules, **_mode_kinds(taken)
         ),
         "types": types_form_class(initial=types_initial, prefix="types", kinds=kinds),
-        "block": scheduling_forms.BlockForm(prefix="block"),
+        "block": scheduling_forms.BlockForm(prefix="block", initial={"day": _block_day(request, today)}),
     }
-    names = {kind.sysid: kind.name for kind in every}
-    changed_days = [
-        {
-            "date": item.date,
-            "periods": [_period_text(window, names) for window in item.windows],
-            "url": _day_change_url(organization_id, schedule, item.date),
-        }
-        for item in _service().day_exceptions(actor=request.user, schedule_id=schedule_id)
-    ]
     status = 200
     if request.method == "POST":
         if not schedule.writable:
@@ -2037,6 +2276,7 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
         kind = request.POST.get("form", "")
         if kind not in page_forms:
             raise Http404
+        tab = FORM_TABS[kind]
         status = 400
         extra: dict[str, Any] = {}
         if kind == "types":
@@ -2045,6 +2285,7 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
             extra = {"kinds": offered, "existing": rules, **_mode_kinds(taken)}
         target = type(page_forms[kind])(request.POST, prefix=kind, **extra)
         page_forms[kind] = target
+        back = _schedule_tab_url(tab, organization_id, schedule_id)
         if target.is_valid():
             values = target.cleaned_data
             try:
@@ -2065,11 +2306,12 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
                             expected_revision=_revision(request),
                         )
                     else:
+                        starts_at, ends_at = target.bounds(zone)
                         _service().add_block(
                             actor=request.user,
                             schedule_id=schedule_id,
-                            starts_at=datetime.combine(values["day"], values["start"], tzinfo=zone),
-                            ends_at=datetime.combine(values["day"], values["end"], tzinfo=zone),
+                            starts_at=starts_at,
+                            ends_at=ends_at,
                             reason=values["reason"],
                             note=values["note"],
                             idempotency_key=_key(request),
@@ -2082,7 +2324,7 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
                 if kind in ("types", "periods") and error.code == "stale_revision":
                     # The page reopens with the schedule as it is now, so nobody saves over what they did not see.
                     messages.error(request, _schedule_changed())
-                    return redirect("med_scheduling:schedule", organization_id, schedule_id)
+                    return redirect(back)
                 target.add_error(None, conflict_text(error, stale=_schedule_changed()))
             else:
                 saved = {
@@ -2091,27 +2333,46 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
                     "block": gettext("Bloqueio incluído."),
                 }
                 messages.success(request, saved[kind])
-                return redirect("med_scheduling:schedule", organization_id, schedule_id)
-    now = dj_timezone.now()
-    blocks = _service().blocks(
-        actor=request.user, schedule_id=schedule_id, start=now - timedelta(days=1), end=now + timedelta(days=365)
-    )
-    return render(
-        request,
-        "med_scheduling/schedule.html",
-        _context(
-            request,
-            organization_id,
-            "schedules",
-            schedule=schedule,
-            week=_week(rules, every, {kind.sysid for kind in offered}, today),
-            periods_form=page_forms["periods"],
-            types_form=page_forms["types"],
+                return redirect(back)
+    context: dict[str, Any] = {
+        "schedule": schedule,
+        "tab": tab,
+        "schedule_tabs": _schedule_tabs(organization_id, schedule_id, tab),
+        "block_url": "{}#block-heading".format(_schedule_tab_url("days", organization_id, schedule_id))
+        if schedule.writable
+        else "",
+        "idempotency_key": _key(request),
+    }
+    if tab == "grid":
+        context.update(
+            week=_week(rules, every, {kind.sysid for kind in offered}, today), periods_form=page_forms["periods"]
+        )
+    elif tab == "days":
+        names = {kind.sysid: kind.name for kind in every}
+        now = dj_timezone.now()
+        blocks = _service().blocks(
+            actor=request.user, schedule_id=schedule_id, start=now - timedelta(days=1), end=now + timedelta(days=365)
+        )
+        context.update(
             block_form=page_forms["block"],
-            taken=taken,
-            every_kind=not configured,
-            changed_days=changed_days,
+            changed_days=[
+                {
+                    "date": item.date,
+                    "periods": [_period_text(window, names) for window in item.windows],
+                    "url": _day_change_url(organization_id, schedule, item.date),
+                }
+                for item in _service().day_exceptions(actor=request.user, schedule_id=schedule_id)
+            ],
             day_form=scheduling_forms.DayPickForm(initial={"date": today}),
+            blocks=[
+                {"block": block, "start": block.starts_at.astimezone(zone), "end": block.ends_at.astimezone(zone)}
+                for block in blocks
+            ],
+        )
+    elif tab == "types":
+        context.update(taken=taken, every_kind=not configured, types_form=page_forms["types"])
+    else:
+        context.update(
             online_form=scheduling_forms.OnlineBookingForm(
                 initial={
                     "enabled": schedule.online_booking,
@@ -2120,12 +2381,11 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
                 }
             ),
             online_kinds=[item["kind"] for item in taken if item["kind"].online_booking],
-            blocks=[
-                {"block": block, "start": block.starts_at.astimezone(zone), "end": block.ends_at.astimezone(zone)}
-                for block in blocks
-            ],
-            idempotency_key=_key(request),
-        ),
+        )
+    return render(
+        request,
+        f"med_scheduling/schedule_{tab}.html",
+        _context(request, organization_id, "schedules", **context),
         status=status,
     )
 
@@ -2485,7 +2745,7 @@ def _describe_block_remove(request: HttpRequest, organization_id: UUID, schedule
         subject=f"{start:%d/%m/%Y %H:%M}–{end:%H:%M}",
         message=gettext("Os horários do bloqueio voltam a ficar livres para marcar, inclusive pela marcação online."),
         submit_label=gettext("Remover o bloqueio"),
-        cancel_url=reverse("med_scheduling:schedule", args=(organization_id, schedule_id)),
+        cancel_url=_schedule_tab_url("days", organization_id, schedule_id),
         hidden={"revision": block.revision},
     )
 
@@ -2501,7 +2761,7 @@ def block_remove(request: HttpRequest, organization_id: UUID, schedule_id: UUID,
         raise Http404 from None
     except Conflict as error:
         messages.error(request, conflict_text(error))
-    return redirect("med_scheduling:schedule", organization_id, schedule_id)
+    return redirect(_schedule_tab_url("days", organization_id, schedule_id))
 
 
 @practice_page
@@ -2552,7 +2812,7 @@ def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUI
     """The "Consultas" tab of the patient page."""
     practice = _practice_or_none(request)
     try:
-        patient = PatientService().summary(actor=request.user, patient_id=patient_id)
+        patient = PatientService().header(actor=request.user, patient_id=patient_id)
         tabs = PatientService().page_tabs(actor=request.user, patient_id=patient_id)
     except (NotFound, Forbidden):
         raise Http404 from None
@@ -2562,7 +2822,12 @@ def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUI
             url = reverse(tab.url_name, args=(organization_id, patient_id))
         except NoReverseMatch:
             continue
-        navigation.append({"label": tab.label, "url": url, "current": tab.code == "med_scheduling.appointments"})
+        navigation.append(
+            {"label": tab.label, "icon": tab.icon, "url": url, "current": tab.code == "med_scheduling.appointments"}
+        )
+    # The patient header is the one of med_patients (#136); this tab adds its main action.
+    book_url = f"{reverse('med_scheduling:book', args=(organization_id,))}?{urlencode({'patient': patient.sysid})}"
+    actions = [{"label": gettext("Marcar consulta"), "url": book_url, "primary": True, "icon": "booking"}]
     try:
         rows = list(_service().appointments(actor=request.user, patient_id=patient_id, page_size=100).items)
     except (Forbidden, NotFound):
@@ -2577,6 +2842,8 @@ def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUI
             organization_id,
             "day",
             patient=patient,
+            patient_header=patient,
+            header_actions=actions,
             tabs=navigation,
             rows=[
                 {

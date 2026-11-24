@@ -25,3 +25,17 @@
     display: none !important;
   }
 }
+
+/* #136: the "Resumo" tab, where the patient opens: the panels of the apps side by side, one per line on a phone. */
+.patient-summary { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); align-items: start; }
+.patient-summary-panel .section-heading { margin-top: 0; }
+
+/* Icons (#144): a tab shows the icon of its concept before the label (buttons already align it). */
+.link-tabs a:has(> svg) { display: inline-flex; align-items: center; gap: 0.375rem; }
+.link-tabs a > svg { flex-shrink: 0; }
+.patient-summary-heading:has(> svg) { display: flex; align-items: center; gap: 0.5rem; }
+.patient-summary-heading > svg { flex-shrink: 0; color: var(--color-fg-brand); }
+/* A panel of the summary is narrow: its data list stacks each label over its value at every width (#143). */
+.patient-summary-panel .meta-list { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+.patient-summary-panel .meta-list dt { min-width: 0; }
+.patient-summary-panel .meta-list dd { margin: 0.125rem 0 0.75rem; }

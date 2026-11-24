@@ -89,7 +89,7 @@ def test_the_periods_of_a_day_are_changed_on_its_page(ready, subtests):
         assert "Alterar este dia" in html and page(ready).replace("&", "&amp;") in html
         week = assert_safe(client.get(url(ready, "week", ready.schedule.sysid), {"start": ready.monday.isoformat()}))
         assert week.count("Alterar este dia") == 7 and "Dia alterado" not in week
-        schedule = assert_safe(client.get(url(ready, "schedule", ready.schedule.sysid)))
+        schedule = assert_safe(client.get(url(ready, "schedule-days", ready.schedule.sysid)))
         assert "Nenhum dia alterado daqui para a frente." in schedule
         assert f'action="{url(ready, "day-exception", ready.schedule.sysid)}"' in schedule
     with subtests.test("what the form refuses is told on the field"):
@@ -127,7 +127,7 @@ def test_the_periods_of_a_day_are_changed_on_its_page(ready, subtests):
         assert re.search(r'<select name="mode_2".*?<option value="walk_in" selected>', html, re.S)
         week = assert_safe(client.get(url(ready, "week", ready.schedule.sysid), {"start": ready.monday.isoformat()}))
         assert week.count("Dia alterado") == 1
-        schedule = assert_safe(client.get(url(ready, "schedule", ready.schedule.sysid)))
+        schedule = assert_safe(client.get(url(ready, "schedule-days", ready.schedule.sysid)))
         assert (
             f"{ready.monday:%d/%m/%Y}" in schedule
             and "14:00–16:00 Hora marcada; 16:00–18:00 Ordem de chegada" in schedule
@@ -231,7 +231,7 @@ def test_who_does_not_write_the_schedule_does_not_change_its_days(ready, subtest
         assert "Agenda da Dra. Ana" in day and "Alterar este dia" not in day
         week = assert_safe(reader.get(url(ready, "week", ready.schedule.sysid), {"start": ready.monday.isoformat()}))
         assert "Alterar este dia" not in week
-        schedule = assert_safe(reader.get(url(ready, "schedule", ready.schedule.sysid)))
+        schedule = assert_safe(reader.get(url(ready, "schedule-days", ready.schedule.sysid)))
         assert "Dias alterados" in schedule and "day-exception" not in schedule and 'name="date"' not in schedule
     with subtests.test("another organization"):
         outsider = client_for(ready.b.reception)

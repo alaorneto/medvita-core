@@ -1,7 +1,7 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Configurar o cadastro de pacientes" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n med_icons %}{% block title %}{% translate "Configurar o cadastro de pacientes" %} · {{ site_name }}{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Pacientes" %}</p><h1>{% translate "Configurar o cadastro de pacientes" %}</h1><p class="page-description">{% translate "Crie o cadastro da clínica e escolha quais grupos cadastram e quais só consultam." %}</p></div></div>
 <form method="post" class="card max-w-3xl">{% csrf_token %}
 {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Configurar" %}</button></div></form>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_icon "configuration" "size-4" %}{% translate "Configurar" %}</button></div></form>
 {% endblock %}

@@ -1,0 +1,14 @@
+{% extends "med_scheduling/schedule.html" %}{% load i18n skeleton_format med_scheduling_labels med_icons %}
+{% block tab %}
+{% if schedule.writable %}<section class="card max-w-3xl mb-6" aria-labelledby="block-heading"><h2 id="block-heading">{% translate "Bloquear um dia" %}</h2>
+<p class="helptext">{% translate "O bloqueio tira os horários da marcação, inclusive da online, e aparece como “Bloqueio” no calendário da agenda. As consultas já marcadas não mudam." %}</p>
+<form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="form" value="block"><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+{% include "skeleton/web/components/form-errors.html" with form=block_form %}{% include "skeleton/web/components/form-fields.html" with form=block_form %}
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_icon "block" "size-4" %}{% translate "Bloquear" %}</button></div></form></section>{% endif %}
+<h2 class="section-heading">{% translate "Bloqueios" %}</h2>
+{% if blocks %}<ul class="mb-6">{% for item in blocks %}<li>{{ item.start|moment }}–{{ item.end|moment:"time" }} · {{ item.block.reason|scheduling_label:"block_reason" }}{% if item.block.note %} · {{ item.block.note }}{% endif %}{% if schedule.writable %} <a class="btn btn-danger-outline btn-sm" href="{% url 'med_scheduling:block-remove' organization_id schedule.sysid item.block.sysid %}">{% med_action_icon "trash" "size-4" %}{% translate "Remover" %}<span class="sr-only"> {% blocktranslate with start=item.start|moment %}o bloqueio de {{ start }}{% endblocktranslate %}</span></a>{% endif %}</li>{% endfor %}</ul>{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum bloqueio.") class="mb-6" %}{% endif %}
+<h2 class="section-heading">{% translate "Dias alterados" %}</h2>
+<p class="helptext">{% translate "Um dia alterado segue os períodos dele no lugar da grade semanal; os outros dias não mudam." %}</p>
+{% if changed_days %}<ul class="mb-4">{% for item in changed_days %}<li>{% if item.url %}<a href="{{ item.url }}">{{ item.date|scheduling_long_date }}</a>{% else %}{{ item.date|scheduling_long_date }}{% endif %}: {% for period in item.periods %}{{ period.hours }} {{ period.mode|scheduling_label:"mode" }}{% if not forloop.last %}; {% endif %}{% endfor %}</li>{% endfor %}</ul>{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum dia alterado daqui para a frente.") class="mb-4" %}{% endif %}
+{% if schedule.writable %}<form method="get" class="mb-6" action="{% url 'med_scheduling:day-exception' organization_id schedule.sysid %}"><div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=day_form.date hide_marks=True %}</div><div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Alterar o dia" %}</button></div></form>{% endif %}
+{% endblock %}

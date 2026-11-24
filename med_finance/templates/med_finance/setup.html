@@ -1,7 +1,7 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Configurar o financeiro" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n med_icons %}{% block title %}{% translate "Configurar o financeiro" %} · {{ site_name }}{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Configurar o financeiro" %}</h1><p class="page-description">{% translate "Cria o caixa e a tabela de preços e prepara o livro contábil padrão." %}</p></div></div>
 <form method="post" class="card max-w-3xl">{% csrf_token %}
 {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Configurar" %}</button></div></form>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_icon "configuration" "size-4" %}{% translate "Configurar" %}</button></div></form>
 {% endblock %}

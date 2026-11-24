@@ -211,6 +211,17 @@
   .link-tabs::-webkit-scrollbar {
     display: none;
   }
+  /* A data list reads label and value on one line: the labels' column is as wide as its longest
+     label (9 to 14rem) and the value starts right after it, not at half the width (#143). */
+  @media (min-width: 40rem) {
+    .meta-list {
+      grid-template-columns: fit-content(14rem) minmax(0, 1fr);
+      align-items: baseline;
+    }
+    .meta-list dt {
+      min-width: 9rem;
+    }
+  }
   /* On the phone a data list stacks: each label sits on its value, pairs apart from each other. */
   @media (max-width: 39.99rem) {
     /* Only where the strip runs off the screen; the end padding lets the last tab clear the fade. */

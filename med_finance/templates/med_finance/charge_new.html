@@ -1,10 +1,10 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Nova conta" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static med_icons %}{% block title %}{% translate "Nova conta" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{% translate "Nova conta" %}</h1></div></div>
 {% with section="new" %}{% include "med_finance/_nav.html" %}{% endwith %}
 {% if not patient %}
-<form method="get" class="filter-bar"><div class="field"><label for="q">{% translate "Paciente (nome, CPF, código ou telefone)" %}</label><input id="q" name="q" type="search" value="{{ query }}" maxlength="200" autocomplete="off" spellcheck="false"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Buscar" %}</button></div></form>
+<form method="get" class="filter-bar"><div class="field"><label for="q">{% translate "Paciente (nome, CPF, código ou telefone)" %}</label><input id="q" name="q" type="search" value="{{ query }}" maxlength="200" autocomplete="off" spellcheck="false"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% med_action_icon "search" "size-4" %}{% translate "Buscar" %}</button></div></form>
 {% if query %}{% if patients %}<ul>{% for item in patients %}<li><a href="?patient={{ item.sysid }}">{{ item.code }} · {{ item.display_name }}</a></li>{% endfor %}</ul>{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum paciente encontrado.") hint=_("Confira o nome, o CPF, o código ou o telefone e busque de novo.") %}{% endif %}{% endif %}
 {% else %}
 <p class="mb-4">{% translate "Paciente:" %} <strong>{{ patient.code }} · {{ patient.display_name }}</strong> · <a href="?">{% translate "trocar" %}</a></p>
@@ -17,6 +17,6 @@
 {% endfor %}
 <h2 class="section-heading">{% translate "Pagador" %}</h2>
 {% include "skeleton/web/components/form-fields.html" %}
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Criar e confirmar a conta" %}</button>{% if can_add %}<button type="submit" name="add_row" value="1" class="btn btn-secondary" formnovalidate>{% translate "Acrescentar item" %}</button>{% endif %}</div></form>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_icon "charge" "size-4" %}{% translate "Criar e confirmar a conta" %}</button>{% if can_add %}<button type="submit" name="add_row" value="1" class="btn btn-secondary" formnovalidate>{% med_action_icon "plus" "size-4" %}{% translate "Acrescentar item" %}</button>{% endif %}</div></form>
 {% endif %}
 {% endblock %}

@@ -15,6 +15,6 @@
   <div class="form-stack">{% for field in fields %}{% include "skeleton/web/components/form-field.html" %}{% endfor %}</div>
   </fieldset>{% endfor %}
   {% if duplicates %}<div class="field mt-4"><label><input type="checkbox" name="confirm_duplicates" value="1"> {% translate "É outra pessoa: cadastrar mesmo assim" %}</label></div>{% endif %}
-  <div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Salvar" %}</button>{% if patient %}<a class="btn btn-secondary" href="{% url 'med_patients:detail' organization_id patient.sysid %}">{% translate "Cancelar" %}</a>{% elif next_url %}<a class="btn btn-secondary" href="{{ next_url }}">{% translate "Voltar à marcação" %}</a>{% else %}<a class="btn btn-secondary" href="{% url 'med_patients:list' organization_id %}">{% translate "Cancelar" %}</a>{% endif %}</div>
+  <div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Salvar" %}</button>{% if patient %}<a class="btn btn-secondary" href="{% url 'med_patients:registration' organization_id patient.sysid %}">{% translate "Cancelar" %}</a>{% elif next_url %}<a class="btn btn-secondary" href="{{ next_url }}">{% translate "Voltar à marcação" %}</a>{% else %}<a class="btn btn-secondary" href="{% url 'med_patients:list' organization_id %}">{% translate "Cancelar" %}</a>{% endif %}</div>
 </form>
 {% endblock %}

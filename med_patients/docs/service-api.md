@@ -6,7 +6,7 @@ Referência de `PatientService` (`applications.med_patients.service_api`). O con
 
 `PatientService` dá às outras apps e às superfícies desta app o cadastro de pacientes da organização atual, com a autorização do ator do contexto. Todos os métodos exigem a app ativa (`Unavailable`), contexto de organização aberto pelo chamador e `actor` igual ao ator do contexto (`Forbidden`, código `actor_mismatch`). Comandos rodam num savepoint da transação do chamador: um erro não deixa nada gravado. Paciente inexistente, de outra organização ou ilegível respondem o mesmo `NotFound`.
 
-Para listar pacientes de outra app, use `PatientSummary` (`summary`, `summaries`, `search`): ele não traz contato, documento nem endereço. `PatientInfo` (`get`) é para a tela do cadastro.
+Para listar pacientes de outra app, use `PatientSummary` (`summary`, `summaries`, `search`): ele não traz contato, documento nem endereço. Para o cabeçalho de uma página do paciente, use `PatientHeader` (`header`) com o template `med_patients/templates/med_patients/_patient_header.html`. `PatientInfo` (`get`) é para a tela do cadastro.
 
 ## Dependência
 
@@ -146,6 +146,14 @@ Whether the patient has a live granted consent for the purpose.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
+#### `header(*, actor, patient_id) -> PatientHeader`
+
+The header of the patient pages of every app: name, code, age, sex, status and the warnings.
+
+- **Autorização:** leitura do cadastro do paciente.
+- **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
 #### `import_status(*, actor, batch_id) -> ImportStatus`
 
 The state, counts and report of one import.
@@ -172,7 +180,7 @@ Say which column feeds which patient field, with CAS, and queue the validation o
 
 #### `page_tabs(*, actor, patient_id) -> tuple[PatientSectionInfo, ...]`
 
-Every tab of the patient page, in order: the app's own, Privacidade for who manages access to the registry, then the sections of active apps. A page of another app renders the same navigation from it (the route of each tab receives ``org`` and ``patient_id``). A section with ``visible`` shows only when it answers ``True`` for the actor and the patient.
+Every tab of the patient page, by use (#136): Resumo first (``order`` 0), the sections of active apps by their ``order`` (the suite's Consultas 20, Prontuário 30, Financeiro 40), then the app's own Cadastro (50), Responsáveis, Convênios, Consentimentos, Linha do tempo and, for who manages access to the registry, Privacidade (55); a section of ``order`` above 55 comes after them. A page of another app renders the same navigation from it (the route of each tab receives ``org`` and ``patient_id``). A section with ``visible`` shows only when it answers ``True`` for the actor and the patient.
 
 - **Autorização:** leitura do cadastro do paciente.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
@@ -295,6 +303,14 @@ Summaries of up to 200 patients, in the order asked; the ones the actor does not
 Code, display name, birth date and status of one patient.
 
 - **Autorização:** leitura do cadastro do paciente.
+- **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
+- **Efeitos:** nenhum.
+
+#### `summary_panels(*, actor, patient_id) -> tuple[SummaryPanelInfo, ...]`
+
+The panels of the "Resumo" tab the actor sees, in order; only active apps.
+
+- **Autorização:** leitura do cadastro do paciente; cada painel autoriza o que mostra.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
 - **Efeitos:** nenhum.
 
@@ -456,6 +472,27 @@ A CSV import: counts and a report of (row, error code); never the cells.
 | `sections` | `tuple[ReportSection, ...]` |
 | `generated_at` | `datetime` |
 
+### `PatientHeader`
+
+The one header of the patient in the four apps (#136): who, how old, the status and the warnings.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `code` | `str` |
+| `display_name` | `str` |
+| `full_name` | `str` |
+| `social_name` | `str` |
+| `birth_date` | `date | None` |
+| `age` | `int | None` |
+| `sex` | `str` |
+| `status` | `str` |
+| `needs_guardian` | `bool` |
+| `processing_restricted` | `bool` |
+| `anonymized` | `bool` |
+| `writable` | `bool` |
+| `revision` | `int` |
+
 ### `PatientInfo`
 
 | Campo | Tipo |
@@ -531,8 +568,11 @@ A tab or shortcut on the patient page; ``url_name`` receives ``org`` and ``patie
 | `url_name` | `str` |
 | `order` | `int` |
 | `visible` | `Callable[..., bool] | None` |
+| `icon` | `str` |
 
 ### `PatientSectionInfo`
+
+A tab of the patient page; ``icon`` is the concept its icon draws (#144), empty for none.
 
 | Campo | Tipo |
 |---|---|
@@ -540,6 +580,7 @@ A tab or shortcut on the patient page; ``url_name`` receives ``org`` and ``patie
 | `label` | `str` |
 | `url_name` | `str` |
 | `order` | `int` |
+| `icon` | `str` |
 
 ### `PatientSummary`
 
@@ -598,6 +639,32 @@ A step of the clinic setup list; ``is_done(actor=...)`` says whether it is compl
 | `order` | `int` |
 | `done` | `bool` |
 
+### `SummaryPanel`
+
+A panel of the "Resumo" tab, the first one of the patient page (#136).
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `Any` |
+| `template` | `str` |
+| `order` | `int` |
+| `visible` | `Callable[..., bool] | None` |
+| `context` | `Callable[..., Mapping[str, Any]] | None` |
+| `icon` | `str` |
+
+### `SummaryPanelInfo`
+
+A panel of the "Resumo" tab the actor sees: ``template`` is rendered with what ``summary_panel_context`` returns for it, plus ``panel``, ``organization_id`` and ``patient_id``.
+
+| Campo | Tipo |
+|---|---|
+| `code` | `str` |
+| `label` | `str` |
+| `template` | `str` |
+| `order` | `int` |
+| `icon` | `str` |
+
 ### `TimelineEntry`
 
 One item of the patient timeline. ``title`` never carries health data ("Consulta realizada").
@@ -631,7 +698,8 @@ Funções reexportadas por este módulo, chamadas no `ready()` da app que se plu
 |---|---|
 | `register_consent_purpose(ConsentPurpose(code, label, description))` | Finalidade de consentimento LGPD |
 | `register_retention_guard(code, guard)` | Veto à exclusão ou anonimização; `guard(patient_id=...)` devolve o motivo ou `None` e roda no contexto da organização do chamador. Uma guarda que falha também veta |
-| `register_patient_section(PatientSection(code, label, url_name, order))` | Aba ou atalho na página do paciente; a rota recebe `org` e `patient_id` e autoriza sozinha |
+| `register_patient_section(PatientSection(code, label, url_name, order))` | Aba ou atalho na página do paciente; a rota recebe `org` e `patient_id` e autoriza sozinha. `order` até 49 fica entre Resumo e Cadastro (a suíte usa 20, 30 e 40); acima de 55, depois das abas do cadastro |
+| `register_summary_panel(SummaryPanel(code, label, template, order, visible, context))` | Painel da aba Resumo: `template` é renderizado com `panel`, `organization_id`, `patient_id` e o mapeamento que `context(actor=..., patient_id=...)` devolve, lido pelo serviço da própria app; `visible(actor=..., patient_id=...)` esconde o painel de quem nada leria nele. Um `visible` ou `context` que falha, um `context` que não é mapeamento de nomes (ou usa `panel`, `organization_id`, `patient_id`) e um template que falha escondem só aquele painel. A página lista os painéis por `summary_panels` (autoriza o paciente e aplica `visible`) e lê o de cada um por `summary_panel_context(actor=..., patient_id=..., code=...)`, que devolve `None` para o que falhou |
 | `register_timeline_provider(code, provider)` | Itens da linha do tempo: `provider(*, actor, patient_id, before, limit)` devolve até `limit` `TimelineEntry` com `at <= before` (ou os mais recentes, com `before=None`), já autorizados; o título nunca leva dado de saúde |
 | `register_patient_data_provider(code, provider)` | Seção do relatório do titular: `provider(*, actor, patient_id)` devolve pares (rótulo, valor) |
 | `register_setup_step(SetupStep(code, label, url_name, is_done, order))` | Passo da lista "Configuração da clínica"; `is_done(actor=...)` diz se está concluído |
@@ -656,3 +724,5 @@ Payload dos eventos de paciente só com `code`, `status` e `registry` (o `sysid`
 | 0.1.0 | Primeira versão |
 | 0.2.0 | Pacientes da pessoa externa do portal: `register_portal_patients` e `portal_patients` (`allow_external`) |
 | 0.2.0 | `anonymization_vetoes`: os motivos das guardas de retenção, antes da tentativa de anonimizar (somente leitura, `manage_access`) |
+| 0.2.0 | Aba Resumo e cabeçalho único (#136): `register_summary_panel`, `summary_panels`, `summary_panel_context`, `header` (`PatientHeader`); `page_tabs` por uso, com `summary` (rota `med_patients:detail`) primeiro e `registration` (Cadastro, rota nova `med_patients:registration`) no lugar de `detail` |
+| 0.2.0 | Ícones das abas e dos painéis (#144): `icon` no fim de `PatientSection`, `PatientSectionInfo`, `SummaryPanel` e `SummaryPanelInfo`, com padrão vazio (o conceito cujo ícone a aba ou o título mostra) |

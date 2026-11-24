@@ -1,0 +1,8 @@
+{% extends "skeleton/web/base.html" %}{% load i18n static med_icons %}{% block title %}{% translate "Resumo" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_patients/med_patients.css' %}">{% endblock %}
+{% block content %}
+{% include "med_patients/_patient_header.html" %}
+{# #136: the panels the active apps register (register_summary_panel), each read by its own app's service with the actor's access. #}
+{% if panels %}<div class="patient-summary">{% for panel in panels %}<section class="card patient-summary-panel" aria-labelledby="summary-{{ forloop.counter }}" data-panel="{{ panel.code }}"><h2 id="summary-{{ forloop.counter }}" class="section-heading patient-summary-heading">{% if panel.icon %}{% med_icon panel.icon "size-5" %}{% endif %}{{ panel.label }}</h2>{{ panel.html }}</section>{% endfor %}</div>
+{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nada a resumir para você.") hint=_("As outras abas mostram o que você pode ver deste paciente.") %}{% endif %}
+{% endblock %}

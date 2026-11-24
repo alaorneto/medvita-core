@@ -1,8 +1,8 @@
 """Contributions of the finance app to the agenda and the patient page.
 
-The "Receber" action on an appointment, the "Financeiro" tab (only for who reads a cash desk),
-timeline items without amounts, the data subject report lines and the retention guard of the
-fiscal records (five years).
+The "Receber" action on an appointment, the "Financeiro" tab and the balance panel of the "Resumo"
+tab (only for who reads a cash desk), timeline items without amounts, the data subject report
+lines and the retention guard of the fiscal records (five years).
 """
 
 from __future__ import annotations
@@ -22,6 +22,17 @@ def reads_a_desk(*, actor: Any, patient_id: UUID) -> bool:
     from .service_api import FinanceService
 
     return bool(FinanceService().desks(actor=actor))
+
+
+def summary_context(*, actor: Any, patient_id: UUID) -> dict[str, Any]:
+    """What the patient still owes on the desks the actor reads, and whether the actor opens a charge (#136)."""
+    from .service_api import FinanceService
+
+    service = FinanceService()
+    return {
+        "balance": service.patient_balance(actor=actor, patient_id=patient_id),
+        "can_charge": any(desk.writable for desk in service.desks(actor=actor)),
+    }
 
 
 def _readable(actor: Any, model: type) -> Any:
@@ -105,9 +116,11 @@ def retention_guard(*, patient_id: UUID) -> str | None:
 def register() -> None:
     from applications.med_patients.service_api import (
         PatientSection,
+        SummaryPanel,
         register_patient_data_provider,
         register_patient_section,
         register_retention_guard,
+        register_summary_panel,
         register_timeline_provider,
     )
     from applications.med_scheduling.service_api import AppointmentAction, register_appointment_action
@@ -122,6 +135,7 @@ def register() -> None:
             "med_finance:collect",
             statuses=("arrived", "in_progress", "completed"),
             order=20,
+            icon="payment",
         )
     )
     register_patient_section(
@@ -131,6 +145,18 @@ def register() -> None:
             "med_finance:patient_section",
             order=40,
             visible=reads_a_desk,
+            icon="charge",
+        )
+    )
+    register_summary_panel(
+        SummaryPanel(
+            "med_finance.balance",
+            gettext_lazy("Financeiro"),
+            "med_finance/_summary_panel.html",
+            order=30,
+            visible=reads_a_desk,
+            context=summary_context,
+            icon="charge",
         )
     )
     register_timeline_provider("med_finance.finance", timeline_provider)

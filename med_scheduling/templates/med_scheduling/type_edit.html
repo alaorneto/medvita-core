@@ -1,4 +1,5 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{{ kind.name }} · {% translate "Tipos de atendimento" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load static i18n %}{% block title %}{{ kind.name }} · {% translate "Tipos de atendimento" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_scheduling/med_scheduling.css' %}">{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_scheduling:settings' organization_id %}">{% translate "Configuração" %}</a> · {% translate "Tipos de atendimento" %}</p><h1>{{ kind.name }}</h1><p class="page-description">{% blocktranslate with code=kind.code %}Código {{ code }}. O código não muda; as consultas já marcadas guardam a forma de pagamento e o código de cobrança que tinham.{% endblocktranslate %}</p></div></div>
 {% include "med_scheduling/_nav.html" %}

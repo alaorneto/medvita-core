@@ -72,6 +72,8 @@ A seta aponta para a app de que se depende. No sentido da seta, uma app chama o 
 
 Uma FK entre apps nunca é caminho de leitura: o dado da outra app vem do serviço dela, que autoriza.
 
+**Página do paciente.** O paciente abre na aba Resumo, feita dos painéis que as apps registram (`register_summary_panel`), cada um lido pelo serviço da app dona com o acesso de quem abre: a recepção não vê alergias, porque o painel do prontuário só aparece para quem lê um arquivo clínico. As abas vêm por uso: Resumo, Consultas, Prontuário, Financeiro, Cadastro e as demais do cadastro. **Cabeçalho do paciente:** um só para as quatro apps. O DTO é `PatientService().header(...)` (`PatientHeader`: nome, código, idade, sexo, situação, menor sem responsável, tratamento restrito, anonimizado, se o ator altera o cadastro; nunca contato, documento ou endereço) e o template é `med_patients/templates/med_patients/_patient_header.html`, que a aba de cada app inclui com `patient_header`, `tabs`, `header_actions` (a ação principal da aba, como "Marcar consulta" ou "Nova conta") e, opcional, `header_description`. As telas do prontuário em que o médico decide (editor e página do atendimento, editor de documento, alergias e medicamentos) mostram o mesmo DTO numa faixa clínica com as alergias ativas do prontuário (`med_patients/templates/med_patients/_patient_identity.html` dentro de `med_records/templates/med_records/_clinical_strip.html`).
+
 A conta de uma consulta não nasce de evento: ela é criada sob demanda, quando a recepção usa a ação "Receber" e o financeiro chama `FinanceService.charge_for_appointment`, que lê a consulta pelo serviço da agenda e devolve sempre a mesma conta para a mesma consulta.
 
 ## Regras comuns de implementação

@@ -75,3 +75,95 @@
 /* A schedule with nothing today says so in one quiet line, not a tall card (reception board). */
 [data-reception-board] .empty-state { padding: 0.5rem 0; text-align: left; }
 [data-reception-board] .empty-state svg { display: none; }
+
+/* The day as a board (#135). Phones (the default): each schedule is a card with its items in a list, in the order of
+   their hours, one under the other; no grid and no sideways scroll. From 640 px: one grid for the whole board, the
+   axis of hours in the first column and a column per schedule, all on the same rows (subgrid), so the hours line
+   up across schedules. A row is a step of the day (board-step-*); each item takes its rows by class, computed on
+   the server (views._board): br-<first row>, bs-<rows>, and bl-<lane> when items cross. No style=, no script. */
+.day-board { display: flex; flex-direction: column; gap: 1rem; }
+.board-axis { display: none; }
+.board-column { min-width: 0; background: var(--color-neutral-primary); border: 1px solid var(--color-default); border-radius: var(--radius-card, 0.75rem); }
+.board-head { padding: 0.75rem 0.75rem 0.5rem; min-width: 0; }
+.board-head h2 { font-size: 1rem; line-height: 1.5rem; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
+.board-head .helptext { margin: 0.25rem 0 0; }
+.board-tools { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; margin: 0.25rem 0 0; font-size: 0.8125rem; line-height: 1.25rem; }
+.board-items { list-style: none; margin: 0; padding: 0 0.75rem 0.75rem; display: flex; flex-direction: column; gap: 0.375rem; }
+.board-items > li { min-width: 0; }
+/* A period of booked time heads its free times and appointments on a phone; from 640 px it is the band behind them. */
+.board-band-label { display: block; padding-top: 0.25rem; font-size: 0.8125rem; line-height: 1.25rem; font-weight: 600; color: var(--color-body-subtle); font-variant-numeric: tabular-nums; }
+.board-free-link, .board-free-text { display: flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; padding: 0 0.75rem; border: 1px solid var(--color-default-medium); border-radius: var(--radius-base, 0.5rem); font-variant-numeric: tabular-nums; }
+.board-free-link { text-decoration: none; }
+.board-free-link:hover { border-color: var(--color-brand); background: var(--color-brand-softer, var(--color-neutral-secondary-soft)); }
+.board-free-link:focus-visible { outline: 2px solid var(--color-focus, var(--color-brand)); outline-offset: 2px; }
+.board-free-text { border-color: var(--color-default); color: var(--color-body-subtle); }
+.board-appointment { background: var(--color-neutral-primary); border: 1px solid var(--color-default); border-radius: var(--radius-base, 0.5rem); padding: 0.25rem; }
+.board-appointment .appt { margin: 0; }
+.board-session .session-card { margin: 0; background: var(--color-neutral-primary); }
+.board-session-action { margin: 0.375rem 0 0; }
+/* A block is the danger tone: what it takes cannot be booked. */
+.board-block { background: var(--color-danger-soft); border: 1px solid var(--color-danger-subtle); border-radius: var(--radius-base, 0.5rem); color: var(--color-fg-danger-strong); padding: 0.375rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; }
+.board-hours { font-variant-numeric: tabular-nums; }
+.board-step-5 { --board-row: calc(2.75rem / 3); }
+.board-step-10 { --board-row: calc(2.75rem * 2 / 3); }
+.board-step-15 { --board-row: 2.75rem; }
+.board-step-30 { --board-row: 3.5rem; }
+.board-step-60 { --board-row: 5rem; }
+@media (min-width: 40rem) {
+  .board-scroll { overflow-x: auto; padding-bottom: 0.25rem; }
+  .day-board { display: grid; grid-template-columns: 3rem; grid-auto-columns: minmax(13rem, 1fr); grid-auto-flow: column; grid-template-rows: auto; grid-auto-rows: minmax(var(--board-row, 2.75rem), auto); column-gap: 0.75rem; }
+  .board-axis, .board-column { display: grid; grid-template-rows: subgrid; grid-row-start: 1; }
+  .board-hour { border-top: 1px solid var(--color-default); padding-top: 0.125rem; font-size: 0.75rem; line-height: 1rem; color: var(--color-body-subtle); font-variant-numeric: tabular-nums; }
+  .board-items { display: grid; grid-template-rows: subgrid; grid-row: 2 / -1; grid-template-columns: minmax(0, 1fr); gap: 0 0.25rem; padding: 0 0.5rem 0.5rem; }
+  .lanes-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lanes-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .board-items > li { grid-column: 1 / -1; position: relative; z-index: 1; margin: 1px 0; }
+  .board-items > .bl-1 { grid-column: 1; }
+  .board-items > .bl-2 { grid-column: 2; }
+  .board-items > .bl-3 { grid-column: 3; }
+  .board-items > .board-band { z-index: 0; margin: 0 -0.25rem; border: 1px solid var(--color-default); border-radius: var(--radius-base, 0.5rem); background: var(--color-neutral-secondary-soft); }
+  .board-band.board-ended { border-style: dashed; background: transparent; }
+  .board-band-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  /* An ended period has no free slot over it: its label shows, so the box is never an empty frame. */
+  .board-band.board-ended .board-band-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: normal; padding: 0.375rem 0.75rem; }
+  .board-free-link, .board-free-text { height: 100%; }
+  .board-session { display: flex; flex-direction: column; }
+  .board-session .session-card { flex: 1 1 auto; } /* Fills its rows and leaves room for "Marcar neste período". */
+}
+.br-1 { grid-row-start: 1; } .br-2 { grid-row-start: 2; } .br-3 { grid-row-start: 3; } .br-4 { grid-row-start: 4; } .br-5 { grid-row-start: 5; } .br-6 { grid-row-start: 6; }
+.br-7 { grid-row-start: 7; } .br-8 { grid-row-start: 8; } .br-9 { grid-row-start: 9; } .br-10 { grid-row-start: 10; } .br-11 { grid-row-start: 11; } .br-12 { grid-row-start: 12; }
+.br-13 { grid-row-start: 13; } .br-14 { grid-row-start: 14; } .br-15 { grid-row-start: 15; } .br-16 { grid-row-start: 16; } .br-17 { grid-row-start: 17; } .br-18 { grid-row-start: 18; }
+.br-19 { grid-row-start: 19; } .br-20 { grid-row-start: 20; } .br-21 { grid-row-start: 21; } .br-22 { grid-row-start: 22; } .br-23 { grid-row-start: 23; } .br-24 { grid-row-start: 24; }
+.br-25 { grid-row-start: 25; } .br-26 { grid-row-start: 26; } .br-27 { grid-row-start: 27; } .br-28 { grid-row-start: 28; } .br-29 { grid-row-start: 29; } .br-30 { grid-row-start: 30; }
+.br-31 { grid-row-start: 31; } .br-32 { grid-row-start: 32; } .br-33 { grid-row-start: 33; } .br-34 { grid-row-start: 34; } .br-35 { grid-row-start: 35; } .br-36 { grid-row-start: 36; }
+.br-37 { grid-row-start: 37; } .br-38 { grid-row-start: 38; } .br-39 { grid-row-start: 39; } .br-40 { grid-row-start: 40; } .br-41 { grid-row-start: 41; } .br-42 { grid-row-start: 42; }
+.br-43 { grid-row-start: 43; } .br-44 { grid-row-start: 44; } .br-45 { grid-row-start: 45; } .br-46 { grid-row-start: 46; } .br-47 { grid-row-start: 47; } .br-48 { grid-row-start: 48; }
+.br-49 { grid-row-start: 49; } .br-50 { grid-row-start: 50; } .br-51 { grid-row-start: 51; } .br-52 { grid-row-start: 52; } .br-53 { grid-row-start: 53; } .br-54 { grid-row-start: 54; }
+.br-55 { grid-row-start: 55; } .br-56 { grid-row-start: 56; } .br-57 { grid-row-start: 57; } .br-58 { grid-row-start: 58; } .br-59 { grid-row-start: 59; } .br-60 { grid-row-start: 60; }
+.br-61 { grid-row-start: 61; } .br-62 { grid-row-start: 62; } .br-63 { grid-row-start: 63; } .br-64 { grid-row-start: 64; } .br-65 { grid-row-start: 65; } .br-66 { grid-row-start: 66; }
+.br-67 { grid-row-start: 67; } .br-68 { grid-row-start: 68; } .br-69 { grid-row-start: 69; } .br-70 { grid-row-start: 70; } .br-71 { grid-row-start: 71; } .br-72 { grid-row-start: 72; }
+.br-73 { grid-row-start: 73; } .br-74 { grid-row-start: 74; } .br-75 { grid-row-start: 75; } .br-76 { grid-row-start: 76; } .br-77 { grid-row-start: 77; } .br-78 { grid-row-start: 78; }
+.br-79 { grid-row-start: 79; } .br-80 { grid-row-start: 80; } .br-81 { grid-row-start: 81; } .br-82 { grid-row-start: 82; } .br-83 { grid-row-start: 83; } .br-84 { grid-row-start: 84; }
+.br-85 { grid-row-start: 85; } .br-86 { grid-row-start: 86; } .br-87 { grid-row-start: 87; } .br-88 { grid-row-start: 88; } .br-89 { grid-row-start: 89; } .br-90 { grid-row-start: 90; }
+.br-91 { grid-row-start: 91; } .br-92 { grid-row-start: 92; } .br-93 { grid-row-start: 93; } .br-94 { grid-row-start: 94; } .br-95 { grid-row-start: 95; } .br-96 { grid-row-start: 96; }
+.bs-1 { grid-row-end: span 1; } .bs-2 { grid-row-end: span 2; } .bs-3 { grid-row-end: span 3; } .bs-4 { grid-row-end: span 4; } .bs-5 { grid-row-end: span 5; } .bs-6 { grid-row-end: span 6; }
+.bs-7 { grid-row-end: span 7; } .bs-8 { grid-row-end: span 8; } .bs-9 { grid-row-end: span 9; } .bs-10 { grid-row-end: span 10; } .bs-11 { grid-row-end: span 11; } .bs-12 { grid-row-end: span 12; }
+.bs-13 { grid-row-end: span 13; } .bs-14 { grid-row-end: span 14; } .bs-15 { grid-row-end: span 15; } .bs-16 { grid-row-end: span 16; } .bs-17 { grid-row-end: span 17; } .bs-18 { grid-row-end: span 18; }
+.bs-19 { grid-row-end: span 19; } .bs-20 { grid-row-end: span 20; } .bs-21 { grid-row-end: span 21; } .bs-22 { grid-row-end: span 22; } .bs-23 { grid-row-end: span 23; } .bs-24 { grid-row-end: span 24; }
+.bs-25 { grid-row-end: span 25; } .bs-26 { grid-row-end: span 26; } .bs-27 { grid-row-end: span 27; } .bs-28 { grid-row-end: span 28; } .bs-29 { grid-row-end: span 29; } .bs-30 { grid-row-end: span 30; }
+.bs-31 { grid-row-end: span 31; } .bs-32 { grid-row-end: span 32; } .bs-33 { grid-row-end: span 33; } .bs-34 { grid-row-end: span 34; } .bs-35 { grid-row-end: span 35; } .bs-36 { grid-row-end: span 36; }
+.bs-37 { grid-row-end: span 37; } .bs-38 { grid-row-end: span 38; } .bs-39 { grid-row-end: span 39; } .bs-40 { grid-row-end: span 40; } .bs-41 { grid-row-end: span 41; } .bs-42 { grid-row-end: span 42; }
+.bs-43 { grid-row-end: span 43; } .bs-44 { grid-row-end: span 44; } .bs-45 { grid-row-end: span 45; } .bs-46 { grid-row-end: span 46; } .bs-47 { grid-row-end: span 47; } .bs-48 { grid-row-end: span 48; }
+.bs-49 { grid-row-end: span 49; } .bs-50 { grid-row-end: span 50; } .bs-51 { grid-row-end: span 51; } .bs-52 { grid-row-end: span 52; } .bs-53 { grid-row-end: span 53; } .bs-54 { grid-row-end: span 54; }
+.bs-55 { grid-row-end: span 55; } .bs-56 { grid-row-end: span 56; } .bs-57 { grid-row-end: span 57; } .bs-58 { grid-row-end: span 58; } .bs-59 { grid-row-end: span 59; } .bs-60 { grid-row-end: span 60; }
+.bs-61 { grid-row-end: span 61; } .bs-62 { grid-row-end: span 62; } .bs-63 { grid-row-end: span 63; } .bs-64 { grid-row-end: span 64; } .bs-65 { grid-row-end: span 65; } .bs-66 { grid-row-end: span 66; }
+.bs-67 { grid-row-end: span 67; } .bs-68 { grid-row-end: span 68; } .bs-69 { grid-row-end: span 69; } .bs-70 { grid-row-end: span 70; } .bs-71 { grid-row-end: span 71; } .bs-72 { grid-row-end: span 72; }
+.bs-73 { grid-row-end: span 73; } .bs-74 { grid-row-end: span 74; } .bs-75 { grid-row-end: span 75; } .bs-76 { grid-row-end: span 76; } .bs-77 { grid-row-end: span 77; } .bs-78 { grid-row-end: span 78; }
+.bs-79 { grid-row-end: span 79; } .bs-80 { grid-row-end: span 80; } .bs-81 { grid-row-end: span 81; } .bs-82 { grid-row-end: span 82; } .bs-83 { grid-row-end: span 83; } .bs-84 { grid-row-end: span 84; }
+.bs-85 { grid-row-end: span 85; } .bs-86 { grid-row-end: span 86; } .bs-87 { grid-row-end: span 87; } .bs-88 { grid-row-end: span 88; } .bs-89 { grid-row-end: span 89; } .bs-90 { grid-row-end: span 90; }
+.bs-91 { grid-row-end: span 91; } .bs-92 { grid-row-end: span 92; } .bs-93 { grid-row-end: span 93; } .bs-94 { grid-row-end: span 94; } .bs-95 { grid-row-end: span 95; } .bs-96 { grid-row-end: span 96; }
+.bs-97 { grid-row-end: span 97; }
+
+/* Icons (#144): a tab shows the icon of its concept before the label (buttons already align it). */
+.link-tabs a:has(> svg) { display: inline-flex; align-items: center; gap: 0.375rem; }
+.link-tabs a > svg { flex-shrink: 0; }

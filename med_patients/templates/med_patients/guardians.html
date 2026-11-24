@@ -1,4 +1,4 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_patients_labels %}{% block title %}{% translate "Responsáveis" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_patients_labels med_icons %}{% block title %}{% translate "Responsáveis" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
 {% block extrahead %}<script src="{% static 'med_patients/med_patients.js' %}" defer></script>{% endblock %}
 {% block content %}
 {% include "med_patients/_patient_header.html" %}
@@ -6,13 +6,13 @@
   <caption class="sr-only">{% translate "Responsáveis" %}</caption>
   <thead><tr><th scope="col">{% translate "Nome" %}</th><th scope="col">{% translate "Relação" %}</th><th scope="col">{% translate "Contato" %}</th><th scope="col">{% translate "Papel" %}</th>{% if patient.writable %}<th scope="col" class="col-actions"><span class="sr-only">{% translate "Ações" %}</span></th>{% endif %}</tr></thead>
   <tbody>{% for row in rows %}<tr><td data-label="{% translate "Nome" %}"><span class="cell-primary">{{ row.name }}</span></td><td data-label="{% translate "Relação" %}">{{ row.relationship|patient_label:"relationship" }}</td><td data-label="{% translate "Contato" %}">{% if row.phone or row.email %}{% if row.phone %}<a href="tel:{{ row.phone }}">{{ row.phone|patient_phone }}</a>{% endif %}{% if row.phone and row.email %} · {% endif %}{% if row.email %}<a href="mailto:{{ row.email }}">{{ row.email }}</a>{% endif %}{% else %}—{% endif %}</td><td data-label="{% translate "Papel" %}">{% if row.is_legal_representative %}{{ "brand"|patient_marker|marker:_("Representante legal") }}{% endif %}{% if row.is_legal_representative and row.is_financial_responsible %} {% endif %}{% if row.is_financial_responsible %}{{ "neutral"|patient_marker|marker:_("Responsável financeiro") }}{% endif %}{% if not row.is_legal_representative and not row.is_financial_responsible %}—{% endif %}</td>
-  {% if patient.writable %}<td class="col-actions" data-label=""><div class="row-actions"><a class="btn btn-danger-outline btn-sm" href="{% url 'med_patients:guardian-remove' organization_id patient.sysid row.sysid %}">{% translate "Remover" %}<span class="sr-only"> {{ row.name }}</span></a></div></td>{% endif %}</tr>
+  {% if patient.writable %}<td class="col-actions" data-label=""><div class="row-actions"><a class="btn btn-danger-outline btn-sm" href="{% url 'med_patients:guardian-remove' organization_id patient.sysid row.sysid %}">{% med_action_icon "trash" "size-4" %}{% translate "Remover" %}<span class="sr-only"> {{ row.name }}</span></a></div></td>{% endif %}</tr>
   {% empty %}{% if patient.writable %}{% include "skeleton/web/components/empty-row.html" with colspan=5 message=_("Nenhum responsável cadastrado.") %}{% else %}{% include "skeleton/web/components/empty-row.html" with colspan=4 message=_("Nenhum responsável cadastrado.") %}{% endif %}{% endfor %}</tbody>
 </table></div>
 {% if patient.writable and not patient.anonymized_at %}
 <section class="card max-w-3xl" aria-labelledby="add-heading"><h2 id="add-heading">{% translate "Incluir responsável" %}</h2>
 <form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
 {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Incluir" %}</button></div></form></section>
+<div class="form-actions"><button type="submit" class="btn btn-primary">{% med_action_icon "plus" "size-4" %}{% translate "Incluir" %}</button></div></form></section>
 {% endif %}
 {% endblock %}

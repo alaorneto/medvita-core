@@ -31,6 +31,7 @@ from .extension import (
     ConsentPurpose,
     PatientSection,
     SetupStep,
+    SummaryPanel,
     TimelineEntry,
     register_consent_purpose,
     register_patient_data_provider,
@@ -38,7 +39,9 @@ from .extension import (
     register_portal_patients,
     register_retention_guard,
     register_setup_step,
+    register_summary_panel,
     register_timeline_provider,
+    summary_panel_context,
 )
 from .models import Consent, ImportBatch, Patient, PatientCoverage, PatientGuardian, PatientRegistry
 from .policies import (
@@ -67,6 +70,7 @@ __all__ = [
     "GuardianInput",
     "ImportStatus",
     "PatientDataReport",
+    "PatientHeader",
     "ReportSection",
     "PatientInfo",
     "PatientInput",
@@ -77,6 +81,8 @@ __all__ = [
     "RegistryInfo",
     "SetupStep",
     "SetupStepInfo",
+    "SummaryPanel",
+    "SummaryPanelInfo",
     "TimelineEntry",
     "TimelinePage",
     "register_consent_purpose",
@@ -85,7 +91,9 @@ __all__ = [
     "register_retention_guard",
     "register_setup_step",
     "register_portal_patients",
+    "register_summary_panel",
     "register_timeline_provider",
+    "summary_panel_context",
 ]
 
 
@@ -128,6 +136,39 @@ def patient_summary(patient: Patient) -> PatientSummary:
         patient.revision,
         patient.processing_restricted,
     )
+
+
+def age_on(born: date | None, today: date) -> int | None:
+    """Whole years from ``born`` to ``today`` (``None`` without a birth date)."""
+    if born is None:
+        return None
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
+@dataclass(frozen=True, slots=True)
+class PatientHeader:
+    """The one header of the patient in the four apps (#136): who, how old, the status and the warnings.
+
+    ``age`` is in whole years on the local date of the organization (``None`` without a birth date);
+    ``needs_guardian`` marks a minor without a legal representative, ``processing_restricted`` and
+    ``anonymized`` the LGPD states. ``writable`` says whether the actor changes the registration.
+    Never contacts, documents or address.
+    """
+
+    sysid: UUID
+    code: str
+    display_name: str
+    full_name: str
+    social_name: str
+    birth_date: date | None
+    age: int | None
+    sex: str
+    status: str
+    needs_guardian: bool
+    processing_restricted: bool
+    anonymized: bool
+    writable: bool
+    revision: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,10 +391,25 @@ class ConsentPurposeInfo:
 
 @dataclass(frozen=True, slots=True)
 class PatientSectionInfo:
+    """A tab of the patient page; ``icon`` is the concept its icon draws (#144), empty for none."""
+
     code: str
     label: str
     url_name: str
     order: int
+    icon: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryPanelInfo:
+    """A panel of the "Resumo" tab the actor sees: ``template`` is rendered with what
+    ``summary_panel_context`` returns for it, plus ``panel``, ``organization_id`` and ``patient_id``."""
+
+    code: str
+    label: str
+    template: str
+    order: int
+    icon: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -771,6 +827,43 @@ class PatientService(ServiceAPI):
         Efeitos: nenhum.
         """
         return patient_summary(_readable(actor, patient_id))
+
+    @service_method(read_only=True, since="0.2.0")
+    def header(self, *, actor: Any, patient_id: UUID) -> PatientHeader:
+        """The header of the patient pages of every app: name, code, age, sex, status and the warnings.
+
+        The template ``med_patients/templates/med_patients/_patient_header.html`` shows it; the other apps include it in
+        their patient tabs instead of building their own.
+        Autorização: leitura do cadastro do paciente.
+        Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from django.core.exceptions import PermissionDenied
+        from django.utils import timezone
+
+        from .services import needs_guardian
+
+        patient = _readable(actor, patient_id)
+        try:
+            writable = writable_patients(actor).filter(pk=patient.pk).exists()
+        except PermissionDenied:
+            writable = False
+        return PatientHeader(
+            sysid=patient.pk,
+            code=patient.code,
+            display_name=patient.display_name,
+            full_name=patient.full_name,
+            social_name=patient.social_name,
+            birth_date=patient.birth_date,
+            age=age_on(patient.birth_date, timezone.localdate()),
+            sex=patient.sex,
+            status=patient.status,
+            needs_guardian=needs_guardian(patient, actor),
+            processing_restricted=patient.processing_restricted,
+            anonymized=patient.anonymized_at is not None,
+            writable=writable,
+            revision=patient.revision,
+        )
 
     @service_method(read_only=True, since="0.1.0")
     def summaries(self, *, actor: Any, patient_ids: tuple[UUID, ...]) -> tuple[PatientSummary, ...]:
@@ -1295,16 +1388,19 @@ class PatientService(ServiceAPI):
 
         rows = [section for _code, section in PATIENT_SECTIONS.active(actor)]
         return tuple(
-            PatientSectionInfo(row.code, str(row.label), row.url_name, row.order)
+            PatientSectionInfo(row.code, str(row.label), row.url_name, row.order, row.icon)
             for row in sorted(rows, key=lambda row: (row.order, row.code))
         )
 
     @service_method(read_only=True, since="0.1.0")
     def page_tabs(self, *, actor: Any, patient_id: UUID) -> tuple[PatientSectionInfo, ...]:
-        """Every tab of the patient page, in order: the app's own, Privacidade for who manages
-        access to the registry, then the sections of active apps. A page of another app renders
-        the same navigation from it (the route of each tab receives ``org`` and ``patient_id``).
-        A section with ``visible`` shows only when it answers ``True`` for the actor and the patient.
+        """Every tab of the patient page, by use (#136): Resumo first (``order`` 0), the sections of
+        active apps by their ``order`` (the suite's Consultas 20, Prontuário 30, Financeiro 40), then
+        the app's own Cadastro (50), Responsáveis, Convênios, Consentimentos, Linha do tempo and,
+        for who manages access to the registry, Privacidade (55); a section of ``order`` above 55
+        comes after them. A page of another app renders the same navigation from it (the route of
+        each tab receives ``org`` and ``patient_id``). A section with ``visible`` shows only when it
+        answers ``True`` for the actor and the patient.
 
         Autorização: leitura do cadastro do paciente.
         Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
@@ -1314,16 +1410,19 @@ class PatientService(ServiceAPI):
 
         patient = _readable(actor, patient_id)
         own = [
-            PatientSectionInfo("detail", gettext("Cadastro"), "med_patients:detail", 0),
-            PatientSectionInfo("guardians", gettext("Responsáveis"), "med_patients:guardians", 1),
-            PatientSectionInfo("coverages", gettext("Convênios"), "med_patients:coverages", 2),
-            PatientSectionInfo("consents", gettext("Consentimentos"), "med_patients:consents", 3),
-            PatientSectionInfo("timeline", gettext("Linha do tempo"), "med_patients:timeline", 4),
+            PatientSectionInfo("summary", gettext("Resumo"), "med_patients:detail", 0, "overview"),
+            PatientSectionInfo(
+                "registration", gettext("Cadastro"), "med_patients:registration", 50, "patient_registration"
+            ),
+            PatientSectionInfo("guardians", gettext("Responsáveis"), "med_patients:guardians", 51, "guardians"),
+            PatientSectionInfo("coverages", gettext("Convênios"), "med_patients:coverages", 52, "coverages"),
+            PatientSectionInfo("consents", gettext("Consentimentos"), "med_patients:consents", 53, "consents"),
+            PatientSectionInfo("timeline", gettext("Linha do tempo"), "med_patients:timeline", 54, "timeline"),
         ]
         if AccessService().can(
             actor=actor, action="manage_access", table_key=REGISTRY_TABLE, record_id=patient.registry_id
         ):
-            own.append(PatientSectionInfo("privacy", gettext("Privacidade"), "med_patients:privacy", 5))
+            own.append(PatientSectionInfo("privacy", gettext("Privacidade"), "med_patients:privacy", 55, "privacy"))
         from .extension import PATIENT_SECTIONS, call_safely
 
         hidden = set()
@@ -1332,7 +1431,35 @@ class PatientService(ServiceAPI):
                 ok, shown = call_safely(code, section.visible, actor=actor, patient_id=patient.pk)
                 if not (ok and shown):
                     hidden.add(code)
-        return (*own, *(row for row in self.patient_sections(actor=actor) if row.code not in hidden))
+        sections = [row for row in self.patient_sections(actor=actor) if row.code not in hidden]
+        # Own tabs win a tie: a section of order 50 comes after Cadastro.
+        rows = [(row.order, 0, index, row) for index, row in enumerate(own)]
+        rows += [(row.order, 1, index, row) for index, row in enumerate(sections)]
+        return tuple(row for *_key, row in sorted(rows, key=lambda item: item[:3]))
+
+    @service_method(read_only=True, since="0.2.0")
+    def summary_panels(self, *, actor: Any, patient_id: UUID) -> tuple[SummaryPanelInfo, ...]:
+        """The panels of the "Resumo" tab the actor sees, in order; only active apps.
+
+        A panel with ``visible`` shows only when it answers ``True`` for the actor and the patient;
+        one whose ``visible`` fails is left out (logged by code and error type). What each panel
+        shows comes from ``summary_panel_context``, read by the service of the panel's app with the
+        actor's access: this method passes only the ``sysid``.
+        Autorização: leitura do cadastro do paciente; cada painel autoriza o que mostra.
+        Erros: NotFound para paciente inexistente, de outra organização ou ilegível.
+        Efeitos: nenhum.
+        """
+        from .extension import SUMMARY_PANELS, call_safely
+
+        patient = _readable(actor, patient_id)
+        shown = []
+        for code, panel in SUMMARY_PANELS.active(actor):
+            if panel.visible is not None:
+                ok, visible = call_safely(code, panel.visible, actor=actor, patient_id=patient.pk)
+                if not (ok and visible):
+                    continue
+            shown.append(SummaryPanelInfo(code, str(panel.label), panel.template, panel.order, panel.icon))
+        return tuple(sorted(shown, key=lambda row: (row.order, row.code)))
 
     @service_method(read_only=True, since="0.1.0")
     def timeline(self, *, actor: Any, patient_id: UUID, cursor: str | None = None, page_size: int = 20) -> TimelinePage:

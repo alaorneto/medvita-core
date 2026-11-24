@@ -1,6 +1,6 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{% translate "Recibo" %} {{ receipt.number }} · {% translate "Impressão" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static med_icons %}{% block title %}{% translate "Recibo" %} {{ receipt.number }} · {% translate "Impressão" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}"><script src="{% static 'med_finance/med_finance.js' %}" defer></script>{% endblock %}
 {% block content %}
-<p class="med-finance-no-print mb-4"><a href="{% url 'med_finance:receipt' organization_id receipt.sysid %}">{% translate "Voltar ao recibo" %}</a> · {% translate "Use a impressão do navegador (Ctrl+P)." %} <button type="button" class="btn btn-primary btn-sm" data-print hidden>{% translate "Imprimir" %}</button></p>
+<p class="med-finance-no-print mb-4"><a href="{% url 'med_finance:receipt' organization_id receipt.sysid %}">{% translate "Voltar ao recibo" %}</a> · {% translate "Use a impressão do navegador (Ctrl+P)." %} <button type="button" class="btn btn-primary btn-sm" data-print hidden>{% med_action_icon "printer" "size-4" %}{% translate "Imprimir" %}</button></p>
 {% include "med_finance/_receipt_body.html" with heading="h1" printing=True %}
 {% endblock %}
