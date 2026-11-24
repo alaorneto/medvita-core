@@ -203,10 +203,37 @@ class TypeForm(forms.Form):
     color = forms.ChoiceField(label=_("Cor"), choices=[(color, color) for color in COLORS])
     billing_code = forms.CharField(label=_("Código de cobrança"), max_length=40, required=False)
     requires_room = forms.BooleanField(label=_("Exige sala"), required=False)
+    online_booking = forms.BooleanField(
+        label=_("Oferecer no agendamento online"),
+        required=False,
+        help_text=_(
+            "O paciente marca este tipo pelo portal, nas agendas publicadas. Tipo que exige sala não é oferecido."
+        ),
+    )
 
     def clean_modality(self) -> str:
         # Left out (a page or client from before the field): presencial, or what the kind already has.
         return self.cleaned_data.get("modality") or self.initial.get("modality") or Modality.IN_PERSON
+
+
+class OnlineBookingForm(forms.Form):
+    """Whether the schedule is published for online booking, and the window the portal offers."""
+
+    enabled = forms.BooleanField(label=_("Publicar esta agenda para agendamento online"), required=False)
+    min_notice_hours = forms.IntegerField(
+        label=_("Antecedência mínima (horas)"),
+        min_value=0,
+        max_value=720,
+        initial=24,
+        help_text=_("O portal não oferece horário antes disso."),
+    )
+    horizon_days = forms.IntegerField(
+        label=_("Horizonte (dias)"),
+        min_value=1,
+        max_value=365,
+        initial=30,
+        help_text=_("Até quantos dias à frente; nunca além do horizonte de marcação da agenda."),
+    )
 
 
 class TypeEditForm(TypeForm):

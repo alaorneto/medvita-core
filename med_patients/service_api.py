@@ -35,6 +35,7 @@ from .extension import (
     register_consent_purpose,
     register_patient_data_provider,
     register_patient_section,
+    register_portal_patients,
     register_retention_guard,
     register_setup_step,
     register_timeline_provider,
@@ -83,6 +84,7 @@ __all__ = [
     "register_patient_section",
     "register_retention_guard",
     "register_setup_step",
+    "register_portal_patients",
     "register_timeline_provider",
 ]
 
@@ -783,6 +785,39 @@ class PatientService(ServiceAPI):
         wanted = [as_uuid(item, field="patient_ids") for item in patient_ids]
         found = {patient.pk: patient for patient in readable_patients(actor).filter(pk__in=wanted)}
         return tuple(patient_summary(found[pk]) for pk in dict.fromkeys(wanted) if pk in found)
+
+    @service_method(read_only=True, since="0.2.0", allow_external=True)
+    def portal_patients(self, *, actor: Any) -> tuple[PatientSummary, ...]:
+        """The patients the external person of the portal acts for: the ones the app that admitted
+        the person linked to the access (``register_portal_patients``), live and in the organization.
+
+        Only in the portal. A resolver that fails, or returns something other than identifiers,
+        adds nothing (logged by code and error type).
+        Autorização: só no portal, pela ligação da app que admitiu a pessoa.
+        Erros: Forbidden fora do portal; NotFound sem acesso externo ativo.
+        Efeitos: nenhum.
+        """
+        from skeleton.service_api.external import ExternalAccessService
+
+        from .extension import PORTAL_PATIENTS, call_safely
+
+        access = ExternalAccessService().me(actor=actor)
+        wanted: list[UUID] = []
+        for code, resolver in PORTAL_PATIENTS.all():
+            if code.split(".", 1)[0] != access.app_label:
+                continue
+            ok, found = call_safely(code, resolver, actor=actor, access_id=access.sysid)
+            if not ok:
+                continue
+            try:
+                wanted += [as_uuid(item, field="patient_id") for item in tuple(found or ())[:MAX_SUMMARIES]]
+            except (InvalidInput, TypeError):
+                continue
+        if not wanted:
+            return ()
+        # The portal reaches no member record by access: the app's link above is the authorization.
+        rows = {row.pk: row for row in Patient.objects.filter(pk__in=wanted)}
+        return tuple(patient_summary(rows[pk]) for pk in dict.fromkeys(wanted) if pk in rows)
 
     @service_method(read_only=True, since="0.1.0")
     def find_duplicates(

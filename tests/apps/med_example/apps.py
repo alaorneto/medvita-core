@@ -60,6 +60,14 @@ def _fiscal_situation(*, actor, charge_id):
     return {"situation": "Pendente"}
 
 
+# The portal links of the reference app (tests only): access sysid -> patients the person acts for.
+PORTAL_LINKS: dict = {}
+
+
+def _portal_patients(*, actor, access_id):
+    return PORTAL_LINKS.get(access_id, ())
+
+
 def _supplies(*, actor):
     """The catalog of the example app: what an encounter may record as consumed."""
     from applications.med_records.service_api import ConsumableItem
@@ -99,6 +107,7 @@ class MedExampleConfig(AppConfig):
             register_consent_purpose,
             register_patient_data_provider,
             register_patient_section,
+            register_portal_patients,
             register_retention_guard,
             register_setup_step,
             register_timeline_provider,
@@ -149,6 +158,7 @@ class MedExampleConfig(AppConfig):
         register_consumer("med_records.encounter_signed", "med_example.note_on_signed", on_encounter_signed)
         register_patient_section(PatientSection("med_example.notes", "Notas", "med_example:notes", order=90))
         register_timeline_provider("med_example.notes", _notes_of)
+        register_portal_patients("med_example.portal", _portal_patients)
         register_consent_purpose(ConsentPurpose("med_example.reminders", "Lembretes de exemplo"))
         register_retention_guard("med_example.keep", _keep)
         register_patient_data_provider("med_example.notes", lambda *, actor, patient_id: (("Notas de exemplo", "—"),))

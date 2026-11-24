@@ -23,6 +23,7 @@ TYPE_FIELDS = (
     "billing_code",
     "requires_room",
     "is_active",
+    "online_booking",
 )
 LIMITS = {
     "name": 120,
@@ -150,7 +151,7 @@ def clean_type(values: dict[str, Any], *, partial: bool) -> dict[str, Any]:
         clean["modality"] = _text(values["modality"]) if "modality" in values else "in_person"
         if clean["modality"] not in Modality.values:
             errors["modality"] = [gettext("Modalidade desconhecida.")]
-    for name in ("requires_room", "is_active"):
+    for name in ("requires_room", "is_active", "online_booking"):
         if name in values:
             clean[name] = bool(values[name])
     if (not partial or "name" in values) and not clean.get("name"):

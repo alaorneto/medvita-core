@@ -1487,6 +1487,41 @@ def _week(rules: Any, every: tuple[Any, ...], offered: set[UUID], today: date) -
     ]
 
 
+@require_POST
+@practice_page
+def schedule_online(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
+    """Publish the schedule for online booking in the patient portal, or take it off."""
+    form = scheduling_forms.OnlineBookingForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, " ".join(str(error) for errors in form.errors.values() for error in errors))
+        return redirect("med_scheduling:schedule", organization_id, schedule_id)
+    values = form.cleaned_data
+    try:
+        with transaction.atomic():
+            _service().set_online_booking(
+                actor=request.user,
+                schedule_id=schedule_id,
+                enabled=values["enabled"],
+                min_notice_hours=values["min_notice_hours"],
+                horizon_days=values["horizon_days"],
+                expected_revision=_revision(request),
+            )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except InvalidInput as error:
+        messages.error(request, " ".join(text for texts in error.errors.values() for text in texts))
+    except Conflict as error:
+        messages.error(request, conflict_text(error))
+    else:
+        messages.success(
+            request,
+            gettext("Agenda publicada para agendamento online.")
+            if values["enabled"]
+            else gettext("Agenda fora do agendamento online."),
+        )
+    return redirect("med_scheduling:schedule", organization_id, schedule_id)
+
+
 @practice_page
 def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) -> HttpResponse:
     practice = _practice_or_none(request)
@@ -1614,6 +1649,14 @@ def schedule_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID
             every_kind=not configured,
             changed_days=changed_days,
             day_form=scheduling_forms.DayPickForm(initial={"date": today}),
+            online_form=scheduling_forms.OnlineBookingForm(
+                initial={
+                    "enabled": schedule.online_booking,
+                    "min_notice_hours": schedule.online_min_notice_hours,
+                    "horizon_days": schedule.online_horizon_days,
+                }
+            ),
+            online_kinds=[item["kind"] for item in taken if item["kind"].online_booking],
             blocks=[
                 {"block": block, "start": block.starts_at.astimezone(zone), "end": block.ends_at.astimezone(zone)}
                 for block in blocks

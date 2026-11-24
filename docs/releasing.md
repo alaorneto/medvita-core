@@ -10,7 +10,7 @@ As quatro apps andam num trem de versão: têm sempre a mesma versão, escrita p
 
 ## O que o responsável precisa ter feito
 
-- **Release do núcleo.** Os manifestos apontam para o núcleo pela faixa `compatibility.skeleton`, e o CI e a publicação instalam o núcleo da tag de uma release publicada (`SKELETON_REF`, hoje `v0.5.0`). Subir o núcleo segue "Trocar o núcleo" em [desenvolvimento](development.md#ci).
+- **Release do núcleo.** Os manifestos apontam para o núcleo pela faixa `compatibility.skeleton`, e o CI e a publicação instalam o núcleo da tag de uma release publicada (`SKELETON_REF`, hoje `v0.6.0`). Subir o núcleo segue "Trocar o núcleo" em [desenvolvimento](development.md#ci).
 - **Chave do publicador.** Gere com `python -m skeleton.system.packages keygen --private-key katua-tech.pem --public-key katua-tech.pub.pem` numa máquina confiável, fora do Git. Guarde o conteúdo da chave privada no secret `SKAPP_SIGNING_KEY` do repositório e o da chave pública na variável `SKAPP_PUBLIC_KEY`. A chave pública vai também para o trust store das instalações.
 - **Permissão do workflow.** Em Settings → Actions → General, permita que o GitHub Actions crie e aprove pull requests, se o workflow de release precisar disso, e confira que `GITHUB_TOKEN` pode escrever conteúdo.
 

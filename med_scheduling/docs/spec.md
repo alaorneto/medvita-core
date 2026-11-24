@@ -147,6 +147,17 @@ Outras apps põem botões na consulta com `register_appointment_action(Appointme
 
 A consulta viva sai da lista pela própria agenda, e não só pelo calendário do profissional: vale igual para a agenda de sala e para a do profissional sem pessoa ligada. `day` usa o mesmo cálculo com o intervalo da agenda como duração e mostra os horários livres de todos os períodos do dia, inclusive os que listam tipos. Cada `Slot` leva em `appointment_type_ids` os tipos do período em que está (vazio: todos os da agenda). Os tipos dos períodos são lidos numa consulta só para todas as agendas do dia: o número de consultas ao banco não cresce com o número de períodos.
 
+### Agendamento online (portal do paciente)
+
+A agenda oferece ao portal do paciente do núcleo (a página é de outra app, Medvita Business) os horários livres e a marcação, sem dar à pessoa externa nenhuma concessão (ADR-017).
+
+- **Publicação.** `set_online_booking(schedule_id, enabled, min_notice_hours=24, horizon_days=30)`, de quem altera a agenda, com CAS: publica a agenda e diz a janela (antecedência mínima de 0 a 720 horas, horizonte de 1 a 365 dias, nunca além de `booking_horizon_days`). O tipo de atendimento é oferecido com `online_booking`, de quem altera o consultório. Só tipos ativos, atendidos pela agenda com hora marcada e que não exigem sala; a ordem de chegada não vai ao portal. Tirar a publicação mantém as consultas marcadas.
+- **Vínculo.** O portal só age por um paciente que a app que admitiu a pessoa ligou ao acesso dela (`PatientService.portal_patients`, registry `register_portal_patients` do cadastro).
+- **Leituras.** `public_schedules` devolve as agendas publicadas com os tipos oferecidos (`PublicSchedule`, `PublicType`: nome, profissional, especialidade, duração, modalidade; nada de membro). `public_slots(schedule_id, appointment_type_id, start_date, end_date)` devolve os horários livres como `available_slots`, cortados pela antecedência e pelo horizonte. Agenda ou tipo não publicado responde como inexistente.
+- **Marcação.** `book_external(schedule_id, appointment_type_id, patient_id, starts_at, idempotency_key)` trava a agenda como `book` e só aceita um horário que `public_slots` ofereça (`Conflict("slot_unavailable")`): dois pedidos para o mesmo horário, um vence. A consulta nasce agendada, `booked_online`, com a forma de pagamento e a modalidade do tipo, e publica `appointment_booked` com a pessoa externa como ator; a mesma chave devolve a mesma consulta. Paciente não ligado responde `NotFound`; inativo, `patient_inactive`; com tratamento restrito, `processing_restricted`.
+- **Limite de taxa.** Até 3 marcações pelo portal do mesmo paciente em 24 horas e 30 na mesma agenda em uma hora; além disso, `Conflict("rate_limited")`.
+- **Limites aceitos.** No portal, o núcleo não abre os compromissos pessoais do profissional no calendário: valem os bloqueios e as consultas da agenda (a página da agenda avisa). O evento do calendário nasce sem participantes, porque o núcleo não os muda pelo portal.
+
 ### Páginas
 
 Em `/o/<org>/apps/med_scheduling/` (nomes `med_scheduling:<nome>`); toda leitura e escrita passa pelo `SchedulingService` e pelo `PatientService`. As horas e o dia corrente são os do relógio do consultório: toda página roda com o fuso do consultório ativo (`practice_page`), qualquer que seja a preferência de fuso de quem lê, e a hora digitada num formulário é lida no mesmo relógio.
@@ -162,7 +173,7 @@ Em `/o/<org>/apps/med_scheduling/` (nomes `med_scheduling:<nome>`); toda leitura
 | `queue` | Fila de uma agenda num dia (`schedules/<id>/queue/<AAAA-MM-DD>/`): os períodos de ordem de chegada com quem aguarda, quem é esperado e quem já foi atendido |
 | `waitlist` | Lista de espera: entradas, incluir e tirar |
 | `settings` | Dados do consultório, profissionais (com a agenda dele no mesmo passo, para quem tem `access.manage`), salas e tipos (com a forma de pagamento) |
-| `type-edit` | Alterar um tipo de atendimento: nome, duração, forma de pagamento, modalidade, cor, código de cobrança, sala e ativo |
+| `type-edit` | Alterar um tipo de atendimento: nome, duração, forma de pagamento, modalidade, cor, código de cobrança, sala, agendamento online e ativo |
 | `schedules`, `schedule` | Agendas e a seção "Calendários" (as agendas de atendimento e os outros calendários que a pessoa lê, cada um com "Baixar .ics" e "Assinar no celular"; "Abrir o calendário" e "Calendários compartilhados", a página do núcleo em que a clínica cria os calendários comuns; para quem gerencia o acesso, o aviso das agendas cujo calendário ainda não é gerenciado, com "Vincular à agenda médica"); na agenda, "Assinar no celular", a grade semanal, os dias alterados, os tipos atendidos e os bloqueios |
 | `calendar-subscribe` | `calendars/<id>/subscribe/` (só `GET`): leva à página do núcleo em que a pessoa cria o link de assinatura só daquele calendário; 404 para quem não o lê |
 | `period-edit`, `period-remove` | Alterar um período da grade semanal; tirá-lo da grade (só `POST`) |
@@ -227,6 +238,7 @@ As respostas de consulta ganharam `mode`, `duration_minutes`, `arrival_number` e
 - Só o administrador configura o consultório; a configuração é idempotente pela chave e única por organização.
 - A recepção lê profissionais, salas e tipos e não os altera; a organização B não vê nada da A.
 - O tipo tem forma de pagamento; a consulta marcada sem dizê-la herda a do tipo, e um valor explícito vence.
+- Agenda não publicada não aparece no portal nem aceita marcação externa; a mesma chave devolve a mesma consulta; dois pedidos para o mesmo horário, um vence e o outro recebe `slot_unavailable`; a pessoa externa nunca marca para um paciente que não está ligado a ela; acima do limite de taxa, `rate_limited`. Cada método do portal passa no `assert_external_contract` do núcleo.
 - O tipo tem modalidade; marcar com um tipo de teleconsulta grava `modality=telehealth` e o evento `appointment_booked` a leva; a consulta iniciada recusa a troca de modalidade; a lista filtra por modalidade.
 - Uma agenda sem tipos escolhidos atende todos os tipos ativos; com tipos escolhidos, marcar outro tipo responde `type_not_allowed` e ele não tem horário livre.
 - A duração da marcação é a informada, depois a da agenda para o tipo, depois a do tipo; fora de 5 a 480 minutos é recusada.

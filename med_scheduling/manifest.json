@@ -5,12 +5,12 @@
   "compatibility": {
     "django": ">=6.1,<6.2",
     "python": ">=3.12,<3.15",
-    "skeleton": ">=0.5.0,<0.6.0"
+    "skeleton": ">=0.6.0,<0.7.0"
   },
   "conflicts": {},
   "dependencies": {
     "io.medvita.patients": ">=0.1.0,<0.2.0",
-    "org.skeleton.calendar": ">=0.5.0,<0.6.0"
+    "org.skeleton.calendar": ">=0.6.0,<0.7.0"
   },
   "description": "Agenda médica: consultório, profissionais, salas, grade de horários, consultas e lista de espera.",
   "files": [],
@@ -27,7 +27,7 @@
       "med_scheduling"
     ],
     "leaves": [
-      "0018_record_infrastructure"
+      "0020_record_infrastructure"
     ]
   },
   "name": "Agenda médica",

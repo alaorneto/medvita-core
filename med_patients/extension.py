@@ -136,7 +136,16 @@ PATIENT_SECTIONS = Registry("patient section")
 TIMELINE_PROVIDERS = Registry("timeline provider")
 DATA_PROVIDERS = Registry("patient data provider")
 SETUP_STEPS = Registry("setup step")
-REGISTRIES = [CONSENT_PURPOSES, RETENTION_GUARDS, PATIENT_SECTIONS, TIMELINE_PROVIDERS, DATA_PROVIDERS, SETUP_STEPS]
+PORTAL_PATIENTS = Registry("portal patients resolver")
+REGISTRIES = [
+    CONSENT_PURPOSES,
+    RETENTION_GUARDS,
+    PATIENT_SECTIONS,
+    TIMELINE_PROVIDERS,
+    DATA_PROVIDERS,
+    SETUP_STEPS,
+    PORTAL_PATIENTS,
+]
 
 
 def register_consent_purpose(purpose: ConsentPurpose) -> ConsentPurpose:
@@ -190,6 +199,20 @@ def register_setup_step(step: SetupStep) -> SetupStep:
     if not isinstance(step, SetupStep):
         raise TypeError("register_setup_step takes a SetupStep.")
     return SETUP_STEPS.add(step.code, step, caller=_caller_label())
+
+
+def register_portal_patients(code: str, resolver: Callable[..., Any]) -> Callable[..., Any]:
+    """Say for which patients an external person of the portal acts (the portal app's link).
+
+    ``resolver(*, actor, access_id)`` runs inside the portal (``external_context``) and returns the
+    ``sysid`` of the patients the person may act for (the patient, a child): only the ones the app
+    linked to that access. Only the resolvers of the app that admitted the person
+    (``ExternalAccessInfo.app_label``) are asked. It reads with its own app's service, marked
+    ``allow_external``, so a disabled app answers nothing.
+    """
+    if not callable(resolver):
+        raise TypeError("register_portal_patients takes a callable.")
+    return PORTAL_PATIENTS.add(code, resolver, caller=_caller_label())
 
 
 def call_safely(code: str, function: Callable[..., Any], **arguments: Any) -> tuple[bool, Any]:

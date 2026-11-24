@@ -6,7 +6,7 @@
   "description": "Tema da marca Medvita: azul, verde e petróleo do logo, claro e escuro, títulos em Poppins.",
   "publisher": "katua-tech",
   "compatibility": {
-    "skeleton": ">=0.5.0,<0.6.0"
+    "skeleton": ">=0.6.0,<0.7.0"
   },
   "tokens": {
     "brand_color": "#1273c4",

@@ -31,6 +31,20 @@ def check_revision(record: Any, expected_revision: object) -> None:
         raise Conflict("stale_revision")
 
 
+def readable(actor: Any, model: type) -> Any:
+    """The rows of ``model`` the actor reads; in the portal, the organization's rows.
+
+    In the portal (``external_context``) ``authorized_queryset`` denies: only an ``allow_external``
+    method reaches here there, and it authorized first by what the schedule published and by the
+    patient's link. Only the helpers of the free times and of a booking use it.
+    """
+    if current_context().external:
+        return model.objects.all()
+    from skeleton.access.policies import authorized_queryset
+
+    return authorized_queryset(model, user=actor, action="read")
+
+
 def deterministic_id(kind: str, actor: Any, idempotency_key: str) -> UUID:
     organization = current_context().organization_id
     return uuid.uuid5(uuid.NAMESPACE_URL, f"med-scheduling:{kind}:{organization}:{actor.pk}:{idempotency_key}")

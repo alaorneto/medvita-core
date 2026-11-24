@@ -1,6 +1,6 @@
 # API de serviços: Agenda médica
 
-Referência de `SchedulingService` (`applications.med_scheduling.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.5.0/docs/service-api.md).
+Referência de `SchedulingService` (`applications.med_scheduling.service_api`). O contrato geral está na [API de serviços do núcleo](https://github.com/alaorneto/skeleton/blob/v0.6.0/docs/service-api.md).
 
 ## Visão geral
 
@@ -16,7 +16,7 @@ Referência de `SchedulingService` (`applications.med_scheduling.service_api`). 
 
 ### `SchedulingService`
 
-#### `add_appointment_type(*, actor, code, name, duration_minutes=30, color='blue', billing_code='', requires_room=False, idempotency_key=None, payment_kind='private', modality='in_person') -> AppointmentTypeInfo`
+#### `add_appointment_type(*, actor, code, name, duration_minutes=30, color='blue', billing_code='', requires_room=False, idempotency_key=None, payment_kind='private', modality='in_person', online_booking=False) -> AppointmentTypeInfo`
 
 Add a kind of appointment; the code is unique in the practice.
 
@@ -119,6 +119,14 @@ Book an appointment; a fit-in skips the grid and the overlap check, never a bloc
 - **Autorização:** alteração na agenda e leitura do paciente.
 - **Erros:** NotFound (agenda, paciente, tipo ou sala ilegível); Forbidden se só lê a agenda; InvalidInput (horário sem fuso, duração fora de 5 a 480, modo, forma de pagamento, modalidade, observação longa, sala exigida pelo tipo); Conflict("type_not_allowed", "slot_unavailable", "mode_mismatch" para hora num período de ordem de chegada ou o contrário, "session_full", "room_unavailable", "patient_inactive", "processing_restricted").
 - **Efeitos:** código da sequência sem lacunas, consulta gravada, evento no calendário e ``med_scheduling.appointment_booked`` publicados; a mesma chave devolve a já marcada.
+
+#### `book_external(*, actor, schedule_id, appointment_type_id, patient_id, starts_at, idempotency_key) -> AppointmentInfo`
+
+Book, from the portal, a free slot of a published kind for a patient the person acts for.
+
+- **Autorização:** só no portal, pela publicação da agenda e do tipo e pelo vínculo do paciente; nenhuma concessão na agenda.
+- **Erros:** Forbidden fora do portal; NotFound para agenda ou tipo não publicado e paciente não ligado; InvalidInput para horário sem fuso ou chave inválida; Conflict("slot_unavailable"), Conflict("rate_limited") acima de 3 marcações do paciente em 24 horas ou de 30 na agenda em uma hora, Conflict("patient_inactive"), Conflict("processing_restricted").
+- **Efeitos:** código da sequência, consulta gravada, evento no calendário e ``med_scheduling.appointment_booked`` com a pessoa externa como ator; a mesma chave devolve a mesma consulta.
 
 #### `book_from_waitlist(*, actor, entry_id, schedule_id, starts_at, expected_revision, idempotency_key, duration_minutes=None, mode='booked') -> AppointmentInfo`
 
@@ -280,6 +288,22 @@ Professionals of the practice, by name.
 - **Erros:** NotFound sem consultório legível.
 - **Efeitos:** nenhum.
 
+#### `public_schedules(*, actor) -> tuple[PublicSchedule, ...]`
+
+The schedules published for online booking, each with the kinds offered on it.
+
+- **Autorização:** só no portal, para a pessoa externa com um paciente ligado pela app do portal.
+- **Erros:** Forbidden fora do portal; NotFound sem acesso externo ativo.
+- **Efeitos:** nenhum.
+
+#### `public_slots(*, actor, schedule_id, appointment_type_id, start_date, end_date) -> tuple[Slot, ...]`
+
+Free booked-time slots of a published kind on a published schedule (at most 62 days).
+
+- **Autorização:** só no portal, para a pessoa externa com um paciente ligado pela app do portal.
+- **Erros:** Forbidden fora do portal; NotFound para agenda ou tipo não publicado; InvalidInput para intervalo invertido ou acima de 62 dias.
+- **Efeitos:** nenhum.
+
 #### `queue(*, actor, schedule_id, date) -> tuple[QueueSession, ...]`
 
 The walk-in sessions of a schedule on one local day, each with its queue.
@@ -367,6 +391,14 @@ Change where an appointment not yet started is seen ("in_person" or "telehealth"
 - **Autorização:** alteração na agenda.
 - **Erros:** NotFound; Forbidden; InvalidInput para modalidade desconhecida; Conflict("stale_revision"; "invalid_transition" fora de agendada, confirmada ou aguardando).
 - **Efeitos:** grava a modalidade e publica ``med_scheduling.appointment_modality_changed``.
+
+#### `set_online_booking(*, actor, schedule_id, enabled, expected_revision, min_notice_hours=24, horizon_days=30) -> ScheduleInfo`
+
+Publish a schedule for online booking in the patient portal, or take it off, with CAS.
+
+- **Autorização:** alteração na agenda.
+- **Erros:** NotFound; Forbidden; InvalidInput; Conflict("stale_revision").
+- **Efeitos:** grava a publicação da agenda.
 
 #### `set_priority(*, actor, appointment_id, priority, expected_revision) -> AppointmentInfo`
 
@@ -538,6 +570,7 @@ An appointment as lists show it: never the notes of the reception nor the priori
 | `duration_minutes` | `int` |
 | `arrival_number` | `int | None` |
 | `modality` | `str` |
+| `booked_online` | `bool` |
 
 ### `AppointmentTypeInfo`
 
@@ -555,6 +588,7 @@ An appointment as lists show it: never the notes of the reception nor the priori
 | `revision` | `int` |
 | `payment_kind` | `str` |
 | `modality` | `str` |
+| `online_booking` | `bool` |
 
 ### `AvailabilityRuleInfo`
 
@@ -728,6 +762,31 @@ An appointment that a change of the periods of its day does not hold as it is.
 | `is_active` | `bool` |
 | `revision` | `int` |
 
+### `PublicSchedule`
+
+A schedule published for online booking, as the patient portal shows it: no member data.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `name` | `str` |
+| `professional_name` | `str` |
+| `specialty` | `str` |
+| `min_notice_hours` | `int` |
+| `horizon_days` | `int` |
+| `types` | `tuple[PublicType, ...]` |
+
+### `PublicType`
+
+A kind of appointment offered for online booking on a published schedule.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `name` | `str` |
+| `duration_minutes` | `int` |
+| `modality` | `str` |
+
 ### `QueueEntry`
 
 An appointment of a walk-in session as the queue shows it, with the priority mark (sensitive).
@@ -785,6 +844,9 @@ A walk-in session: a schedule and one of its walk-in periods on a day.
 | `is_active` | `bool` |
 | `revision` | `int` |
 | `writable` | `bool` |
+| `online_booking` | `bool` |
+| `online_min_notice_hours` | `int` |
+| `online_horizon_days` | `int` |
 
 ### `ScheduleTypeInfo`
 
@@ -873,4 +935,4 @@ As rotas de `/api/v1/o/<org>/apps/med_scheduling/` estão em `docs/spec.md` (se�
 | Versão | Mudança |
 |---|---|
 | 0.1.0 | Primeira versão |
-| 0.2.0 | Modalidade presencial ou teleconsulta: `modality` em `AppointmentTypeInfo` e `AppointmentInfo` (no fim, com padrão), em `add_appointment_type`, `book` e no filtro de `appointments`; `set_modality`; `modality` no payload dos eventos e o evento `appointment_modality_changed` |
+| 0.2.0 | Agendamento online pelo portal: `public_schedules`, `public_slots` e `book_external` (`allow_external`), `set_online_booking`, `PublicSchedule`, `PublicType`; `online_booking` (e a janela) no fim de `ScheduleInfo` e `AppointmentTypeInfo`, `booked_online` no fim de `AppointmentInfo`, com padrão. Modalidade presencial ou teleconsulta: `modality` em `AppointmentTypeInfo` e `AppointmentInfo` (no fim, com padrão), em `add_appointment_type`, `book` e no filtro de `appointments`; `set_modality`; `modality` no payload dos eventos e o evento `appointment_modality_changed` |

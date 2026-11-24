@@ -1,6 +1,6 @@
 # Guia de implantação
 
-Para o operador da plataforma e para o administrador da clínica. As regras de instalação, atualização e operação do núcleo estão na documentação do Skeleton ([implantação](https://github.com/alaorneto/skeleton/blob/v0.5.0/docs/deployment.md) e [atualizações](https://github.com/alaorneto/skeleton/blob/v0.5.0/docs/updates.md)); este guia só cobre o que é próprio da suíte.
+Para o operador da plataforma e para o administrador da clínica. As regras de instalação, atualização e operação do núcleo estão na documentação do Skeleton ([implantação](https://github.com/alaorneto/skeleton/blob/v0.6.0/docs/deployment.md) e [atualizações](https://github.com/alaorneto/skeleton/blob/v0.6.0/docs/updates.md)); este guia só cobre o que é próprio da suíte.
 
 ## 1. Operador da plataforma
 
@@ -60,3 +60,7 @@ O script cria profissionais, salas, tipos particulares e de convênio, agendas c
 ## 6. Ao atualizar uma clínica que já tem agendas
 
 A partir do núcleo `v0.4.0`, o calendário de cada agenda de atendimento é gerenciado pela agenda médica: as páginas do calendário não o renomeiam, compartilham nem excluem, e o acesso dele só muda junto com o da agenda. As agendas criadas depois da atualização já nascem assim. Para as que existiam antes, quem gerencia o acesso abre **Agenda médica → Agendas** e usa "Vincular à agenda médica" uma vez; o aviso some quando não há mais nada a vincular, e repetir o passo não muda nada. Até lá as agendas funcionam como antes, só que a página do calendário ainda deixa mudar o acesso do calendário sem mudar o da agenda.
+
+## 7. Ao atualizar para o núcleo `v0.6.0`
+
+A partir do núcleo `v0.6.0`, o MFA é exigido em produção do administrador da plataforma (sem como desligar) e, por padrão, de quem tem papel administrativo na organização (`SKELETON_REQUIRE_ADMIN_MFA`, na tela da instância). Até cadastrar o autenticador, essas pessoas só veem as páginas de MFA. Avise o administrador da clínica antes de atualizar. Como a clínica guarda dado de saúde, vale também ligar a política da organização para todos os membros (**Configurações → Segurança**, `mfa_policy=all`); quem perder o autenticador e os códigos de recuperação é atendido pelo administrador da plataforma, que redefine o MFA. As regras estão na autenticação da documentação do [núcleo v0.6.0](https://github.com/alaorneto/skeleton/blob/v0.6.0/docs/authentication-sso.md#mfa-cifrado-e-obrigatório).
