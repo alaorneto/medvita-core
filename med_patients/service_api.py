@@ -1614,6 +1614,22 @@ class PatientService(ServiceAPI):
             patient.save(update_fields={"processing_restricted"})
         return patient_info(patient, writable=True)
 
+    @service_method(read_only=True, since="0.2.0")
+    def anonymization_vetoes(self, *, actor: Any, patient_id: UUID) -> tuple[str, ...]:
+        """The reasons the retention guards give today to refuse anonymizing a patient (empty: none vetoes).
+
+        The same guards ``anonymize`` consults, asked before the attempt, so the page explains
+        the refusal instead of offering the form; ``anonymize`` asks them again when it runs.
+        Autorização: ``manage_access`` no cadastro.
+        Erros: NotFound para paciente ilegível; Forbidden para quem lê sem gerir o acesso.
+        Efeitos: nenhum.
+        """
+        from .extension import retention_vetoes
+
+        patient = _readable(actor, patient_id)
+        _require_privacy_manager(actor, patient)
+        return tuple(retention_vetoes(actor=actor, patient=patient))
+
     @service_method(read_only=False, since="0.1.0")
     def anonymize(self, *, actor: Any, patient_id: UUID, expected_revision: int) -> PatientInfo:
         """Erase the identification of a patient for good, when no retention guard vetoes, with CAS.

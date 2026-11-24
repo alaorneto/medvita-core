@@ -16,6 +16,8 @@ ALLOWED = {
     ("cancel", "scheduled"): "cancelled",
     ("cancel", "confirmed"): "cancelled",
     ("cancel", "arrived"): "cancelled",
+    # Without a confirmation; undo_target gives "confirmed" for a confirmed one.
+    ("undo_check_in", "arrived"): "scheduled",
 }
 
 

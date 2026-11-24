@@ -18,6 +18,8 @@
 </div>
 {% endif %}
 {% endif %}
-<h2 class="section-heading">{% translate "Contas recentes" %}</h2>
-{% with rows=charges %}{% include "med_finance/_charge_rows.html" %}{% endwith %}
+<h2 class="section-heading">{% translate "Contas em aberto até hoje" %}</h2>
+<p class="helptext mb-2">{% translate "Contas deste caixa com saldo a receber e vencimento até hoje." %}</p>
+{% translate "Nenhuma conta em aberto até hoje." as empty_message %}{% with rows=charges %}{% include "med_finance/_charge_rows.html" %}{% endwith %}
+<p class="mb-6"><a href="{% url 'med_finance:charges' organization_id %}?{{ outstanding_query }}">{% if more_charges %}{% translate "Ver todas as contas em aberto até hoje" %}{% else %}{% translate "Abrir na lista de contas" %}{% endif %}</a></p>
 {% endblock %}

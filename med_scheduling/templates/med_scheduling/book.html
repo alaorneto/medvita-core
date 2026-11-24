@@ -5,9 +5,10 @@
 {% include "med_scheduling/_nav.html" %}
 {% if not patient %}
 <form method="get" class="filter-bar" aria-label="{% translate "Buscar paciente" %}">{% for name, value in carried.items %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<div class="field"><label for="q">{% translate "Paciente (nome, CPF, código ou telefone)" %}</label><input id="q" name="q" type="search" value="{{ query }}" maxlength="200" autocomplete="off" spellcheck="false"></div><div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Buscar" %}</button></div></form>
-{% if query %}{% if patients %}<ul class="mb-6">{% for item in patients %}<li><a href="?patient={{ item.sysid }}{% if carry %}&amp;{{ carry }}{% endif %}"><span translate="no">{{ item.code }}</span> · {{ item.display_name }}</a></li>{% endfor %}</ul>{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum paciente encontrado.") hint=_("Confira o nome, o CPF, o código ou o telefone digitado.") class="mb-6" %}{% endif %}{% endif %}
+{% if query %}{% if patients %}{% include "med_scheduling/_patient_results.html" %}{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum paciente encontrado.") hint=_("Confira o nome, o CPF, o código ou o telefone digitado, ou cadastre o paciente.") action_url=register_url action_label=_("Cadastrar paciente") class="mb-6" %}{% endif %}{% endif %}
+{% if register_url %}<p class="helptext mb-6">{% translate "Paciente novo?" %} <a href="{{ register_url }}">{% translate "Cadastrar paciente" %}</a>. {% translate "Depois do cadastro a marcação continua daqui, com a agenda, o dia e o horário escolhidos." %}</p>{% endif %}
 {% else %}
-<p class="mb-4">{% translate "Paciente:" %} <strong><span translate="no">{{ patient.code }}</span> · {{ patient.display_name }}</strong> · <a href="?{{ carry }}">{% translate "trocar" %}</a></p>
+<p class="mb-4">{% translate "Paciente:" %} <strong><span translate="no">{{ patient.code }}</span> · {{ patient.display_name }}</strong>{% if patient.birth_date %} · {% blocktranslate with day=patient.birth_date|moment:"date" %}nascimento {{ day }}{% endblocktranslate %}{% endif %} · <a href="?{{ carry }}">{% translate "trocar" %}</a></p>
 {% if entry_id %}<p class="mb-4 helptext">{% translate "Marcação a partir da lista de espera: a entrada passa a agendada e o tipo de atendimento é o da entrada." %}</p>{% endif %}
 <form method="get" class="card max-w-3xl mb-6"><input type="hidden" name="patient" value="{{ patient.sysid }}">{% if entry_id %}<input type="hidden" name="entry" value="{{ entry_id }}"><input type="hidden" name="revision" value="{{ entry_revision }}">{% endif %}{% for name, value in carried.items %}{% if name == "slot" or name == "arrived" %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor %}{{ form.suggested_duration }}
 {% include "skeleton/web/components/form-errors.html" %}
@@ -25,16 +26,11 @@
   <dt>{% translate "Modalidade" %}</dt><dd>{{ chosen.kind.modality|scheduling_label:"modality" }}</dd>
 </dl>
 <fieldset class="mb-4"><legend>{% blocktranslate with day=chosen.day|scheduling_long_date:"inline" %}Períodos de {{ day }}{% endblocktranslate %}</legend>
+<nav class="toolbar slot-days" aria-label="{% translate "Outro dia" %}">{% if chosen.days.previous %}<a class="btn btn-secondary btn-sm" href="{{ chosen.days.previous }}">{% translate "Dia anterior" %}</a>{% endif %}<a class="btn btn-secondary btn-sm" href="{{ chosen.days.following }}">{% translate "Próximo dia" %}</a></nav>
 <p class="helptext mb-4">{% translate "Escolha um horário livre de um período de hora marcada, ou um período de ordem de chegada." %}</p>{{ form.slot.errors }}
-{% for item in plan %}<div class="period-card">
-<p class="period-hours">{{ item.hours }} · {{ item.mode|scheduling_label:"mode" }}</p>
-<p class="helptext">{{ item.occupancy }}{% if item.full %} {{ "warning"|scheduling_marker|marker:_("Lotado") }}{% endif %}</p>
-{% if item.offer %}<div class="slot-list"><label class="slot-option"><input type="radio" name="slot" value="{{ item.value }}"{% if item.picked %} checked{% endif %}> {% blocktranslate with hours=item.hours %}Ordem de chegada · {{ hours }}{% endblocktranslate %}</label></div>{% endif %}
-{% if item.slots %}<div class="slot-list">{% for slot in item.slots %}<label class="slot-option"><input type="radio" name="slot" value="{{ slot.value }}"{% if slot.picked %} checked{% endif %}> {{ slot.local|moment:"time" }}</label>{% endfor %}</div>{% endif %}
-{% if item.note %}<p class="helptext">{{ item.note }}</p>{% endif %}
-</div>{% empty %}<p class="helptext">{% translate "Esta agenda não atende neste dia." %} <a href="{% url 'med_scheduling:week' organization_id chosen.schedule_id %}?start={{ chosen.day.isoformat }}">{% translate "Ver a semana" %}</a>. {% translate "Um encaixe com hora continua possível." %}</p>{% endfor %}</fieldset>
-<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.fit_in %}{% include "skeleton/web/components/form-field.html" with field=form.fit_in_time %}{% include "skeleton/web/components/form-field.html" with field=form.modality %}{% include "skeleton/web/components/form-field.html" with field=form.notes %}{% if chosen.today %}{% include "skeleton/web/components/form-field.html" with field=form.arrived %}{% endif %}{% include "skeleton/web/components/form-field.html" with field=form.priority %}</div>
-<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Marcar" %}</button></div></form>
+{% if plan %}{% include "med_scheduling/_slot_plan.html" %}{% else %}<p class="helptext">{% translate "Esta agenda não atende neste dia." %} <a href="{% url 'med_scheduling:week' organization_id chosen.schedule_id %}?start={{ chosen.day.isoformat }}">{% translate "Ver a semana" %}</a>. {% translate "Um encaixe com hora continua possível." %}</p>{% endif %}</fieldset>
+<div class="form-stack">{% include "skeleton/web/components/form-field.html" with field=form.fit_in %}<div data-fit-in-only>{% include "skeleton/web/components/form-field.html" with field=form.fit_in_time %}</div>{% include "skeleton/web/components/form-field.html" with field=form.modality %}{% include "skeleton/web/components/form-field.html" with field=form.notes %}{% if chosen.today %}{% include "skeleton/web/components/form-field.html" with field=form.arrived %}{% endif %}{% include "skeleton/web/components/form-field.html" with field=form.priority %}</div>
+<div class="form-actions"><button type="submit" class="btn btn-primary" data-slot-submit>{{ chosen.submit }}</button></div></form>
 {% endif %}
 {% endif %}
 {% endblock %}

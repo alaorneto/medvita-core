@@ -1,0 +1,5 @@
+{% load i18n skeleton_format %}{% comment %}The patients a search found, to choose one (#130): the name links to the same page with ``?patient=<sysid>`` and what the page carries (``carry``, already encoded; ``anchor`` is where the page opens). The birth date and the code tell namesakes apart; the patient summary carries no contact (#130).{% endcomment %}<div class="table-scroll table-stack mb-6"><table>
+<caption class="sr-only">{% translate "Pacientes encontrados" %}</caption>
+<thead><tr><th scope="col">{% translate "Paciente" %}</th><th scope="col" class="col-date">{% translate "Nascimento" %}</th></tr></thead>
+<tbody>{% for item in patients %}<tr><td data-label="{% translate "Paciente" %}"><a class="cell-primary" href="?patient={{ item.patient.sysid }}{% if carry %}&amp;{{ carry }}{% endif %}{{ anchor }}">{{ item.patient.display_name }}</a> <span class="cell-secondary" translate="no">{{ item.patient.code }}</span></td><td class="col-date" data-label="{% translate "Nascimento" %}">{% if item.patient.birth_date %}{{ item.patient.birth_date|moment:"date" }}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div>

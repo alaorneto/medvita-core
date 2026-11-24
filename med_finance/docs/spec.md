@@ -94,24 +94,28 @@ O financeiro não emite documento fiscal: as apps de Receita Saúde (Medvita Pro
 ### Relatórios
 
 - `daily_summary(date)`: num dia local, o recebido por forma de pagamento, os estornos, as contas emitidas (quantidade e total) e as contas do dia em aberto; os totais em dinheiro batem com o saldo da conta de dinheiro no livro.
-- `receivables(as_of)`: saldos em aberto por faixa de atraso (a vencer, 1–30, 31–60, 61–90, acima de 90 dias), calculados das contas desta app; o relatório de vencimentos do livro (`aging`) é o da contabilidade.
+- `receivables(as_of)`: saldos em aberto por faixa de atraso (a vencer, 1–30, 31–60, 61–90, acima de 90 dias), calculados das contas desta app; cada faixa diz os vencimentos que cobre (`due_from`, `due_to`), que `charges(outstanding=True, start=, end=)` lista; o relatório de vencimentos do livro (`aging`) é o da contabilidade.
 - As duas consultas são agregadas no banco: o número de consultas não cresce com o de contas.
 
 ### Páginas
 
 Cancelar a conta, estornar um pagamento e anular um recibo pedem o motivo numa página de confirmação; desativar um item de preço também confirma (#119). "Estornar" só aparece depois de anulado o recibo do pagamento, e "Cancelar a conta" só numa conta sem pagamento. Fechar o caixa tem dois passos: o primeiro mostra o esperado em dinheiro, o contado e a diferença; o segundo fecha. Pagamento, movimento e fechamento recusados voltam com o que foi digitado e o erro no formulário (#120). O recibo impresso tem título, endereço da clínica e a linha de assinatura de quem recebeu (#118).
 
+Do recebimento ao recibo (#132): "Receber e emitir recibo" leva direto à página do recibo emitido, cuja ação principal é "Imprimir recibo" (com "Voltar à conta" para um pagamento parcial). Parcelas e código de autorização são dos cartões: o script opcional da app (`static/med_finance/med_finance.js`) esconde e não envia esses campos nas outras formas; sem ele, todos aparecem e o serviço valida como sempre (parcelas só no crédito; sem parcelas informadas, uma). A nova conta escolhe "Item da tabela" ou "Descrição livre" (`segmented`, a escolha em `?mode=`) e aceita vários itens sem JavaScript: "Acrescentar item" devolve a página com uma linha a mais e o que foi digitado, sem criar nada; linhas em branco são ignoradas e ao menos uma é exigida. O caixa lista as contas dele em aberto até hoje (em aberto ou parcialmente pagas, vencimento hoje ou antes), com o link para a lista de contas com o mesmo filtro. A lista de contas filtra por situação (também "A receber", em aberto ou parcial) e por vencimento (de, até), no endereço; um filtro sem resultado diz isso e oferece "Limpar". As faixas dos recebíveis levam à lista de contas da faixa; o resumo do dia anda para o dia anterior e o seguinte e imprime sem a navegação.
+
+"Receber" pela consulta (`collect`) é um POST com CSRF (#131): um GET responde 405 e não cria conta.
+
 Em `/o/<org>/apps/med_finance/` (nomes `med_finance:<nome>`); toda leitura e escrita passa pelo `FinanceService`. Valores são digitados em reais com vírgula ("250,00"), convertidos para centavos por `skeleton.common.money.parse` (nunca `float`), e mostrados com o filtro `brl`.
 
 | Nome | Página |
 |---|---|
-| `desk` | Caixa do dia: abrir, totais por forma de pagamento, suprimento e sangria, fechar, contas recentes |
+| `desk` | Caixa do dia: abrir, totais por forma de pagamento, suprimento e sangria, fechar, contas em aberto até hoje |
 | `session` | Relatório da sessão (imprimível): abertura, formas de pagamento, movimentos, contado e diferença |
-| `charges`, `charge_new`, `charge` | Contas com filtro de situação; nova conta (busca de paciente, item da tabela ou descrição livre, pagador); a conta com itens, pagamentos, recibos, receber, estornar, confirmar e cancelar |
-| `collect` | Entrada pela consulta ("Receber"): a conta da consulta |
-| `receipt`, `receipt_print` | Recibo com o valor por extenso, o resumo do selo, o aviso fiscal e "ANULADO" quando for o caso; anular |
+| `charges`, `charge_new`, `charge` | Contas com filtro de situação (e "A receber") e vencimento; nova conta (busca de paciente, item da tabela ou descrição livre, vários itens, pagador); a conta com itens, pagamentos, recibos, receber, estornar, confirmar e cancelar |
+| `collect` | Entrada pela consulta ("Receber", só POST): a conta da consulta |
+| `receipt`, `receipt_print` | Recibo com o valor por extenso, o resumo do selo, o aviso fiscal e "ANULADO" quando for o caso; imprimir (a ação principal); anular |
 | `prices` | Tabela de preços: itens, incluir, desativar |
-| `daily`, `receivables` | Resumo do dia e contas a receber por atraso |
+| `daily`, `receivables` | Resumo do dia (dia anterior e seguinte, imprimível) e contas a receber por atraso (cada faixa leva às contas dela) |
 | `patient_section` | Aba "Financeiro" do paciente: contas e saldo |
 | `setup` | Configuração inicial (administradores) |
 

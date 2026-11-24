@@ -6,6 +6,6 @@
 <h1>{% translate "Registro de atendimento" %} <span translate="no">{{ header.code }}</span></h1>
 <p>{% translate "Paciente:" %} {% if patient %}{{ patient.display_name }} (<span translate="no">{{ patient.code }}</span>){% else %}{% translate "não disponível" %}{% endif %} · {{ header.occurred_at|moment }}</p>
 {% include "med_records/_sections.html" %}
-{% include "med_records/_seal.html" with signed=header.signed signed_at=header.signed_at author_name=header.author_name author_council=header.author_council digest=header.seal_digest %}
+{% include "med_records/_seal.html" with signed=header.signed signed_at=header.signed_at author_name=header.author_name author_council=header.author_council digest=header.seal_digest full=True %}
 </article>
 {% endblock %}

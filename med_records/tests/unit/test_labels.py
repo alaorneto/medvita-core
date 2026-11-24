@@ -72,7 +72,19 @@ def test_the_seal_box_has_one_paragraph_per_line_and_the_verification_code():
         )
     assert "<br" not in html and html.count("<p>") == 3
     assert "<time datetime=" in html and "Dra. Ana (CRM 123)" in html
-    assert "Código de verificação:" in html and 'translate="no">abc123<' in html
+    # #133: a short code on screen, the whole one in the title, to screen readers and on paper.
+    assert "Código de verificação:" in html and 'translate="no" title="abc123">' in html
+    assert '<span class="seal-digest-short" aria-hidden="true">abc123…</span>' in html
+    assert '<span class="seal-digest-full">abc123</span>' in html
+
+
+def test_the_seal_box_prints_the_whole_code():
+    with translation.override("pt-br"):
+        html = render_to_string(
+            "med_records/_seal.html",
+            {"signed": True, "signed_at": datetime(2026, 11, 24, 15, 30, tzinfo=UTC), "digest": "abc123", "full": True},
+        )
+    assert 'translate="no">abc123<' in html and "seal-digest-short" not in html
 
 
 def test_the_seal_box_of_a_draft():

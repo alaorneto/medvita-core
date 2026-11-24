@@ -6,7 +6,7 @@
 
 from django import template
 
-from ..models import AccessLog, Allergy, EntryTemplate, Medication
+from ..models import AccessLog, Allergy, Encounter, EntryTemplate, Medication
 
 register = template.Library()
 
@@ -17,6 +17,7 @@ CHOICES = {
     "medication_status": Medication.Status,
     "access_action": AccessLog.Action,
     "template_kind": EntryTemplate.Kind,
+    "encounter_kind": Encounter.Kind,
 }
 
 # The core's status_badge and marker read fixed maps (#121): a state or marker of this app is shown with a core code

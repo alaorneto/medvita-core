@@ -426,7 +426,8 @@ def test_the_reception_runs_the_queue_of_today(ready, subtests):
     with subtests.test("everybody is expected, each with the arrival"):
         html = assert_safe(client.get(reception))
         assert "Agenda da Dra. Ana" in html and "3 de 10 vagas" in html and "Ninguém aguardando." in html
-        assert html.count("Registrar chegada") == 3 and html.count("Chegada prioritária (Lei&nbsp;10.048)") == 3
+        # The buttons of the queue (the header's "Registrar chegada" is a link to the board).
+        assert html.count("Registrar chegada<span") == 3 and html.count("Chegada prioritária (Lei&nbsp;10.048)") == 3
         assert all(name in html for name in patients)
     with subtests.test("a page that opened before another change gives no number"):
         response = check_in("Ana Primeira", revision=99)
@@ -446,7 +447,7 @@ def test_the_reception_runs_the_queue_of_today(ready, subtests):
             table = re.search(r"<tbody>(.*?)</tbody>", html[html.index("Chegada nº") :], re.S).group(1)
             assert table.index("Bento Segundo") < table.index("Ana Primeira")
             assert table.count("Prioritário") == 1 and "Clara Terceira" not in table
-            assert html.count("Registrar chegada") == 1
+            assert html.count("Registrar chegada<span") == 1
     with subtests.test("who only reads the schedule sees the queue and registers nothing"):
         reader = let_finance_read(ready)
         html = assert_safe(reader.get(queue_page))
@@ -530,16 +531,21 @@ def test_the_appointment_page_shows_the_period_and_corrects_the_priority(ready, 
     with subtests.test("moved to the session of another day, and to a time"):
         tuesday = ready.monday + timedelta(days=1)
         current = detail(ready, appointment).appointment
+        tuesday_session = "walk_in:" + at(ready, 8, day=tuesday).isoformat()
+        html = assert_safe(client.get(page, {"day": tuesday.isoformat()}))
+        sessions = re.findall(r'name="slot" value="walk_in:([^"]+)"', html)
+        # The walk-in period is a choice of the same picker.
+        assert [datetime.fromisoformat(value) for value in sessions] == [at(ready, 8, day=tuesday)]
         response = client.post(
             url(ready, "reschedule", appointment.sysid),
-            {"day": tuesday.isoformat(), "time": "10:15", "revision": current.revision},
+            {"day": tuesday.isoformat(), "slot": tuesday_session, "revision": current.revision},
         )
         assert response.status_code == 302
         moved = detail(ready, appointment).appointment
         assert (moved.mode, moved.starts_at) == ("walk_in", at(ready, 8, day=tuesday))
         response = client.post(
             url(ready, "reschedule", appointment.sysid),
-            {"day": ready.monday.isoformat(), "time": "14:00", "mode": "booked", "revision": moved.revision},
+            {"day": ready.monday.isoformat(), "slot": at(ready, 14).isoformat(), "revision": moved.revision},
         )
         assert response.status_code == 302
         timed = detail(ready, appointment).appointment
@@ -549,7 +555,11 @@ def test_the_appointment_page_shows_the_period_and_corrects_the_priority(ready, 
         assert "Chegada nº" not in html and "14:00–14:30" in text
         response = client.post(
             url(ready, "reschedule", appointment.sysid),
-            {"day": ready.monday.isoformat(), "time": "09:00", "mode": "walk_in", "revision": timed.revision},
+            {
+                "day": ready.monday.isoformat(),
+                "slot": "walk_in:" + at(ready, 8).isoformat(),
+                "revision": timed.revision,
+            },
         )
         assert response.status_code == 302 and detail(ready, appointment).appointment.mode == "walk_in"
     with subtests.test("after the arrival: the number, and the appointment is no longer moved"):

@@ -1,5 +1,5 @@
 {% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format skeleton_format %}{% block title %}{{ charge.code }} · {% translate "Conta" %} · {{ site_name }}{% endblock %}
-{% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}"><script src="{% static 'med_finance/med_finance.js' %}" defer></script>{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_finance:charges' organization_id %}">{% translate "Contas" %}</a> · {{ charge.code }}</p><h1>{% if patient %}{{ patient.display_name }}{% else %}{% translate "Paciente não disponível" %}{% endif %}</h1><p class="page-description">{% with label=charge.status|finance_label:"charge_status" %}{{ charge.status|finance_state:"charge_status"|status_badge:label }}{% endwith %} · {% translate "Total" %} {{ charge.total|brl }} · {% translate "Saldo" %} {{ charge.balance|brl }}</p></div></div>
 {% with section="charges" %}{% include "med_finance/_nav.html" %}{% endwith %}

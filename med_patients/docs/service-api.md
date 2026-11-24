@@ -34,6 +34,14 @@ Add a guardian or contact person to a patient.
 - **Erros:** NotFound; Forbidden se só lê; InvalidInput com o nome do campo; Conflict("processing_restricted", "anonymized").
 - **Efeitos:** grava o responsável; a mesma chave do mesmo ator devolve o já criado.
 
+#### `anonymization_vetoes(*, actor, patient_id) -> tuple[str, ...]`
+
+The reasons the retention guards give today to refuse anonymizing a patient (empty: none vetoes).
+
+- **Autorização:** ``manage_access`` no cadastro.
+- **Erros:** NotFound para paciente ilegível; Forbidden para quem lê sem gerir o acesso.
+- **Efeitos:** nenhum.
+
 #### `anonymize(*, actor, patient_id, expected_revision) -> PatientInfo`
 
 Erase the identification of a patient for good, when no retention guard vetoes, with CAS.
@@ -647,3 +655,4 @@ Payload dos eventos de paciente só com `code`, `status` e `registry` (o `sysid`
 |---|---|
 | 0.1.0 | Primeira versão |
 | 0.2.0 | Pacientes da pessoa externa do portal: `register_portal_patients` e `portal_patients` (`allow_external`) |
+| 0.2.0 | `anonymization_vetoes`: os motivos das guardas de retenção, antes da tentativa de anonimizar (somente leitura, `manage_access`) |

@@ -2,7 +2,7 @@
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_finance:charge' organization_id receipt.charge_id %}">{% translate "Conta" %}</a></p><h1>{% translate "Recibo" %} {{ receipt.number }}</h1>{% if receipt.voided %}<p class="page-description"><span class="voided-stamp">{% translate "Anulado" %}</span> {{ receipt.void_reason }}</p>{% endif %}</div>
-<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_finance:receipt_print' organization_id receipt.sysid %}">{% translate "Imprimir" %}</a></nav></div>
+<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_finance:charge' organization_id receipt.charge_id %}">{% translate "Voltar à conta" %}</a><a class="btn {% if receipt.voided %}btn-secondary{% else %}btn-primary{% endif %}" href="{% url 'med_finance:receipt_print' organization_id receipt.sysid %}">{% translate "Imprimir recibo" %}</a></nav></div>
 {% include "med_finance/_receipt_body.html" %}
 {% if not receipt.voided %}
 {% url 'med_finance:receipt_void' organization_id receipt.sysid as void_url %}<div class="med-finance-no-print">{% include "skeleton/web/components/danger-zone.html" with heading_id="void-heading" title=_("Anular o recibo") text=_("O recibo continua guardado, marcado como anulado; o número não volta.") url=void_url label=_("Anular o recibo") %}</div>

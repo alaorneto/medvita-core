@@ -14,3 +14,12 @@
 
 /* Two cards side by side on wide screens (#124): this app's own class, not another app's. */
 .day-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
+
+/* The daily report walks day by day (#132); the links fold away in print with the rest of the navigation. */
+.day-nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
+/* One line of a new charge (#132): its fields side by side when there is room. */
+.charge-line { border: 1px solid var(--color-default); border-radius: var(--radius-base, 0.5rem); padding: 0.75rem 1rem 1rem; margin: 0 0 1rem; min-width: 0; }
+.charge-line legend { font-weight: 600; padding: 0 0.25rem; }
+.charge-line .form-stack { display: grid; gap: 0.75rem 1rem; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); }
+/* What the optional script folds away (payment fields) or has not shown yet (print button) stays hidden. */
+.form-field[hidden], .btn[data-print][hidden] { display: none !important; }

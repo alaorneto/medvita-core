@@ -13,6 +13,7 @@ from applications.med_patients.service_api import PatientService
 
 from ..service_api import AvailabilityRuleInput, ScheduleTypeInput, SchedulingService
 from .booking import SP, at, book, prepare
+from .helpers import new_patient
 
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)", re.IGNORECASE)
 UNSAFE = re.compile(r"\sstyle=|\son[a-z]+=", re.IGNORECASE)
@@ -160,15 +161,41 @@ def test_final_transitions_ask_first(ready):
     assert detail(ready, appointment.sysid).status == "completed"
 
 
-def test_reschedule_through_the_page(ready):
+def test_reschedule_through_the_page(ready, subtests):
+    """#130: the reschedule offers the free times of the chosen day, as the booking does."""
     appointment = book(ready, 9)
+    taken = book(ready, 10, key="taken", patient_id=new_patient(ready, full_name="Outro Paciente").sysid)
     client = client_for(ready.a.reception)
-    response = client.post(
-        url(ready, "reschedule", appointment.sysid),
-        {"day": ready.monday.isoformat(), "time": "11:00", "revision": appointment.revision},
-    )
-    assert response.status_code == 302
-    assert detail(ready, appointment.sysid).starts_at == at(ready, 11)
+    page = url(ready, "appointment", appointment.sysid)
+    with subtests.test("the free times of the day, without the taken one"):
+        html = assert_safe(client.get(page, {"day": ready.monday.isoformat()}))
+        offered = offered_slots(html)
+        assert at(ready, 11) in offered and at(ready, 10) not in offered and at(ready, 9) not in offered
+        assert re.search(r"<details[^>]*appointment-change[^>]* open", html)
+        assert "Remarcar para 11:00" in html and "data-slot-submit" in html
+        following = (ready.monday + timedelta(days=1)).isoformat()
+        assert f"day={following}" in html  # The next day, in the same picker.
+    with subtests.test("a time already taken is refused"):
+        response = client.post(
+            url(ready, "reschedule", appointment.sysid),
+            {"day": ready.monday.isoformat(), "slot": at(ready, 10).isoformat(), "revision": appointment.revision},
+        )
+        assert response.status_code == 400 and "O horário não está livre." in response.content.decode()
+        assert detail(ready, appointment.sysid).starts_at == at(ready, 9)
+        assert detail(ready, taken.sysid).starts_at == at(ready, 10)
+    with subtests.test("no choice is refused"):
+        response = client.post(
+            url(ready, "reschedule", appointment.sysid),
+            {"day": ready.monday.isoformat(), "slot": "", "revision": appointment.revision},
+        )
+        assert response.status_code == 400 and "Escolha um horário livre" in response.content.decode()
+    with subtests.test("moved to a free time"):
+        response = client.post(
+            url(ready, "reschedule", appointment.sysid),
+            {"day": ready.monday.isoformat(), "slot": at(ready, 11).isoformat(), "revision": appointment.revision},
+        )
+        assert response.status_code == 302
+        assert detail(ready, appointment.sysid).starts_at == at(ready, 11)
 
 
 def test_unknown_transition_and_other_organization_answer_404(ready):
@@ -332,10 +359,21 @@ def test_start_and_complete_through_the_pages(ready):
 
 def test_waitlist_add_and_book_from_it_through_the_pages(ready):
     client = client_for(ready.a.reception)
+    # #130: the patient is found by the search and chosen, never typed by code.
+    found = assert_safe(client.get(url(ready, "waitlist"), {"q": "Maria"}))
+    assert f'href="?patient={ready.patient.sysid}#add-heading"' in found and 'name="patient_code"' not in found
+    chosen = assert_safe(client.get(url(ready, "waitlist"), {"patient": ready.patient.sysid}))
+    assert f'name="patient" value="{ready.patient.sysid}"' in chosen and "Maria Paciente Secreta" in chosen
+    nobody = client.post(
+        url(ready, "waitlist"),
+        {"appointment_type": ready.kind.sysid, "preferred_period": "any", "earliest_date": ready.monday.isoformat()}
+        | {"priority": "high", "idempotency_key": "page-nobody"},
+    )
+    assert nobody.status_code == 400 and "Busque e escolha o paciente." in nobody.content.decode()
     response = client.post(
         url(ready, "waitlist"),
         {
-            "patient_code": ready.patient.code,
+            "patient": ready.patient.sysid,
             "appointment_type": ready.kind.sysid,
             "preferred_period": "any",
             "earliest_date": ready.monday.isoformat(),
@@ -899,9 +937,9 @@ def test_the_script_is_an_optional_static_file_bound_by_data_attributes(ready):
     source = (APP_DIR / "static" / "med_scheduling" / "med_scheduling.js").read_text(encoding="utf-8")
     assert 'select.closest("[data-period]")' in source
     assert source.startswith('"use strict";')
-    assert not re.search(
-        r"innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|fetch\(|XMLHttpRequest", source
-    )
+    assert not re.search(r"innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|XMLHttpRequest", source)
+    # The one request of the script (#129): the reception asks its own address again, on the same origin.
+    assert source.count("fetch(") == 1 and 'credentials: "same-origin"' in source and "DOMParser" in source
 
 
 def test_day_page_query_count_does_not_grow_with_the_periods(ready):

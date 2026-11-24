@@ -200,6 +200,14 @@ One encounter with its sections and signed addenda; the read is recorded in the 
 - **Erros:** NotFound para atendimento inexistente, de outra organização ou ilegível.
 - **Efeitos:** registra a leitura na trilha do prontuário.
 
+#### `encounter_history(*, actor, chart_id, cursor=None, page_size=50) -> Page[EncounterLine]`
+
+The chart's encounters, newest first, each with its section types and chief complaint.
+
+- **Autorização:** leitura do arquivo do prontuário.
+- **Erros:** NotFound para prontuário ilegível; InvalidInput para cursor ou tamanho inválidos.
+- **Efeitos:** registra a leitura do prontuário na trilha (a queixa principal é conteúdo clínico).
+
 #### `encounter_panels(*, actor, encounter_id) -> tuple[PanelInfo, ...]`
 
 The panels other apps add to a signed encounter, in order; only active apps.
@@ -231,6 +239,14 @@ The medications of the chart, in use first.
 - **Autorização:** leitura do arquivo do prontuário.
 - **Erros:** NotFound para prontuário ilegível.
 - **Efeitos:** registra a leitura na trilha do prontuário.
+
+#### `my_drafts(*, actor, chart_id=None, limit=50) -> tuple[DraftInfo, ...]`
+
+The actor's own drafts (encounters and documents), latest change first; with ``chart_id``, that chart's.
+
+- **Autorização:** leitura do arquivo de cada rascunho, e só os do próprio ator: o rascunho de outro profissional nunca aparece, nem a quem lê o mesmo arquivo.
+- **Erros:** NotFound para prontuário ilegível; InvalidInput para ``limit`` fora de 1 a 100.
+- **Efeitos:** nenhum (sem conteúdo clínico).
 
 #### `open_chart(*, actor, patient_id, archive_id=None, idempotency_key=None) -> ChartInfo`
 
@@ -530,6 +546,21 @@ A panel on the page of an issued document, like ``EncounterPanel`` with ``docume
 | `visible` | `Callable[..., bool] | None` |
 | `context` | `Callable[..., Mapping[str, Any]] | None` |
 
+### `DraftInfo`
+
+A draft the actor wrote and has not signed or issued, without clinical content.
+
+| Campo | Tipo |
+|---|---|
+| `sysid` | `UUID` |
+| `kind` | `str` |
+| `chart_id` | `UUID` |
+| `patient_id` | `UUID` |
+| `code` | `str` |
+| `subtype` | `str` |
+| `title` | `str` |
+| `updated_at` | `datetime` |
+
 ### `EncounterHeader`
 
 An encounter without clinical content: what lists show.
@@ -564,6 +595,16 @@ An encounter with its sections (clinical content: every read is recorded in the 
 | `writable` | `bool` |
 | `appointment_completed` | `bool` |
 | `consumption` | `tuple[ConsumptionInfo, ...]` |
+
+### `EncounterLine`
+
+A line of the chart's history: the header, the types of its sections and the chief complaint.
+
+| Campo | Tipo |
+|---|---|
+| `header` | `EncounterHeader` |
+| `section_types` | `tuple[str, ...]` |
+| `reason` | `str` |
 
 ### `EncounterPanel`
 
@@ -726,4 +767,4 @@ As rotas de `/api/v1/o/<org>/apps/med_records/` estão em `docs/spec.md` (seçã
 | Versão | Mudança |
 |---|---|
 | 0.1.0 | Primeira versão |
-| 0.2.0 | Painéis de outras apps no atendimento assinado e no documento emitido (`register_encounter_panel`, `register_document_panel`, `encounter_panels`, `document_panels`, `PanelInfo`); itens consumidos no atendimento (`register_consumable_provider`, `ConsumableItem`, `consumable_items`, `add_consumption`, `remove_consumption`, `ConsumptionInput`, `ConsumptionInfo`, `ConsumableOption`, `consumption` no fim de `EncounterInfo`, com padrão, e o evento `items_consumed`) |
+| 0.2.0 | Painéis de outras apps no atendimento assinado e no documento emitido (`register_encounter_panel`, `register_document_panel`, `encounter_panels`, `document_panels`, `PanelInfo`); itens consumidos no atendimento (`register_consumable_provider`, `ConsumableItem`, `consumable_items`, `add_consumption`, `remove_consumption`, `ConsumptionInput`, `ConsumptionInfo`, `ConsumableOption`, `consumption` no fim de `EncounterInfo`, com padrão, e o evento `items_consumed`); entrada e histórico do prontuário (#133): `my_drafts` e `DraftInfo` (os rascunhos do ator), `encounter_history` e `EncounterLine` (tipos de seção e queixa principal de cada atendimento, com a leitura na trilha) |

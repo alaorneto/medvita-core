@@ -1,0 +1,7 @@
+{% load i18n skeleton_format med_scheduling_labels %}{% comment %}The periods of a day as one group of choices (``slot``), for the booking and the reschedule: the free times of a period of booked time, or a walk-in period as a whole. ``plan`` comes from views._booking_plan; ``data-submit-label`` is what the submit button says once the choice is picked (the optional script writes it there).{% endcomment %}{% for item in plan %}<div class="period-card">
+<p class="period-hours">{{ item.hours }} · {{ item.mode|scheduling_label:"mode" }}</p>
+<p class="helptext">{{ item.occupancy }}{% if item.full %} {{ "warning"|scheduling_marker|marker:_("Lotado") }}{% endif %}</p>
+{% if item.offer %}<div class="slot-list"><label class="slot-option"><input type="radio" name="slot" value="{{ item.value }}"{% if item.picked %} checked{% endif %} data-submit-label="{{ item.submit }}"> {% blocktranslate with hours=item.hours %}Ordem de chegada · {{ hours }}{% endblocktranslate %}</label></div>{% endif %}
+{% if item.slots %}<div class="slot-list">{% for slot in item.slots %}<label class="slot-option"><input type="radio" name="slot" value="{{ slot.value }}"{% if slot.picked %} checked{% endif %} data-submit-label="{{ slot.submit }}"> {{ slot.local|moment:"time" }}</label>{% endfor %}</div>{% endif %}
+{% if item.note %}<p class="helptext">{{ item.note }}</p>{% endif %}
+</div>{% endfor %}

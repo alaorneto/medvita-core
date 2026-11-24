@@ -28,6 +28,7 @@ urlpatterns = [
     path("appointments/<uuid:appointment_id>/cancel/", views.appointment_cancel, name="cancel"),
     # Before the transitions: the arrival takes the priority mark, and the mark has a page of its own.
     path("appointments/<uuid:appointment_id>/check_in/", views.appointment_check_in, name="check-in"),
+    path("appointments/<uuid:appointment_id>/undo_check_in/", views.appointment_undo_check_in, name="undo-check-in"),
     path("appointments/<uuid:appointment_id>/priority/", views.appointment_priority, name="priority"),
     path("appointments/<uuid:appointment_id>/modality/", views.appointment_modality, name="modality"),
     path("appointments/<uuid:appointment_id>/<slug:name>/", views.appointment_transition, name="transition"),
