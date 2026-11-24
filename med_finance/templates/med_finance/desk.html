@@ -1,7 +1,7 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format %}{% block title %}{% translate "Caixa" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format skeleton_format %}{% block title %}{% translate "Caixa" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{{ desk.name }}</h1><p class="page-description">{% if session %}{% blocktranslate with when=session.opened_at|date:"SHORT_DATETIME_FORMAT" %}Caixa aberto desde {{ when }}.{% endblocktranslate %}{% else %}{% translate "Caixa fechado." %}{% endif %}</p></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Financeiro" %}</p><h1>{{ desk.name }}</h1><p class="page-description">{% if session %}{% blocktranslate with when=session.opened_at|moment %}Caixa aberto desde {{ when }}.{% endblocktranslate %}{% else %}{% translate "Caixa fechado." %}{% endif %}</p></div>
 <nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-primary" href="{% url 'med_finance:charge_new' organization_id %}">{% translate "Nova conta" %}</a></nav></div>
 {% with section="desk" %}{% include "med_finance/_nav.html" %}{% endwith %}
 {% if not session %}

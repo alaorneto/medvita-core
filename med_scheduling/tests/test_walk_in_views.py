@@ -310,7 +310,7 @@ def test_day_and_week_show_the_session_with_its_occupancy(ready, subtests):
             html = assert_safe(client.get(address))
             assert "Ordem de chegada · 08:00–12:00" in html and "2 de 15 vagas" in html
             assert f'href="{queue_page}"' in html
-            assert "nº 1" in html and "Maria Paciente Secreta" in html and "Joaquim Outro Paciente" in html
+            assert "nº&nbsp;1" in html and "Maria Paciente Secreta" in html and "Joaquim Outro Paciente" in html
             # A walk-in appointment has no time of its own: none is listed at 08:00.
             assert not re.search(r"<time[^>]*>08:00</time> · (Maria|Joaquim)", html)
             assert html.index("Fila") < html.index("Esperados")
@@ -426,7 +426,7 @@ def test_the_reception_runs_the_queue_of_today(ready, subtests):
     with subtests.test("everybody is expected, each with the arrival"):
         html = assert_safe(client.get(reception))
         assert "Agenda da Dra. Ana" in html and "3 de 10 vagas" in html and "Ninguém aguardando." in html
-        assert html.count("Registrar chegada") == 3 and html.count("Chegada prioritária (Lei 10.048)") == 3
+        assert html.count("Registrar chegada") == 3 and html.count("Chegada prioritária (Lei&nbsp;10.048)") == 3
         assert all(name in html for name in patients)
     with subtests.test("a page that opened before another change gives no number"):
         response = check_in("Ana Primeira", revision=99)
@@ -545,7 +545,8 @@ def test_the_appointment_page_shows_the_period_and_corrects_the_priority(ready, 
         timed = detail(ready, appointment).appointment
         assert (timed.mode, timed.starts_at, timed.ends_at) == ("booked", at(ready, 14), at(ready, 14, 30))
         html = assert_safe(client.get(page))
-        assert "Chegada nº" not in html and "14:00–14:30" in html
+        text = re.sub(r"<[^>]+>", "", html)  # The times are <time> elements (#122).
+        assert "Chegada nº" not in html and "14:00–14:30" in text
         response = client.post(
             url(ready, "reschedule", appointment.sysid),
             {"day": ready.monday.isoformat(), "time": "09:00", "mode": "walk_in", "revision": timed.revision},

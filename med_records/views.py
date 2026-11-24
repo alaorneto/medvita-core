@@ -157,8 +157,9 @@ def _section_rows(section: Any) -> list[dict[str, Any]]:
         elif field.kind == "choice":
             value = str(dict(field.choices).get(value, value))
         elif field.unit:
-            value = f"{value} {field.unit}"
-        rows.append({"label": field.label, "value": value})
+            value = f"{value} {field.unit}"  # The unit never wraps away from its number.
+        # A date stays in ISO: the template shows it with |moment.
+        rows.append({"label": field.label, "value": value, "kind": field.kind})
     if section.section_type == "med_records.vitals" and body_mass_index(data):
         rows.append({"label": gettext("IMC (calculado)"), "value": body_mass_index(data)})
     return rows
@@ -1273,6 +1274,11 @@ def access_log_view(request: HttpRequest, organization_id: UUID, chart_id: UUID)
         member.sysid: member.display_name
         for member in OrganizationService().members(actor=request.user, page_size=100).items
     }
+    next_url = ""
+    if page.next_cursor:
+        query = request.GET.copy()
+        query["cursor"] = page.next_cursor
+        next_url = f"?{query.urlencode()}"  # The cursor is opaque text: always encoded (#123).
     return render(
         request,
         "med_records/access_log.html",
@@ -1284,5 +1290,6 @@ def access_log_view(request: HttpRequest, organization_id: UUID, chart_id: UUID)
                 for entry in page.items
             ],
             page=page,
+            next_url=next_url,
         ),
     )

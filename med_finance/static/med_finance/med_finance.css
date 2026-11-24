@@ -1,6 +1,6 @@
 /* Finance app: amounts aligned, receipts printable. */
 .amount { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.voided-stamp { border: 2px solid #dc2626; color: #dc2626; display: inline-block; font-weight: 700; padding: 0.25rem 0.75rem; transform: rotate(-4deg); }
+.voided-stamp { border: 2px solid var(--color-fg-danger); color: var(--color-fg-danger); display: inline-block; font-weight: 700; padding: 0.25rem 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; transform: rotate(-4deg); }
 .print-page { max-width: 48rem; margin: 0 auto; }
 .seal-digest { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 .signature-block { margin-top: 3rem; max-width: 22rem; }
@@ -11,3 +11,6 @@
   .print-page { max-width: none; border: 0; padding: 0; }
 }
 @page { margin: 18mm 16mm; }
+
+/* Two cards side by side on wide screens (#124): this app's own class, not another app's. */
+.day-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }

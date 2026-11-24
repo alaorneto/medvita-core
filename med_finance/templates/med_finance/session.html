@@ -1,14 +1,14 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format %}{% block title %}{% translate "Sessão de caixa" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static med_finance_format skeleton_format %}{% block title %}{% translate "Sessão de caixa" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_finance/med_finance.css' %}">{% endblock %}
 {% block content %}
 <article class="print-page">
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_finance:desk' organization_id %}">{% translate "Caixa" %}</a></p><h1>{% translate "Sessão de caixa" %}</h1><p class="page-description">{{ report.session.opened_at|date:"SHORT_DATETIME_FORMAT" }}{% if report.session.closed_at %} – {{ report.session.closed_at|date:"SHORT_DATETIME_FORMAT" }}{% endif %}</p></div></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_finance:desk' organization_id %}">{% translate "Caixa" %}</a></p><h1>{% translate "Sessão de caixa" %}</h1><p class="page-description">{% with label=report.session.status|finance_label:"session_status" %}{{ report.session.status|finance_state:"session_status"|status_badge:label }}{% endwith %} · {{ report.session.opened_at|moment }}{% if report.session.closed_at %} – {{ report.session.closed_at|moment }}{% endif %}</p></div></div>
 <dl class="meta-list mb-6"><dt>{% translate "Abertura" %}</dt><dd class="amount">{{ report.session.opening_amount|brl }}</dd>
 {% for item in report.by_method %}<dt>{{ item.method|finance_label:"method" }} ({{ item.count }})</dt><dd class="amount">{{ item.amount|brl }}</dd>{% endfor %}
 <dt>{% translate "Suprimentos" %}</dt><dd class="amount">{{ report.supplies|brl }}</dd><dt>{% translate "Sangrias" %}</dt><dd class="amount">{{ report.withdrawals|brl }}</dd>
 <dt>{% translate "Dinheiro esperado" %}</dt><dd class="amount">{{ report.expected_cash|brl }}</dd>
 {% if report.session.status == "closed" %}<dt>{% translate "Contado" %}</dt><dd class="amount">{{ report.session.counted_amount|brl }}</dd><dt>{% translate "Diferença" %}</dt><dd class="amount"><strong>{{ report.session.difference|brl }}</strong></dd>{% if report.session.note %}<dt>{% translate "Observação" %}</dt><dd>{{ report.session.note }}</dd>{% endif %}{% endif %}</dl>
 <h2 class="section-heading">{% translate "Movimentos" %}</h2>
-<ul>{% for item in report.movements %}<li>{{ item.at|date:"SHORT_DATETIME_FORMAT" }} · {{ item.kind|finance_label:"movement" }} · {{ item.amount|brl }} · {{ item.reason }}</li>{% empty %}<li>—</li>{% endfor %}</ul>
+{% if report.movements %}<ul>{% for item in report.movements %}<li>{{ item.at|moment }} · {{ item.kind|finance_label:"movement" }} · {{ item.amount|brl }} · {{ item.reason }}</li>{% endfor %}</ul>{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum suprimento ou sangria.") %}{% endif %}
 </article>
 {% endblock %}

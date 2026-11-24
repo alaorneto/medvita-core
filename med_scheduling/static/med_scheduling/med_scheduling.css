@@ -1,19 +1,28 @@
-/* Scheduling app: the colors of the appointment types and the day columns. */
+/* Scheduling app: the colors of the appointment types and the day columns. Colours come from tokens only (#124):
+   the type colours are --mv-type-* of the Medvita theme, with the core palette as fallback. The stripe is a
+   reminder; the type is always written in text. */
 .appt { border-left-width: 4px; border-left-style: solid; padding: 0.25rem 0.5rem; margin-bottom: 0.25rem; }
-.appt-color-blue { border-left-color: #2563eb; }
-.appt-color-green { border-left-color: #16a34a; }
-.appt-color-amber { border-left-color: #d97706; }
-.appt-color-red { border-left-color: #dc2626; }
-.appt-color-purple { border-left-color: #7c3aed; }
-.appt-color-teal { border-left-color: #0d9488; }
-.appt-color-gray { border-left-color: #6b7280; }
-.appt-color-pink { border-left-color: #db2777; }
+.appt-color-blue { border-left-color: var(--mv-type-blue, var(--color-blue-600)); }
+.appt-color-green { border-left-color: var(--mv-type-green, var(--color-emerald-600)); }
+.appt-color-amber { border-left-color: var(--mv-type-amber, var(--color-amber-500)); }
+.appt-color-red { border-left-color: var(--mv-type-red, var(--color-rose-600)); }
+.appt-color-purple { border-left-color: var(--mv-type-purple, var(--color-purple-500)); }
+.appt-color-teal { border-left-color: var(--mv-type-teal, var(--color-teal-500)); }
+.appt-color-gray { border-left-color: var(--mv-type-gray, var(--color-gray-600)); }
+.appt-color-pink { border-left-color: var(--mv-type-pink, var(--color-pink-500)); }
 .day-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
-.slot-list { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.slot-list { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; list-style: none; padding: 0; margin: 0.25rem 0 0; font-variant-numeric: tabular-nums; }
+.appt-type { color: var(--color-body-subtle); }
+/* Booking: a free time is a 44 px target whose checked state is visible without the radio dot (#123). */
+.slot-option { display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; padding: 0 0.875rem; border: 1px solid var(--color-default-medium); border-radius: var(--radius-base, 0.5rem); font-variant-numeric: tabular-nums; cursor: pointer; }
+.slot-option:hover { border-color: var(--color-default-strong); }
+.slot-option:has(input:checked) { border-color: var(--color-brand); background: var(--color-brand-softer, var(--color-neutral-secondary-soft)); color: var(--color-fg-brand); font-weight: 600; }
+.slot-option:has(input:focus-visible) { outline: 2px solid var(--color-focus, var(--color-brand)); outline-offset: 2px; }
+.slot-option input { accent-color: var(--color-brand); }
 /* The weekly grid: one column per weekday, one card per period. */
 .week-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); align-items: start; }
 .week-day h3 { font-weight: 600; margin-bottom: 0.5rem; }
-.period-card { border: 1px solid var(--color-default, #d1d5db); border-radius: 0.5rem; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; }
+.period-card { border: 1px solid var(--color-default); border-radius: 0.5rem; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; }
 .period-ended { border-style: dashed; }
 .period-hours { font-weight: 600; font-variant-numeric: tabular-nums; }
 .period-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
@@ -21,15 +30,15 @@
 .period-line[hidden] { display: none; }
 .box-list { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; }
 /* The page of one day: a period per fieldset, and the appointments a change moves. */
-.day-period { border: 1px solid var(--color-default, #d1d5db); border-radius: 0.5rem; padding: 0.5rem 0.75rem; }
+.day-period { border: 1px solid var(--color-default); border-radius: 0.5rem; padding: 0.5rem 0.75rem; }
 .day-period > legend { font-weight: 600; padding: 0 0.25rem; }
 .day-period fieldset { margin-top: 0.75rem; }
 .plan-list { list-style: none; padding: 0; margin: 0.5rem 0 1rem; }
 .plan-list li { padding: 0.25rem 0; }
 /* Walk-in sessions: the card on the day and the week, and the queue of the reception. */
-.session-card { border: 1px dashed var(--color-default, #d1d5db); border-radius: 0.5rem; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
+.session-card { border: 1px dashed var(--color-default); border-radius: 0.5rem; padding: 0.5rem 0.75rem; margin: 0.5rem 0; }
 .queue-group { font-weight: 600; margin-top: 0.5rem; }
-.queue-list { list-style: decimal inside; padding: 0; margin: 0; }
+.queue-list { list-style: none; padding: 0; margin: 0; } /* The arrival number is written in each item. */
 .queue-list li > .appt { display: inline-block; vertical-align: top; }
 .queue-number { font-weight: 600; font-variant-numeric: tabular-nums; }
 .queue-expected { margin-bottom: 0.75rem; }
@@ -42,3 +51,9 @@
 /* The calendars of the schedules page: one per line, with room between the name and its links. */
 .calendar-list { margin-bottom: 1rem; }
 .calendar-list li { padding: 0.25rem 0; }
+
+/* Headings inside a session card and the queue (#123): real headings, the size of the old label. */
+:is(h3, h4).queue-group { font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; margin: 0.5rem 0 0.25rem; }
+/* An empty list inside a small card or a day column: the core empty state, without its page padding. */
+:is(.session-card, .day-columns, .week-grid) .empty-state { padding: 0.75rem 0.5rem; }
+:is(.session-card, .day-columns, .week-grid) .empty-state svg { display: none; }

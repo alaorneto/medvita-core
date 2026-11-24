@@ -249,21 +249,24 @@ def _with_patients(
     zone: ZoneInfo,
     colors: dict[UUID, str] | None = None,
     names: dict[UUID, Any] | None = None,
+    kind_names: dict[UUID, str] | None = None,
 ) -> list[dict[str, Any]]:
     """The items of a list of appointments; a kind without a known colour falls back to the template's gray.
 
     ``names`` are the patients already read for the page; without them the ones of the rows are read.
+    ``kind_names`` (from ``_kind_maps``, read once per page) write the kind in text next to its colour.
     """
     rows = list(rows)
     if names is None:
         names = _patient_names(request, [row.patient_id for row in rows])
-    colors = colors or {}
+    colors, kind_names = colors or {}, kind_names or {}
     return [
         {
             "row": row,
             "patient": names.get(row.patient_id),
             "local": row.starts_at.astimezone(zone),
             "color": colors.get(row.appointment_type_id, ""),
+            "kind": kind_names.get(row.appointment_type_id, ""),
         }
         for row in rows
     ]
@@ -416,7 +419,7 @@ def day_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     columns = [
         {
             "schedule": agenda.schedule,
-            "appointments": _with_patients(request, _timed(agenda.appointments), zone, colors, names),
+            "appointments": _with_patients(request, _timed(agenda.appointments), zone, colors, names, kind_names),
             "sessions": _session_cards(
                 agenda.sessions, agenda.schedule, organization_id, zone, names, kind_names, colors
             ),
@@ -468,7 +471,7 @@ def week_view(request: HttpRequest, organization_id: UUID, schedule_id: UUID) ->
         rows.append(
             {
                 "day": day,
-                "appointments": _with_patients(request, _timed(found), zone, colors, names),
+                "appointments": _with_patients(request, _timed(found), zone, colors, names, kind_names),
                 "sessions": _session_cards(
                     agenda.sessions if agenda else (), schedule, organization_id, zone, names, kind_names, colors
                 ),
@@ -1067,7 +1070,7 @@ def reception_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     rows = [row for agenda in agendas for row in agenda.appointments]
     names = _patient_names(request, [row.patient_id for row in rows])
     # The appointments with a time go to the three lists; the walk-in ones to the queue of their session.
-    items = _with_patients(request, _timed(rows), zone, colors, names)
+    items = _with_patients(request, _timed(rows), zone, colors, names, kind_names)
     schedules = {agenda.schedule.sysid: agenda.schedule for agenda in agendas}
     for item in items:
         item["schedule"] = schedules.get(item["row"].schedule_id)
@@ -1176,8 +1179,18 @@ def waitlist_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                 else:
                     messages.success(request, gettext("Paciente incluído na lista de espera."))
                     return redirect("med_scheduling:waitlist", organization_id)
-    page = _service().waitlist(actor=request.user)
+    cursor = request.GET.get("cursor") or None
+    try:
+        page = _service().waitlist(actor=request.user, cursor=cursor)
+    except InvalidInput:
+        # A cursor that is not one the page gave (edited by hand, or from an old page): the list from the start.
+        page = _service().waitlist(actor=request.user)
     names = _patient_names(request, [entry.patient_id for entry in page.items])
+    next_url = ""
+    if page.next_cursor:
+        query = request.GET.copy()
+        query["cursor"] = page.next_cursor
+        next_url = "?" + query.urlencode()
     return render(
         request,
         "med_scheduling/waitlist.html",
@@ -1186,6 +1199,7 @@ def waitlist_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             organization_id,
             "waitlist",
             entries=[{"entry": entry, "patient": names.get(entry.patient_id)} for entry in page.items],
+            next_url=next_url,
             form=form,
             practice=practice,
             idempotency_key=_key(request),

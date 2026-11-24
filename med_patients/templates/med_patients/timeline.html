@@ -1,8 +1,8 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Linha do tempo" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{% translate "Linha do tempo" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
 {% block content %}
 {% include "med_patients/_patient_header.html" %}
-{% if page.unavailable %}<p class="badge badge-warning mb-4">{% translate "Parte da linha do tempo está indisponível agora." %}</p>{% endif %}
-<ol class="timeline">{% for item in entries %}<li><time datetime="{{ item.entry.at|date:'c' }}">{{ item.entry.at|date:"SHORT_DATETIME_FORMAT" }}</time> · {% if item.url %}<a href="{{ item.url }}">{{ item.entry.title }}</a>{% else %}{{ item.entry.title }}{% endif %}</li>
-{% empty %}<li>{% translate "Nada registrado ainda." %}</li>{% endfor %}</ol>
-{% if page.next_cursor %}<nav class="pagination" aria-label="{% translate "Paginação" %}"><div class="pagination-links"><a class="pagination-next" rel="next" href="?cursor={{ page.next_cursor|urlencode }}">{% translate "Mais antigos" %}</a></div></nav>{% endif %}
+{% if page.unavailable %}<div class="message warning mb-4" role="status">{% include "skeleton/web/components/icon.html" with name="warning" %}<div class="min-w-0">{% translate "Parte da linha do tempo está indisponível agora." %}</div></div>{% endif %}
+{% if entries %}<ol class="space-y-3">{% for item in entries %}<li class="card p-3!" data-timeline-kind="{{ item.entry.kind }}"><p class="text-sm text-body-subtle">{{ item.entry.at|moment }}</p><p class="font-medium text-heading">{% if item.url %}<a href="{{ item.url }}">{{ item.entry.title }}</a>{% else %}{{ item.entry.title }}{% endif %}</p></li>{% endfor %}</ol>
+{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nada registrado ainda.") icon="audit"|concept_icon %}{% endif %}
+{% include "skeleton/web/components/cursor-pagination.html" with next_url=next_url label=_("Mais antigos") %}
 {% endblock %}

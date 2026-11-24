@@ -1,6 +1,7 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{% translate "Configuração da clínica" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{% translate "Configuração da clínica" %} · {{ site_name }}{% endblock %}
 {% block content %}
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% translate "Administração" %}</p><h1>{% translate "Configuração da clínica" %}</h1><p class="page-description">{% if done %}{% translate "Tudo configurado." %}{% else %}{% translate "Siga os passos na ordem; cada um abre a configuração da app correspondente." %}{% endif %}</p></div></div>
-<ol class="mb-6">{% for row in rows %}<li class="mb-2">{% if row.step.done %}<span class="badge badge-success">{% translate "Feito" %}</span>{% else %}<span class="badge badge-warning">{% translate "Pendente" %}</span>{% endif %} {% if row.url %}<a href="{{ row.url }}">{{ row.step.label }}</a>{% else %}{{ row.step.label }}{% endif %}</li>{% empty %}<li>{% translate "Nenhuma app ativa com configuração." %}</li>{% endfor %}</ol>
+{% if rows %}<ol class="mb-6">{% for row in rows %}<li class="mb-2"><span aria-hidden="true">{{ forloop.counter }}.</span> {% if row.url %}<a href="{{ row.url }}">{{ row.step.label }}</a>{% else %}{{ row.step.label }}{% endif %} {% if row.step.done %}{{ "completed"|status_badge:_("Feito") }}{% else %}{{ "pending"|status_badge:_("Pendente") }}{% endif %}</li>{% endfor %}</ol>
+{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhuma app ativa com configuração.") hint=_("Ative a agenda, o prontuário ou o financeiro para ver os passos aqui.") class="mb-6" %}{% endif %}
 <p class="helptext">{% translate "Antes, crie os grupos Recepção, Profissionais de saúde e Financeiro na tela de acesso da organização." %}</p>
 {% endblock %}

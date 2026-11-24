@@ -324,7 +324,15 @@ def charges_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         )
     except InvalidInput:
         raise Http404 from None
+    from django.utils.http import urlencode
+
+    from .models import Charge
+
     names = _patients(request, [item.patient_id for item in page.items])
+    next_url = ""
+    if page.next_cursor:
+        query = {"status": status} if status else {}
+        next_url = "?" + urlencode({**query, "cursor": page.next_cursor})
     return render(
         request,
         "med_finance/charges.html",
@@ -332,6 +340,8 @@ def charges_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             organization_id,
             page=page,
             status=status or "",
+            status_options=Charge.Status.choices,
+            next_url=next_url,
             rows=[{"charge": item, "patient": names.get(item.patient_id)} for item in page.items],
         ),
     )

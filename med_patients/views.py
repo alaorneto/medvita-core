@@ -18,6 +18,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
+from django.utils.http import urlencode
 from django.utils.translation import gettext
 from django.views.decorators.http import require_POST
 from rest_framework.response import Response
@@ -175,12 +176,14 @@ def patient_list(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         return _bad_request(request, organization_id, gettext("Filtro ou página inválida."))
     except (Forbidden, NotFound):
         raise Http404 from None
+    kept = {name: value for name, value in (("q", query), ("status", status or "")) if value}
     return render(
         request,
         "med_patients/list.html",
         {
             "organization_id": organization_id,
             "page": page,
+            "next_url": "?" + urlencode({**kept, "cursor": page.next_cursor}) if page.next_cursor else "",
             "query": query,
             "status": status or "",
             "statuses": Patient.Status.choices,
@@ -643,7 +646,8 @@ def patient_timeline(request: HttpRequest, organization_id: UUID, patient_id: UU
                 url = ""
         entries.append({"entry": entry, "url": url})
     context = patient_context(request, organization_id, patient, "timeline")
-    context.update({"entries": entries, "page": page})
+    next_url = "?" + urlencode({"cursor": page.next_cursor}) if page.next_cursor else ""
+    context.update({"entries": entries, "page": page, "next_url": next_url})
     return render(request, "med_patients/timeline.html", context)
 
 
@@ -969,7 +973,8 @@ def patient_privacy(request: HttpRequest, organization_id: UUID, patient_id: UUI
     except (Forbidden, NotFound):
         raise Http404 from None
     context = patient_context(request, organization_id, patient, "privacy")
-    context.update({"report": report})
+    labels = {purpose.code: purpose.label for purpose in _service().consent_purposes(actor=request.user)}
+    context.update({"report": report, "labels": labels})
     return render(request, "med_patients/privacy.html", context)
 
 

@@ -1,9 +1,9 @@
-{% load i18n %}{% comment %}A walk-in session as the day and the week show it: the occupancy and who is in it, in the call order.{% endcomment %}<section class="session-card" aria-labelledby="session-{{ card.id }}">
-<h3 id="session-{{ card.id }}" class="period-hours"><a href="{% url 'med_scheduling:queue' organization_id card.schedule.sysid card.day %}">{% translate "Ordem de chegada" %} · {{ card.hours }}</a></h3>
-<p class="helptext">{{ card.occupancy }}{% if card.session.is_full %} <span class="badge badge-warning">{% translate "Lotado" %}</span>{% endif %}</p>
-{% if card.empty %}<p class="helptext">{% translate "Nenhum paciente marcado." %}</p>{% endif %}
-{% if card.waiting %}<p class="queue-group">{% translate "Fila" %}</p><ol class="queue-list">{% for item in card.waiting %}<li>{% include "med_scheduling/_queue_item.html" %}</li>{% endfor %}</ol>{% endif %}
-{% if card.in_progress %}<p class="queue-group">{% translate "Em atendimento" %}</p>{% for item in card.in_progress %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
-{% if card.expected %}<p class="queue-group">{% translate "Esperados" %}</p>{% for item in card.expected %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
-{% if card.finished %}<p class="queue-group">{% translate "Atendidos e faltas" %}</p>{% for item in card.finished %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
-</section>
+{% load i18n skeleton_format med_scheduling_labels %}{% comment %}A walk-in session as the day and the week show it: the occupancy and who is in it, in the call order. ``level`` is the level of its heading under the page's (3 by default, under the h2 of a day column; 2 in the week table, right under the h1); the groups of the queue are one level below.{% endcomment %}{% with level=level|default:3 %}{% with sub=level|add:1 %}<section class="session-card" aria-labelledby="session-{{ card.id }}">
+<h{{ level }} id="session-{{ card.id }}" class="period-hours"><a href="{% url 'med_scheduling:queue' organization_id card.schedule.sysid card.day %}">{% translate "Ordem de chegada" %} · {{ card.hours }}</a></h{{ level }}>
+<p class="helptext">{{ card.occupancy }}{% if card.session.is_full %} {{ "warning"|scheduling_marker|marker:_("Lotado") }}{% endif %}</p>
+{% if card.empty %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum paciente marcado.") %}{% endif %}
+{% if card.waiting %}<h{{ sub }} class="queue-group">{% translate "Fila" %}</h{{ sub }}><ol class="queue-list">{% for item in card.waiting %}<li>{% include "med_scheduling/_queue_item.html" %}</li>{% endfor %}</ol>{% endif %}
+{% if card.in_progress %}<h{{ sub }} class="queue-group">{% translate "Em atendimento" %}</h{{ sub }}>{% for item in card.in_progress %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
+{% if card.expected %}<h{{ sub }} class="queue-group">{% translate "Esperados" %}</h{{ sub }}>{% for item in card.expected %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
+{% if card.finished %}<h{{ sub }} class="queue-group">{% translate "Atendidos e faltas" %}</h{{ sub }}>{% for item in card.finished %}{% include "med_scheduling/_queue_item.html" %}{% endfor %}{% endif %}
+</section>{% endwith %}{% endwith %}

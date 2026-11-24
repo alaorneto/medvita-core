@@ -24,6 +24,17 @@ from .models import (
 )
 from .slots import collide
 
+# The colour of a kind of appointment by its pt-BR name (#121): the stored code never reaches the screen.
+COLOR_LABELS = {
+    "blue": _("Azul"),
+    "green": _("Verde"),
+    "amber": _("Âmbar"),
+    "red": _("Vermelho"),
+    "purple": _("Roxo"),
+    "teal": _("Verde-azulado"),
+    "gray": _("Cinza"),
+    "pink": _("Rosa"),
+}
 WEEKDAYS = (
     (0, _("Segunda")),
     (1, _("Terça")),
@@ -206,7 +217,7 @@ class TypeForm(forms.Form):
         required=False,
         help_text=_("A consulta marcada com este tipo nasce presencial ou por teleconsulta; muda até o início."),
     )
-    color = forms.ChoiceField(label=_("Cor"), choices=[(color, color) for color in COLORS])
+    color = forms.ChoiceField(label=_("Cor"), choices=[(color, COLOR_LABELS[color]) for color in COLORS])
     billing_code = forms.CharField(label=_("Código de cobrança"), max_length=40, required=False)
     requires_room = forms.BooleanField(label=_("Exige sala"), required=False)
     online_booking = forms.BooleanField(
