@@ -80,6 +80,16 @@
   --color-fg-danger: #b02a36;
   --color-fg-danger-strong: #8f1f2a;
 
+  /* Cores dos tipos de atendimento (faixa da agenda; o tipo sempre vem escrito ao lado). */
+  --mv-type-blue: #2563eb;
+  --mv-type-green: #15803d;
+  --mv-type-amber: #b45309;
+  --mv-type-red: #be123c;
+  --mv-type-purple: #7c3aed;
+  --mv-type-teal: #0f766e;
+  --mv-type-gray: #4b6166;
+  --mv-type-pink: #be185d;
+
   /* Sombra só no que flutua: cartão parado não tem sombra. */
   --shadow-xs: 0 0 #0000;
   --shadow-card: 0 0 #0000;
@@ -139,8 +149,9 @@
     --color-fg-warning: #f5c566;
     --color-fg-warning-subtle: #f5c566;
 
-    --color-danger: #f0707a;
-    --color-danger-strong: #f48c95;
+    /* A fill under white text (buttons): 4.8:1 with white, 3.6:1 against the dark card for the outline (#124). */
+    --color-danger: #d03a47;
+    --color-danger-strong: #b83240;
     --color-danger-soft: #40151a;
     --color-danger-medium: #551d23;
     --color-danger-subtle: #7a2f37;
@@ -150,6 +161,15 @@
     --shadow-xs: 0 0 #0000;
     --shadow-card: 0 0 #0000;
     --shadow-pop: 0 4px 12px #00000080;
+
+    --mv-type-blue: #60a5fa;
+    --mv-type-green: #4ade80;
+    --mv-type-amber: #fbbf24;
+    --mv-type-red: #fb7185;
+    --mv-type-purple: #a78bfa;
+    --mv-type-teal: #2dd4bf;
+    --mv-type-gray: #9fb4b8;
+    --mv-type-pink: #f472b6;
   }
 }
 
@@ -159,7 +179,7 @@
 /* components do núcleo, depois das regras dele: utilitários vencem.   */
 /* ------------------------------------------------------------------ */
 @layer components {
-  :is(.sidebar-heading, .page-eyebrow, .table-scroll thead) {
+  :is(.sidebar-heading, .page-eyebrow, .table-scroll thead, .section-heading, .meta-list dt, .stat-label, .field dt, .dropdown-heading) {
     text-transform: none;
     letter-spacing: 0;
     font-size: 0.8125rem;
@@ -167,6 +187,15 @@
   }
   .table-scroll thead {
     font-weight: 500;
+  }
+  /* A stacked row on the phone: the cell label as written, and a state pill only as wide as its text. */
+  .table-stack td[data-label]:not([data-label=""])::before {
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .table-stack td > .badge {
+    justify-self: start;
+    width: fit-content;
   }
 }
 
@@ -181,6 +210,7 @@
     font-family: var(--mv-font-display);
     font-weight: 600;
     letter-spacing: -0.02em;
+    text-wrap: balance;
   }
   time {
     font-variant-numeric: tabular-nums;

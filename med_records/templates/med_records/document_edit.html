@@ -1,7 +1,7 @@
 {% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{{ header.code }} · {% translate "Rascunho" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_records/med_records.css' %}">{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% if patient %}<a href="{% url 'med_records:patient_section' organization_id header.patient_id %}">{{ patient.code }}</a>{% endif %} · {{ header.code }} · {{ kind_label }}</p><h1>{% translate "Documento em rascunho" %}</h1><p class="page-description">{% translate "Só você altera até emitir. Emitido, o documento não muda: a correção é substituí-lo." %}</p></div></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow">{% if patient %}<a href="{% url 'med_records:patient_section' organization_id header.patient_id %}" translate="no">{{ patient.code }}</a> · {% endif %}<span translate="no">{{ header.code }}</span> · {{ kind_label }}</p><h1>{% translate "Documento em rascunho" %}</h1><p class="page-description">{% translate "Só você altera até emitir. Emitido, o documento não muda: a correção é substituí-lo." %}</p></div></div>
 {% if info.notice %}<p class="helptext mb-4">{{ info.notice }}</p>{% endif %}
 <form method="post" class="card max-w-3xl">{% csrf_token %}<input type="hidden" name="revision" value="{{ header.revision }}">
 {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}

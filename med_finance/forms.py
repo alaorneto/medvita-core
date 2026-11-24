@@ -29,7 +29,8 @@ class MoneyField(forms.CharField):
         text = super().clean(value)
         if text in (None, ""):
             return None
-        text = str(text).strip().replace("R$", "").replace(" ", "")
+        # "R$ 250,00" pasted from a page carries a non-breaking space since brl writes one (#122).
+        text = str(text).strip().replace("R$", "").replace(" ", "").replace("\u00a0", "")
         if "," in text:
             text = text.replace(".", "").replace(",", ".")
         try:

@@ -75,7 +75,7 @@ def test_the_periods_of_a_day_are_changed_on_its_page(ready, subtests):
     day_page = url(ready, "day") + f"?date={ready.monday:%Y-%m-%d}"
     with subtests.test("the page comes filled with the periods the day follows"):
         html = assert_safe(client.get(page(ready)))
-        assert re.search(rf"<h1>Alterar [^<]*{ready.monday:%d/%m/%Y}</h1>", html)
+        assert re.search(rf"<h1>Alterar <time[^>]*>[^<]*{ready.monday:%d/%m/%Y}</time></h1>", html)
         assert "Este dia segue a grade semanal." in html and "Voltar à grade semanal" not in html
         assert re.search(r'name="start_1"[^>]*value="08:00"', html) and re.search(
             r'name="end_1"[^>]*value="12:00"', html
@@ -270,7 +270,7 @@ def test_the_grid_offers_a_later_validity_when_a_mode_changes_under_appointments
         assert response.status_code == 400
         assert f"têm consultas marcadas até {ready.monday:%d/%m/%Y}" in html
         assert f'name="split_from" value="{following.isoformat()}"' in html
-        assert f"Mudar a partir de {following:%d/%m/%Y}" in html
+        assert re.search(rf"Mudar a partir de <time[^>]*>{following:%d/%m/%Y}</time>", html)
     with subtests.test("accepted from that day: the period stays as it is until the eve"):
         response = client.post(
             edit, {**values, "revision": schedule_revision(ready), "split_from": following.isoformat()}

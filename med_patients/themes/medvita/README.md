@@ -12,6 +12,10 @@ Tema da instância trazido pelo `med_patients` (`runtime.instance_themes` do man
 
 A cor de marca (`tokens.brand_color`, `#1273c4`) gera no núcleo a escala e os tokens de marca, nos dois modos e com contraste AA. Por isso o `theme.css` não fixa nenhum token de marca: uma clínica com cor própria continua vencendo. O corpo usa a Inter do núcleo (os `.otf` da pasta da marca são a mesma fonte).
 
+Contraste (#124), conferido por `med_patients/tests/test_theme.py` nos dois modos: branco sobre o botão de perigo, texto de perigo no cartão, texto secundário no fundo e texto de atenção no fundo de atenção, todos AA (4,5:1). No escuro, `--color-danger` é o vermelho de preenchimento (4,8:1 com branco) e o texto vermelho usa `--color-fg-danger`. Os rótulos de seção, de lista de dados e de tabela seguem sem caixa alta.
+
+As cores dos tipos de atendimento (`--mv-type-blue` … `--mv-type-pink`, claro e escuro) pintam a faixa da agenda; o CSS da agenda cai na paleta do núcleo quando outro tema está ativo, e o tipo sempre vem escrito ao lado da cor.
+
 Para conferir e para gerar o `.zip` (instâncias que preferem enviar o pacote):
 
 ```sh

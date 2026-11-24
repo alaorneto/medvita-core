@@ -1,10 +1,10 @@
-{% extends "skeleton/web/base.html" %}{% load i18n static %}{% block title %}{{ header.code }} · {% translate "Impressão" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format %}{% block title %}{{ header.code }} · {% translate "Impressão" %} · {{ site_name }}{% endblock %}
 {% block extrahead %}<link rel="stylesheet" href="{% static 'med_records/med_records.css' %}">{% endblock %}
 {% block content %}
 <article class="print-page">
 {% if practice %}<p><strong>{{ practice.legal_name|default:practice.name }}</strong>{% if practice.address %} · {{ practice.address }}{% endif %}{% if practice.city %} · {{ practice.city }}/{{ practice.state }}{% endif %}</p>{% endif %}
-<h1>{% translate "Registro de atendimento" %} {{ header.code }}</h1>
-<p>{% translate "Paciente:" %} {% if patient %}{{ patient.display_name }} ({{ patient.code }}){% else %}{% translate "não disponível" %}{% endif %} · {{ header.occurred_at|date:"SHORT_DATETIME_FORMAT" }}</p>
+<h1>{% translate "Registro de atendimento" %} <span translate="no">{{ header.code }}</span></h1>
+<p>{% translate "Paciente:" %} {% if patient %}{{ patient.display_name }} (<span translate="no">{{ patient.code }}</span>){% else %}{% translate "não disponível" %}{% endif %} · {{ header.occurred_at|moment }}</p>
 {% include "med_records/_sections.html" %}
 {% include "med_records/_seal.html" with signed=header.signed signed_at=header.signed_at author_name=header.author_name author_council=header.author_council digest=header.seal_digest %}
 </article>

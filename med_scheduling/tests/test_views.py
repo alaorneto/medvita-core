@@ -948,6 +948,7 @@ def test_the_pages_follow_the_clock_of_the_practice_not_of_the_reader(ready, sub
     with subtests.test("the appointment"):
         html = assert_safe(client.get(url(ready, "appointment", appointment.sysid)))
         described = re.search(r'<p class="page-description">(.*?)</p>', html, re.S).group(1)
+        described = re.sub(r"<[^>]+>", "", described)  # The day and the hours are each in a <time>.
         assert monday in described and "09:00–09:30" in described
     with subtests.test("the day, with its free hours"):
         html = assert_safe(client.get(url(ready, "day"), {"date": ready.monday.isoformat()}))
@@ -964,7 +965,7 @@ def test_the_pages_follow_the_clock_of_the_practice_not_of_the_reader(ready, sub
             "day": ready.monday.isoformat(),
         }
         html = assert_safe(client.get(url(ready, "book"), query))
-        offered = re.findall(r'name="slot" value="([^"]+)"[^>]*> (\d\d:\d\d)</label>', html)
+        offered = re.findall(r'name="slot" value="([^"]+)"[^>]*> <time[^>]*>(\d\d:\d\d)</time></label>', html)
         assert offered and all(
             f"{datetime.fromisoformat(value).astimezone(SP):%H:%M}" == label for value, label in offered
         )

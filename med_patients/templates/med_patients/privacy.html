@@ -4,25 +4,30 @@
 {% include "med_patients/_patient_header.html" %}
 <section class="mb-6" aria-labelledby="report-heading">
 <h2 id="report-heading" class="section-heading">{% translate "Relatório do titular" %}</h2>
-<p class="helptext mb-3">{% blocktranslate with when=report.generated_at|date:"SHORT_DATETIME_FORMAT" %}Gerado em {{ when }}. Use a impressão do navegador para entregar uma cópia ao titular.{% endblocktranslate %}</p>
+<p class="helptext mb-3">{% blocktranslate with when=report.generated_at|moment %}Gerado em {{ when }}. Use a impressão do navegador para entregar uma cópia ao titular.{% endblocktranslate %}</p>
 <dl class="meta-list mb-4">
-  <dt>{% translate "Código" %}</dt><dd>{{ report.patient.code }}</dd>
+  <dt>{% translate "Código" %}</dt><dd translate="no">{{ report.patient.code }}</dd>
   <dt>{% translate "Nome completo" %}</dt><dd>{{ report.patient.full_name }}</dd>
   <dt>{% translate "Nome social" %}</dt><dd>{{ report.patient.social_name|default:"—" }}</dd>
-  <dt>{% translate "Nascimento" %}</dt><dd>{{ report.patient.birth_date|date:"SHORT_DATE_FORMAT"|default:"—" }}</dd>
-  <dt>{% translate "CPF" %}</dt><dd>{{ report.patient.cpf|default:"—" }}</dd>
-  <dt>{% translate "Cartão Nacional de Saúde" %}</dt><dd>{{ report.patient.national_health_card|default:"—" }}</dd>
-  <dt>{% translate "Contatos" %}</dt><dd>{{ report.patient.phone|default:"—" }} {{ report.patient.phone_secondary }} {{ report.patient.email }}</dd>
-  <dt>{% translate "Endereço" %}</dt><dd>{{ report.patient.street }} {{ report.patient.number }} {{ report.patient.complement }} {{ report.patient.district }} {{ report.patient.city }} {{ report.patient.state }} {{ report.patient.postal_code }}</dd>
+  <dt>{% translate "Nascimento" %}</dt><dd>{{ report.patient.birth_date|moment:"date" }}</dd>
+  <dt>{% translate "CPF" %}</dt><dd translate="no">{{ report.patient.cpf|patient_cpf|default:"—" }}</dd>
+  <dt>{% translate "Cartão Nacional de Saúde" %}</dt><dd translate="no">{{ report.patient.national_health_card|default:"—" }}</dd>
+  <dt>{% translate "Contatos" %}</dt><dd>{{ report.patient|patient_contacts }}</dd>
+  <dt>{% translate "Endereço" %}</dt><dd>{{ report.patient|patient_address }}</dd>
 </dl>
 <h3 class="section-heading">{% translate "Responsáveis" %}</h3>
-<ul class="mb-4">{% for row in report.guardians %}<li>{{ row.name }} · {{ row.relationship|patient_label:"relationship" }}{% if row.phone %} · {{ row.phone }}{% endif %}</li>{% empty %}<li>—</li>{% endfor %}</ul>
+{% if report.guardians %}<ul class="mb-4">{% for row in report.guardians %}<li>{{ row.name }} · {{ row.relationship|patient_label:"relationship" }}{% if row.phone %} · {{ row.phone|patient_phone }}{% endif %}</li>{% endfor %}</ul>
+{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum responsável cadastrado.") class="mb-4" %}{% endif %}
 <h3 class="section-heading">{% translate "Convênios" %}</h3>
-<ul class="mb-4">{% for row in report.coverages %}<li>{{ row.insurer_name }} · {{ row.card_number }}</li>{% empty %}<li>—</li>{% endfor %}</ul>
+{% if report.coverages %}<ul class="mb-4">{% for row in report.coverages %}<li>{{ row.insurer_name }} · <span translate="no">{{ row.card_number }}</span>{% if row.valid_until %} · {% translate "validade" %} {{ row.valid_until|moment:"date" }}{% endif %}</li>{% endfor %}</ul>
+{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum convênio cadastrado.") class="mb-4" %}{% endif %}
 <h3 class="section-heading">{% translate "Consentimentos" %}</h3>
-<ul class="mb-4">{% for row in report.consents %}<li>{{ row.purpose }} · {{ row.status|status_badge }} · {{ row.granted_at|date:"SHORT_DATE_FORMAT" }}</li>{% empty %}<li>—</li>{% endfor %}</ul>
-{% for section in report.sections %}<h3 class="section-heading">{{ section.title }}</h3>
-{% if section.available %}<dl class="meta-list mb-4">{% for label, value in section.lines %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% empty %}<dt>—</dt><dd>—</dd>{% endfor %}</dl>{% else %}<p class="badge badge-warning mb-4">{% translate "Indisponível agora." %}</p>{% endif %}{% endfor %}
+{% if report.consents %}<ul class="mb-4">{% for row in report.consents %}<li>{{ row.purpose|patient_purpose:labels }} · {% with status_label=row.status|patient_label:"consent_status" %}{{ row.status|patient_state:"consent_status"|status_badge:status_label }}{% endwith %} · {% translate "concedido em" %} {{ row.granted_at|moment:"date" }}{% if row.revoked_at %} · {% translate "revogado em" %} {{ row.revoked_at|moment:"date" }}{% endif %}</li>{% endfor %}</ul>
+{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nenhum consentimento registrado.") class="mb-4" %}{% endif %}
+{% for section in report.sections %}<h3 class="section-heading">{{ section.title|patient_section_title }}</h3>
+{% if not section.available %}<div class="message warning mb-4" role="status">{% include "skeleton/web/components/icon.html" with name="warning" %}<div class="min-w-0">{% translate "Indisponível agora." %}</div></div>
+{% elif section.lines %}<dl class="meta-list mb-4">{% for label, value in section.lines %}<dt>{{ label }}</dt><dd>{{ value }}</dd>{% endfor %}</dl>
+{% else %}{% include "skeleton/web/components/empty-state.html" with message=_("Nada registrado nesta seção.") class="mb-4" %}{% endif %}{% endfor %}
 </section>
 {% if not patient.anonymized_at %}
 <div class="med-patients-no-print">

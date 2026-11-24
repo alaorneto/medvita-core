@@ -1,9 +1,9 @@
-{% extends "skeleton/web/base.html" %}{% load i18n %}{% block title %}{{ heading }} · {% translate "Pacientes" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{{ heading }} · {% translate "Pacientes" %} · {{ site_name }}{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:list' organization_id %}">{% translate "Pacientes" %}</a>{% if patient %} · {{ patient.code }}{% endif %}</p><h1>{{ heading }}</h1></div></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:list' organization_id %}">{% translate "Pacientes" %}</a>{% if patient %} · <span translate="no">{{ patient.code }}</span>{% endif %}</p><h1>{{ heading }}</h1></div></div>
 {% if duplicates %}<section class="card mb-6" aria-labelledby="duplicates-heading"><h2 id="duplicates-heading">{% translate "Possível paciente já cadastrado" %}</h2>
 <p class="helptext">{% translate "Confira se não é a mesma pessoa antes de criar outro cadastro." %}</p>
-<ul class="mt-2">{% for item in duplicates %}<li><a href="{% url 'med_patients:detail' organization_id item.sysid %}">{{ item.code }} · {{ item.display_name }}</a>{% if item.birth_date %} · {{ item.birth_date|date:"SHORT_DATE_FORMAT" }}{% endif %}</li>{% endfor %}</ul></section>{% endif %}
+<ul class="mt-2">{% for item in duplicates %}<li><a href="{% url 'med_patients:detail' organization_id item.sysid %}">{{ item.display_name }}</a> · <span translate="no">{{ item.code }}</span>{% if item.birth_date %} · {% translate "nascimento" %} {{ item.birth_date|moment:"date" }}{% endif %}</li>{% endfor %}</ul></section>{% endif %}
 <form method="post" class="card max-w-3xl" novalidate>{% csrf_token %}
   {% if patient %}<input type="hidden" name="revision" value="{{ patient.revision }}">{% else %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% endif %}
   {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}

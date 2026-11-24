@@ -1,13 +1,13 @@
-{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format %}{% block title %}{% translate "Importação de pacientes" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format med_patients_labels %}{% block title %}{% translate "Importação de pacientes" %} · {{ site_name }}{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:imports' organization_id %}">{% translate "Importações" %}</a></p><h1>{% translate "Importação de pacientes" %}</h1><p class="page-description">{{ batch.status|status_badge }}</p></div></div>
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:imports' organization_id %}">{% translate "Importações" %}</a></p><h1>{% translate "Importação de pacientes" %}</h1><p class="page-description">{% with status_label=batch.status|patient_label:"import_status" %}{{ batch.status|patient_state:"import_status"|status_badge:status_label }}{% endwith %} · {% translate "enviada em" %} {{ batch.created_at|moment }}{% if batch.finished_at %} · {% translate "encerrada em" %} {{ batch.finished_at|moment }}{% endif %}</p></div></div>
 <dl class="meta-list mb-6">
   <dt>{% translate "Linhas de dados" %}</dt><dd>{{ batch.total_rows }}</dd>
   {% if batch.status == "validated" or batch.status == "importing" or batch.status == "completed" %}<dt>{% translate "Válidas na conferência" %}</dt><dd>{{ batch.valid_rows }}</dd>{% endif %}
   {% if batch.status == "importing" or batch.status == "completed" %}<dt>{% translate "Processadas" %}</dt><dd>{{ batch.applied_rows }}</dd><dt>{% translate "Criados" %}</dt><dd>{{ batch.created_rows }}</dd>{% endif %}
   <dt>{% translate "Pulados (CPF já cadastrado)" %}</dt><dd>{{ batch.skipped_rows }}</dd>
   <dt>{% translate "Com erro" %}</dt><dd>{{ batch.error_rows }}</dd>
-  {% if batch.error_code %}<dt>{% translate "Motivo da falha" %}</dt><dd>{% if batch.error_code == "forbidden" %}{% translate "Quem enviou não pode mais alterar o cadastro." %}{% else %}{{ batch.error_code }}{% endif %}</dd>{% endif %}
+  {% if batch.error_code %}<dt>{% translate "Motivo da falha" %}</dt><dd>{{ batch.error_code|patient_import_failure }}</dd>{% endif %}
 </dl>
 {% if mappable %}
 <section class="card max-w-3xl mb-6" aria-labelledby="mapping-heading"><h2 id="mapping-heading">{% translate "Colunas do arquivo" %}</h2>
@@ -21,10 +21,12 @@
 {% if batch.report %}
 <h2 class="section-heading">{% translate "Relatório" %}</h2>
 <p class="mb-3"><a href="{% url 'med_patients:import-report' organization_id batch.sysid %}">{% translate "Baixar o relatório (CSV)" %}</a></p>
+{% with total=batch.report|length %}{% if total > 200 %}<p class="helptext mb-3">{% blocktranslate with total=total %}Mostrando 200 de {{ total }} linhas do relatório. As demais estão no CSV.{% endblocktranslate %}</p>{% endif %}{% endwith %}
+{# table-scroll only: dense report of up to 200 rows, read line number against reason #}
 <div class="table-scroll"><table>
   <caption class="sr-only">{% translate "Linhas não importadas" %}</caption>
   <thead><tr><th scope="col" class="col-num">{% translate "Linha" %}</th><th scope="col">{% translate "Motivo" %}</th></tr></thead>
-  <tbody>{% for row, code in batch.report|slice:":200" %}<tr><td class="col-num">{{ row }}</td><td>{% if code == "duplicate_cpf" %}{% translate "CPF já cadastrado ou repetido no arquivo" %}{% else %}{{ code }}{% endif %}</td></tr>{% endfor %}</tbody>
+  <tbody>{% for row, code in batch.report|slice:":200" %}<tr><td class="col-num">{{ row }}</td><td>{{ code|patient_import_reason }}</td></tr>{% endfor %}</tbody>
 </table></div>
 {% endif %}
 {% endblock %}
