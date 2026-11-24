@@ -9,7 +9,7 @@ from applications.med_scheduling.service_api import SchedulingService
 
 from ..service_api import RecordsService
 
-REQUIRED_APPS = ("med_patients", "med_scheduling", "skeleton_calendar")
+REQUIRED_APPS = ("med_patients", "med_scheduling")
 
 
 def setup_patients(clinic: Any, side: Any = None) -> Any:

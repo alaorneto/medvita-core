@@ -95,3 +95,13 @@ Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da t
 - `python -m pytest med_patients med_records med_finance tests -q -n 4` → 271 passed, 138 subtests passed em 500 s. Juntas, as duas cobrem a suíte inteira, sem nenhuma mudança de código.
 - O paralelismo funciona com um servidor só para a execução: as falhas de recriação do schema por worker (`pg_namespace_nspname_index`) da troca anterior vinham de outra execução usando o mesmo servidor ao mesmo tempo.
 - `package doctor <pacote> --git-ref HEAD` nos quatro, sobre o commit da troca → `"ok": true`, `problems: []`.
+
+## Núcleo v0.8.0 (2026-11-24)
+
+Local: Windows 11, Python 3.14, virtualenv próprio com o núcleo instalado da tag `v0.8.0` (commit `180be43`), um PostgreSQL descartável do `dev_postgres.py` de um clone do núcleo, só desta execução, asserções na role runtime (#116).
+
+- Mudança do núcleo que tocou a suíte: desde a `v0.7.0` a agenda e o livro contábil são bibliotecas first-party com estado derivado (alaorneto/skeleton#792). Os testes deixaram de abri-las e de desligá-las diretamente: elas seguem as apps que dependem delas, e os dois testes que desligavam a biblioteca agora desligam a app e conferem que a biblioteca fecha junto.
+- O argumento `NotificationType(templates=...)`, removido na `v0.7.0`, não era usado pela suíte.
+- `python -m django check --fail-level WARNING` → sem problemas; `makemigrations --check --dry-run` → nada pendente.
+- `python -m pytest -q -n 8` → 467 passed, 712 subtests passed em 716 s.
+- `ruff check .` e `ruff format --check .` → limpos.

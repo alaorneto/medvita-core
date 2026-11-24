@@ -13,7 +13,7 @@ from ..models import AppointmentType, Practice, Professional, Room
 from ..service_api import SchedulingService
 from .helpers import as_admin, setup_patients, setup_practice
 
-REQUIRED_APPS = ("med_patients", "skeleton_calendar")
+REQUIRED_APPS = ("med_patients",)
 
 
 def service():
