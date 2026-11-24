@@ -181,9 +181,9 @@ def test_attend_from_the_appointment(ready, patient):
     doctor = client_for(ready.a.doctor)
     page = doctor.get(reverse("med_scheduling:appointment", args=(ready.org_a.pk, appointment.sysid)))
     assert url(ready, "attend", appointment.sysid) in page.content.decode()
-    response = doctor.get(url(ready, "attend", appointment.sysid))
+    response = doctor.post(url(ready, "attend", appointment.sysid))
     assert response.status_code == 302 and "/edit/" in response["Location"]
-    again = doctor.get(url(ready, "attend", appointment.sysid))
+    again = doctor.post(url(ready, "attend", appointment.sysid))
     assert again["Location"] == response["Location"]
     with ready.as_user(ready.a.reception) as actor:
         current = SchedulingService().appointment(actor=actor, appointment_id=appointment.sysid).appointment

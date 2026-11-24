@@ -62,7 +62,7 @@ def test_desk_flow_through_the_pages(ready):
     assert_safe(client.get(url(ready, "charge_new") + f"?patient={patient.sysid}"))
     created = client.post(
         url(ready, "charge_new") + f"?patient={patient.sysid}",
-        {"patient": patient.sysid, "code": "C1", "quantity": 1, "idempotency_key": "c"},
+        {"patient": patient.sysid, "rows": 1, "item-0-code": "C1", "item-0-quantity": 1, "idempotency_key": "c"},
     )
     assert created.status_code == 302
     charge_id = created["Location"].rstrip("/").split("/")[-1]
@@ -83,7 +83,7 @@ def test_desk_flow_through_the_pages(ready):
                 "idempotency_key": key,
             },
         )
-        assert response.status_code == 302
+        assert response.status_code == 302 and "/receipts/" in response["Location"]  # #132: straight to the receipt.
     with ready.as_user(ready.a.reception) as actor:
         charge = FinanceService().charge(actor=actor, charge_id=charge_id).charge
         receipts = FinanceService().receipts(actor=actor, charge_id=charge_id).items
@@ -124,9 +124,15 @@ def test_collect_and_patient_tab(ready):
     client = client_for(ready.a.reception)
     page = client.get(reverse("med_scheduling:appointment", args=(ready.org_a.pk, appointment.sysid)))
     assert url(ready, "collect", appointment.sysid) in page.content.decode()
-    response = client.get(url(ready, "collect", appointment.sysid))
+    # #131: "Receber" creates the charge by POST only; a GET answers 405 and creates nothing.
+    assert client.get(url(ready, "collect", appointment.sysid)).status_code == 405
+    with ready.as_user(ready.a.reception) as actor:
+        assert not FinanceService().charges_for_origin(
+            actor=actor, origin_app="med_scheduling", origin_key=str(appointment.sysid)
+        )
+    response = client.post(url(ready, "collect", appointment.sysid))
     assert response.status_code == 302 and "/charges/" in response["Location"]
-    assert client.get(url(ready, "collect", appointment.sysid))["Location"] == response["Location"]
+    assert client.post(url(ready, "collect", appointment.sysid))["Location"] == response["Location"]
     assert brl(25000) in assert_safe(client.get(url(ready, "patient_section", patient.sysid)))
 
 

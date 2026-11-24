@@ -46,6 +46,11 @@ WEEKDAYS = (
 )
 
 
+def status_label(status: str) -> str:
+    """The pt-BR name of a state of an appointment ("Agendada", "Confirmada"...)."""
+    return str(dict(Appointment.Status.choices).get(status, status))
+
+
 def _date() -> forms.DateInput:
     return forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d")
 
@@ -84,7 +89,10 @@ class BookForm(forms.Form):
         required=False, widget=forms.HiddenInput(attrs={"data-duration": "suggested"})
     )
     slot = forms.CharField(label=_("Horário"), required=False, widget=forms.HiddenInput)
-    fit_in = forms.BooleanField(label=_("Encaixe (fora da grade)"), required=False)
+    # data-fit-in-toggle: the optional script shows the time of the fit-in only while this is ticked.
+    fit_in = forms.BooleanField(
+        label=_("Encaixe (fora da grade)"), required=False, widget=forms.CheckboxInput(attrs={"data-fit-in-toggle": ""})
+    )
     fit_in_time = forms.TimeField(
         label=_("Hora do encaixe"),
         required=False,
@@ -129,22 +137,10 @@ class BookForm(forms.Form):
 
 
 class RescheduleForm(forms.Form):
-    """The new day and time of an appointment; ``walk_in`` says the appointment has no time of its own today."""
+    """The new time of an appointment: a choice of the slot picker of ``day`` (a free time or a walk-in period)."""
 
-    day = forms.DateField(label=_("Nova data"), widget=_date())
-    time = forms.TimeField(label=_("Nova hora"), widget=_time())
-    mode = forms.ChoiceField(label=_("Modo de atendimento"), required=False)
-
-    def __init__(self, *args, walk_in=False, **kwargs):
-        super().__init__(*args, **kwargs)
-        current = Mode.WALK_IN if walk_in else Mode.BOOKED
-        self.fields["mode"].choices = [
-            ("", gettext("Como está (%(mode)s)") % {"mode": current.label}),
-            *((value, label) for value, label in Mode.choices if value != current),
-        ]
-        self.fields["time"].help_text = _(
-            "Na ordem de chegada a consulta não tem hora: informe qualquer hora dentro do período de destino."
-        )
+    day = forms.DateField(label=_("Data"), widget=_date())
+    slot = forms.CharField(label=_("Horário"), required=False, widget=forms.HiddenInput)
 
 
 class CancelForm(forms.Form):
@@ -803,7 +799,9 @@ class BlockForm(forms.Form):
 
 
 class WaitlistForm(forms.Form):
-    patient_code = forms.CharField(label=_("Código do paciente (P000001)"), max_length=20)
+    """The entry of the waitlist; the patient is the one chosen in the search above the form."""
+
+    patient = forms.CharField(required=False, widget=forms.HiddenInput)
     appointment_type = forms.ChoiceField(label=_("Tipo de atendimento"), required=False)
     preferred_period = forms.ChoiceField(label=_("Período"), choices=WaitlistEntry.Period.choices)
     earliest_date = forms.DateField(label=_("A partir de"), widget=_date())

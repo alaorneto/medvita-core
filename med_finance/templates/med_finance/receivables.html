@@ -5,6 +5,6 @@
 {% with section="reports" %}{% include "med_finance/_nav.html" %}{% endwith %}
 <div class="table-scroll table-stack"><table><caption class="sr-only">{% translate "Contas a receber por atraso" %}</caption>
 <thead><tr><th scope="col">{% translate "Atraso" %}</th><th scope="col" class="amount col-num">{% translate "Contas" %}</th><th scope="col" class="amount col-num">{% translate "Saldo" %}</th></tr></thead>
-<tbody>{% for item in report.buckets %}<tr><td data-label="{% translate "Atraso" %}">{{ item.name|finance_label:"aging" }}</td><td class="amount col-num" data-label="{% translate "Contas" %}">{{ item.count }}</td><td class="amount col-num" data-label="{% translate "Saldo" %}">{{ item.amount|brl }}</td></tr>{% endfor %}</tbody>
+<tbody>{% for item in buckets %}<tr><td data-label="{% translate "Atraso" %}">{% with label=item.bucket.name|finance_label:"aging" %}{% if item.bucket.count %}<a class="cell-primary" href="{% url 'med_finance:charges' organization_id %}?{{ item.query }}">{{ label }}<span class="sr-only"> · {% translate "ver as contas" %}</span></a>{% else %}{{ label }}{% endif %}{% endwith %}</td><td class="amount col-num" data-label="{% translate "Contas" %}">{{ item.bucket.count }}</td><td class="amount col-num" data-label="{% translate "Saldo" %}">{{ item.bucket.amount|brl }}</td></tr>{% endfor %}</tbody>
 <tfoot><tr><th scope="row" colspan="2">{% translate "Total" %}</th><td class="amount col-num" data-label="{% translate "Saldo" %}"><strong>{{ report.total|brl }}</strong></td></tr></tfoot></table></div>
 {% endblock %}

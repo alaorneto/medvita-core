@@ -17,7 +17,7 @@ Configuração do consultório (profissionais, salas, tipos de atendimento), gra
 ## Serviços e pontos de extensão
 
 - Oferece `SchedulingService` e o registry `register_appointment_action`.
-- Publica `appointment_booked`, `_rescheduled`, `_confirmed`, `_arrived`, `_started`, `_completed`, `_no_show` e `_cancelled`.
+- Publica `appointment_booked`, `_rescheduled`, `_confirmed`, `_arrived`, `_arrival_undone`, `_started`, `_completed`, `_no_show`, `_cancelled` e `_modality_changed`.
 - Consome `PatientService` e o `CalendarService` do núcleo.
 - Contribui para a página do paciente (aba, linha do tempo, relatório do titular) e para a lista de configuração, em `integration.py`.
 - Superfícies: páginas em `views.py` e API REST em `api.py`; nenhuma consulta modelo, só os serviços.

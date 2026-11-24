@@ -701,9 +701,13 @@ class DailySummary:
 
 @dataclass(frozen=True, slots=True)
 class AgingRow:
+    """One bucket of the receivables; ``due_from`` and ``due_to`` (both included, ``None`` = open) are its due dates."""
+
     name: str
     amount: int
     count: int
+    due_from: date | None = None
+    due_to: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1487,13 +1491,16 @@ class FinanceService(ServiceAPI):
         desk_id: UUID | None = None,
         start: date | None = None,
         end: date | None = None,
+        outstanding: bool = False,
         cursor: str | None = None,
         page_size: int = 50,
     ) -> Page[ChargeInfo]:
-        """Charges of the desks the actor reads, newest first, filtered by patient, status, desk or due date.
+        """Charges of the desks the actor reads, newest first, by patient, status, desk, due date or balance to receive.
 
+        ``outstanding`` keeps only the charges with a balance to receive (open or partially paid);
+        ``start`` and ``end`` bound the due date, both included.
         Autorização: leitura de cada caixa.
-        Erros: InvalidInput para situação, datas, cursor ou tamanho inválidos.
+        Erros: InvalidInput para situação, datas, ``outstanding``, cursor ou tamanho inválidos.
         Efeitos: nenhum.
         """
         from skeleton.access.policies import authorized_queryset
@@ -1507,6 +1514,10 @@ class FinanceService(ServiceAPI):
             if status not in Charge.Status.values:
                 raise InvalidInput({"status": [gettext("Situação desconhecida.")]})
             rows = rows.filter(status=status)
+        if type(outstanding) is not bool:
+            raise InvalidInput({"outstanding": [gettext("Informe verdadeiro ou falso.")]})
+        if outstanding:
+            rows = rows.filter(status__in=(Charge.Status.OPEN, Charge.Status.PARTIALLY_PAID))
         for value, name, lookup in ((start, "start", "due_date__gte"), (end, "end", "due_date__lte")):
             if value is not None:
                 if not isinstance(value, date):
@@ -1984,6 +1995,8 @@ class FinanceService(ServiceAPI):
     def receivables(self, *, actor: Any, as_of: date | None = None) -> ReceivablesReport:
         """Open balances of the charges by days overdue: to come, 1–30, 31–60, 61–90 and over 90.
 
+        Each bucket says its due dates, so a page lists its charges with ``charges(outstanding=True, start, end)``.
+
         Calculado das contas desta app; o relatório de vencimentos do livro (``aging``) é o da contabilidade.
         Autorização: leitura de cada caixa.
         Erros: InvalidInput para data inválida.
@@ -2014,7 +2027,12 @@ class FinanceService(ServiceAPI):
             .annotate(total=Sum(F("total") - F("paid_total")), count=Count("sysid"))
         )
         found = {row["bucket"]: (int(row["total"] or 0), row["count"]) for row in rows}
-        buckets = tuple(
-            AgingRow(name, *found.get(name, (0, 0))) for name in ("current", "1-30", "31-60", "61-90", "90+")
+        ranges = (
+            ("current", day, None),
+            ("1-30", day - timedelta(days=30), day - timedelta(days=1)),
+            ("31-60", day - timedelta(days=60), day - timedelta(days=31)),
+            ("61-90", day - timedelta(days=90), day - timedelta(days=61)),
+            ("90+", None, day - timedelta(days=91)),
         )
+        buckets = tuple(AgingRow(name, *found.get(name, (0, 0)), first, last) for name, first, last in ranges)
         return ReceivablesReport(day, buckets, sum(item.amount for item in buckets))

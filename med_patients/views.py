@@ -7,9 +7,11 @@ readable message. Validation errors are put on the form fields; they never echo 
 
 from __future__ import annotations
 
+import posixpath
 import uuid
 from datetime import date
 from typing import Any
+from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
 from uuid import UUID
 
 from django.contrib import messages
@@ -18,7 +20,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
-from django.utils.http import urlencode
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils.translation import gettext
 from django.views.decorators.http import require_POST
 from rest_framework.response import Response
@@ -156,6 +158,33 @@ def _input(data: dict[str, Any]) -> PatientInput:
     return PatientInput(**values, birth_date=data.get("birth_date"))
 
 
+def booking_return(request: HttpRequest, organization_id: UUID) -> str:
+    """The booking page to go back to after creating a patient (#130), or "" when there is none.
+
+    Only a local path under this organization's booking page is accepted: anything else (another
+    host, ``//host``, a scheme, another app, a path that climbs out with ``..``) is ignored.
+    """
+    value = (request.POST.get("next") or request.GET.get("next") or "")[:2000]
+    prefix = f"/o/{organization_id}/apps/med_scheduling/book/"
+    if not value.startswith(prefix) or "\\" in value or any(ord(char) < 32 for char in value):
+        return ""
+    if not url_has_allowed_host_and_scheme(
+        value, allowed_hosts={request.get_host()}, require_https=request.is_secure()
+    ):
+        return ""
+    path = unquote(urlsplit(value).path)  # A browser reads %2e%2e as "..".
+    if not path.startswith(prefix) or posixpath.normpath(path).rstrip("/") != path.rstrip("/"):
+        return ""
+    return value
+
+
+def with_patient(url: str, patient_id: UUID) -> str:
+    """``url`` with ``patient=<sysid>``, keeping its other parameters (a previous ``patient`` is replaced)."""
+    parts = urlsplit(url)
+    query = [(name, value) for name, value in parse_qsl(parts.query, keep_blank_values=True) if name != "patient"]
+    return urlunsplit(parts._replace(query=urlencode([*query, ("patient", str(patient_id))])))
+
+
 # ------------------------------------------------------------------------------------- pages
 
 
@@ -189,13 +218,22 @@ def patient_list(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             "statuses": Patient.Status.choices,
             "can_create": any(registry.writable for registry in registries),
             "has_registry": bool(registries),
+            "can_set_up_clinic": _manages_access(request),
         },
     )
+
+
+def _manages_access(request: HttpRequest) -> bool:
+    """Whether the person opens the setup pages (the organization's ``access.manage``, as the service asks)."""
+    from skeleton.service_api.access import AccessService
+
+    return "access.manage" in AccessService().capabilities(actor=request.user)
 
 
 @tenant_page()
 def patient_create(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     form = patient_forms.PatientForm(request.POST or None)
+    next_url = booking_return(request, organization_id)
     duplicates: tuple[Any, ...] = ()
     status = 200
     if request.method == "POST":
@@ -215,6 +253,8 @@ def patient_create(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                             actor=request.user, data=_input(data), idempotency_key=_key(request)
                         )
                     messages.success(request, gettext("Paciente cadastrado."))
+                    if next_url:
+                        return redirect(with_patient(next_url, patient.sysid))
                     return redirect("med_patients:detail", organization_id, patient.sysid)
             except (Forbidden, NotFound):
                 raise Http404 from None
@@ -231,6 +271,7 @@ def patient_create(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             "duplicates": duplicates,
             "heading": gettext("Novo paciente"),
             "idempotency_key": _key(request),
+            "next_url": next_url,
         },
         status=status,
     )
@@ -653,10 +694,9 @@ def patient_timeline(request: HttpRequest, organization_id: UUID, patient_id: UU
 
 @tenant_page()
 def registry_setup(request: HttpRequest, organization_id: UUID) -> HttpResponse:
-    from skeleton.service_api.access import AccessService
     from skeleton.service_api.organizations import OrganizationService
 
-    if "access.manage" not in AccessService().capabilities(actor=request.user):
+    if not _manages_access(request):
         raise Http404
     groups = OrganizationService().groups(actor=request.user, page_size=100).items
     form = patient_forms.SetupForm(request.POST or None, groups=groups)
@@ -885,6 +925,15 @@ def imports(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     )
 
 
+# A batch in these states is being worked on by a job: its page shows the progress and refreshes (#134).
+IMPORT_RUNNING = ("validating", "importing")
+
+
+def _import_processed(batch: Any) -> int:
+    """Rows already worked on: the applied ones while importing; validation reports only at the end."""
+    return batch.applied_rows if batch.status in ("importing", "completed") else 0
+
+
 @tenant_page()
 def import_detail(request: HttpRequest, organization_id: UUID, batch_id: UUID) -> HttpResponse:
     try:
@@ -923,6 +972,8 @@ def import_detail(request: HttpRequest, organization_id: UUID, batch_id: UUID) -
             "batch": batch,
             "form": form,
             "mappable": batch.status in ("uploaded", "validated"),
+            "running": batch.status in IMPORT_RUNNING,
+            "processed": _import_processed(batch),
         },
         status=status,
     )
@@ -972,9 +1023,13 @@ def patient_privacy(request: HttpRequest, organization_id: UUID, patient_id: UUI
         report = _service().data_report(actor=request.user, patient_id=patient_id)
     except (Forbidden, NotFound):
         raise Http404 from None
+    vetoes: tuple[str, ...] = ()
+    if patient.anonymized_at is None:
+        # The guards answer now, before the attempt: a vetoed anonymization shows why instead of the form (#134).
+        vetoes = _service().anonymization_vetoes(actor=request.user, patient_id=patient_id)
     context = patient_context(request, organization_id, patient, "privacy")
     labels = {purpose.code: purpose.label for purpose in _service().consent_purposes(actor=request.user)}
-    context.update({"report": report, "labels": labels})
+    context.update({"report": report, "labels": labels, "vetoes": vetoes})
     return render(request, "med_patients/privacy.html", context)
 
 

@@ -115,7 +115,7 @@ Só quem tem `manage_access` no cadastro (permissão de tabela mais dono ou admi
 | Restrição de tratamento (`restrict_processing`) | O cadastro continua legível e encontrável, mas nada sobre o paciente muda até a restrição sair |
 | Anonimização (`anonymize`) | Só quando nenhuma guarda de retenção veta. O nome vira "Paciente anonimizado <código>", todo campo pessoal é limpo, responsáveis e convênios recebem tombstone, consentimentos perdem a observação, o paciente fica inativo e somente leitura. A auditoria anterior já está redigida. Irreversível: a tela pede o código do paciente |
 
-Com o prontuário dentro do prazo de guarda, a guarda do `med_records` veta a anonimização; a tela explica e oferece só a restrição de tratamento.
+Com o prontuário dentro do prazo de guarda, a guarda do `med_records` veta a anonimização; a tela explica e oferece só a restrição de tratamento. O aviso vem antes da tentativa (#134): a aba Privacidade pergunta às mesmas guardas por `anonymization_vetoes` e, com um veto (ou uma guarda que falha), mostra o motivo no lugar do formulário de anonimização; `anonymize` pergunta de novo ao gravar, então um envio forjado continua recusado.
 
 ### Telas
 
@@ -125,15 +125,20 @@ Todas em `/o/<org>/apps/med_patients/`, pelo `PatientService`; paciente inexiste
 
 | Rota | Tela |
 |---|---|
-| `med_patients:list` | Busca por nome, CPF, código ou final do telefone, filtro de situação e paginação por cursor |
-| `med_patients:create` | Cadastro novo; antes de gravar mostra possíveis duplicatas (mesmo CPF, ou mesmo nome e nascimento) e pede confirmação |
-| `med_patients:detail` | Página do paciente: cabeçalho (nome, idade, código, situação, avisos de responsável e de tratamento restrito), abas e situação do cadastro |
+| `med_patients:list` | Busca por nome, CPF, código ou final do telefone, filtro de situação e paginação por cursor (sem contagem: a página do serviço não a traz); para quem tem `access.manage`, o atalho "Configuração da clínica" e, sem cadastro, o caminho para configurá-lo |
+| `med_patients:create` | Cadastro novo; antes de gravar mostra possíveis duplicatas (mesmo CPF, ou mesmo nome e nascimento) e pede confirmação. Aceita `next` da marcação (abaixo) |
+| `med_patients:detail` | Página do paciente: cabeçalho (nome, idade, código, situação, avisos de responsável e de tratamento restrito), abas e, sob "Alterar situação" (`<details>`, fechado), a troca da situação; o óbito continua pedindo a data e a confirmação |
 | `med_patients:edit` | Alteração, com a revisão em campo oculto; conflito mostra a mensagem de CAS |
-| `med_patients:guardians`, `:coverages`, `:consents` | Abas com lista e formulário de inclusão; consentimento aceita o termo digitalizado |
+| `med_patients:guardians`, `:coverages`, `:consents` | Abas com lista e formulário de inclusão; consentimento aceita o termo digitalizado; convênio com validade passada leva a marca "Vencido", e com validade nos próximos 30 dias, "Vence em N dias" |
 | `med_patients:timeline` | Linha do tempo das apps ativas |
-| `med_patients:imports`, `:import` | Envio, mapeamento das colunas, conferência, aplicação e relatório da importação |
+| `med_patients:imports`, `:import` | Envio, mapeamento das colunas, conferência, aplicação e relatório da importação. Conferindo ou importando, a página mostra o andamento (linhas processadas de N, numa barra `<progress>`) e o link "Atualizar"; o JS opcional atualiza a região de andamento sozinho e recarrega a página quando o lote sai dessas etapas (sem `meta refresh`). O botão diz "Importar N pacientes" com as linhas válidas da conferência; o relatório mostra até 200 linhas e diz "Mostrando 200 de N" |
 | `med_patients:privacy` | Relatório do titular, restrição de tratamento e anonimização (quem gere o acesso do cadastro) |
 | `med_patients:setup` | Configuração inicial (administradores) |
+| `med_patients:clinic_setup` | "Configuração da clínica": os passos numerados das apps ativas, cada um com feito ou pendente (só quem tem `access.manage`; os outros recebem 404) |
+
+O formulário do paciente vem em quatro grupos (`fieldset` com `legend`): Identificação, Contato, Endereço e Observações; os nomes dos campos não mudam. CPF, telefones e CEP levam `data-mask`, que o `static/med_patients/med_patients.js` opcional usa só para formatar enquanto se digita; sem JS o formulário funciona igual e o servidor normaliza e valida (o erro cita o campo, nunca o valor).
+
+**Volta à marcação (#130).** A marcação liga para `med_patients:create?next=<caminho da marcação>`. A página só aceita `next` que seja caminho local deste host (`url_has_allowed_host_and_scheme`) começando por `/o/<org>/apps/med_scheduling/book/` da organização corrente, sem `..` (nem codificado), barra invertida ou caractere de controle; qualquer outro valor é ignorado. O `next` aceito vai num campo oculto (também no passo das duplicatas) e, depois de criar, a página redireciona para ele com `patient=<sysid>` acrescentado, preservando os demais parâmetros. Sem `next`, abre o paciente criado, como antes. A URL de volta leva só o `sysid`.
 
 As abas das outras apps (`register_patient_section`) entram depois das próprias, em ordem, e somem com a app desativada. O título da aba do navegador leva o código do paciente, nunca o nome. O termo anexado recebe um nome fixo, porque o nome do arquivo enviado pode trazer o nome da pessoa.
 

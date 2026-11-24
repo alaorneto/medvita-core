@@ -41,6 +41,7 @@ TRANSITIONS = {
     "start": "start",
     "complete": "complete",
     "no-show": "mark_no_show",
+    "undo-check-in": "undo_check_in",
 }
 
 

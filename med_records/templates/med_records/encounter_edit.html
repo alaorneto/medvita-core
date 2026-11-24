@@ -8,7 +8,7 @@
 {# Enter in a field saves the draft: the first submit button of the form is the default. #}
 <button type="submit" name="action" value="save" class="sr-only" tabindex="-1" aria-hidden="true">{% translate "Salvar rascunho" %}</button>
 {% for card in cards %}
-<section class="card section-card" aria-labelledby="{{ card.prefix }}-heading"><div class="section-card-header"><h2 id="{{ card.prefix }}-heading">{{ card.kind.label }}</h2>{% if card.section %}<button type="submit" name="action" value="remove:{{ card.section.sysid }}" class="btn btn-danger-outline btn-sm">{% translate "Remover" %}<span class="sr-only"> {% blocktranslate with section=card.kind.label %}a seção {{ section }}{% endblocktranslate %}</span></button>{% endif %}</div>
+<section class="card section-card{% if card.kind.code == "med_records.vitals" %} section-grid{% endif %}" aria-labelledby="{{ card.prefix }}-heading"><div class="section-card-header"><h2 id="{{ card.prefix }}-heading">{{ card.kind.label }}</h2>{% if card.section %}<button type="submit" name="action" value="remove:{{ card.section.sysid }}" class="btn btn-danger-outline btn-sm">{% translate "Remover" %}<span class="sr-only"> {% blocktranslate with section=card.kind.label %}a seção {{ section }}{% endblocktranslate %}</span></button>{% endif %}</div>
 {% if card.section %}<input type="hidden" name="{{ card.prefix }}-section" value="{{ card.section.sysid }}">{% else %}<input type="hidden" name="{{ card.prefix }}-type" value="{{ card.kind.code }}"><input type="hidden" name="{{ card.prefix }}-position" value="{{ card.position }}">{% endif %}
 {% include "skeleton/web/components/form-fields.html" with form=card.form hide_marks=True %}
 </section>

@@ -141,6 +141,28 @@ def patient_section_title(title: object) -> str:
         return str(title)
 
 
+# A coverage that expires within this many days shows "Vence em N dias" next to its validity (#134).
+COVERAGE_DUE_DAYS = 30
+
+
+@register.filter
+def patient_days_left(valid_until: object) -> int | None:
+    """Days from today (the organization's date) to a validity: negative when past; None without a date."""
+    from datetime import date
+
+    from django.utils import timezone
+
+    if not isinstance(valid_until, date):
+        return None
+    return (valid_until - timezone.localdate()).days
+
+
+@register.filter
+def patient_coverage_due(days: object) -> bool:
+    """Whether a validity ``days`` ahead is near enough to be pointed out (today included)."""
+    return isinstance(days, int) and 0 <= days <= COVERAGE_DUE_DAYS
+
+
 def _digits(value: object) -> str:
     return "".join(char for char in str(value or "") if char.isdigit())
 

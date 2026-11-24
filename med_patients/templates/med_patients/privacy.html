@@ -38,9 +38,13 @@
 <button type="submit" class="btn btn-secondary">{% if patient.processing_restricted %}{% translate "Retirar a restrição" %}{% else %}{% translate "Restringir o tratamento" %}{% endif %}</button></form></section>
 <section class="card max-w-xl" aria-labelledby="anonymize-heading"><h2 id="anonymize-heading">{% translate "Anonimizar" %}</h2>
 <p class="helptext">{% translate "Apaga de vez a identificação do paciente. Não pode ser desfeito. A guarda legal do prontuário (20 anos) e a guarda fiscal impedem a anonimização enquanto valerem; nesse caso, use a restrição de tratamento." %}</p>
+{% if vetoes %}{# The retention guards answered before the attempt (#134): the reason takes the place of the form. #}
+<div class="message warning mt-3" role="status" data-anonymization-vetoed>{% include "skeleton/web/components/icon.html" with name="warning" %}<div class="min-w-0"><p class="font-medium">{% translate "A anonimização não está disponível agora." %}</p><ul class="mt-1">{% for reason in vetoes %}<li>{{ reason }}</li>{% endfor %}</ul><p class="mt-1">{% translate "Enquanto a guarda valer, use a restrição de tratamento acima." %}</p></div></div>
+{% else %}
 <form method="post" action="{% url 'med_patients:anonymize' organization_id patient.sysid %}" class="mt-3 flex flex-col gap-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ patient.revision }}">
 <div class="field"><label for="confirm-code">{% blocktranslate with code=patient.code %}Digite {{ code }} para confirmar{% endblocktranslate %}</label><input id="confirm-code" name="confirm_code" autocomplete="off" maxlength="20"></div>
-<div><button type="submit" class="btn btn-danger">{% translate "Anonimizar" %}</button></div></form></section>
+<div><button type="submit" class="btn btn-danger">{% translate "Anonimizar" %}</button></div></form>
+{% endif %}</section>
 </div>
 {% endif %}
 {% endblock %}

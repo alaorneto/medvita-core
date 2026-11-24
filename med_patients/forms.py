@@ -17,6 +17,10 @@ def _date_input() -> forms.DateInput:
 NUMERIC = {"inputmode": "numeric", "autocomplete": "off", "spellcheck": "false"}
 PHONE = {"type": "tel", "inputmode": "tel", "autocomplete": "off"}
 EMAIL = {"autocomplete": "off", "spellcheck": "false"}
+# The optional masks of med_patients.js (#134): they only format while typing; the server normalizes and validates.
+CPF_MASK = {**NUMERIC, "data-mask": "cpf"}
+CEP_MASK = {**NUMERIC, "data-mask": "cep"}
+PHONE_MASK = {**PHONE, "data-mask": "phone"}
 
 
 def keep_private(form: forms.Form, **attrs: dict[str, str]) -> None:
@@ -61,13 +65,37 @@ class PatientForm(forms.Form):
         super().__init__(*args, **kwargs)
         keep_private(
             self,
-            cpf=NUMERIC,
+            cpf=CPF_MASK,
             national_health_card=NUMERIC,
-            postal_code=NUMERIC,
-            phone=PHONE,
-            phone_secondary=PHONE,
+            postal_code=CEP_MASK,
+            phone=PHONE_MASK,
+            phone_secondary=PHONE_MASK,
             email=EMAIL,
         )
+
+    # The fieldsets of the page (#134), in order: every field in exactly one of them.
+    GROUPS = (
+        (
+            _("Identificação"),
+            (
+                "full_name",
+                "social_name",
+                "birth_date",
+                "sex",
+                "cpf",
+                "national_health_card",
+                "identity_document",
+                "mother_name",
+            ),
+        ),
+        (_("Contato"), ("phone", "phone_secondary", "email", "contact_preference")),
+        (_("Endereço"), ("postal_code", "street", "number", "complement", "district", "city", "state")),
+        (_("Observações"), ("notes",)),
+    )
+
+    def groups(self) -> list[tuple[str, list[forms.BoundField]]]:
+        """The bound fields of each fieldset, with its legend."""
+        return [(legend, [self[name] for name in names]) for legend, names in self.GROUPS]
 
 
 class StatusForm(forms.Form):
@@ -86,7 +114,7 @@ class GuardianForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        keep_private(self, cpf=NUMERIC, phone=PHONE, email=EMAIL)
+        keep_private(self, cpf=CPF_MASK, phone=PHONE_MASK, email=EMAIL)
 
     notes = forms.CharField(label=_("Observações"), required=False, widget=forms.Textarea(attrs={"rows": 2}))
 

@@ -177,7 +177,12 @@ def _form_run(form: Any, action: Any) -> bool:
 def desk_view(
     request: HttpRequest, organization_id: UUID, *, forms: dict[str, Any] | None = None, status: int = 200
 ) -> HttpResponse:
-    """The cash desk of the day: the session, its totals and movements, and the open charges."""
+    """The cash desk of the day: the session, its totals and movements, and the charges open until today.
+
+    The list is the desk's charges with a balance to receive due today or earlier (#132), not the last ones created.
+    """
+    from django.utils import timezone
+
     from skeleton.service_api.access import AccessService
 
     desks = _service().desks(actor=request.user)
@@ -187,7 +192,9 @@ def desk_view(
     desk = desks[0]
     session = _service().current_session(actor=request.user, desk_id=desk.sysid)
     report = _service().session_report(actor=request.user, session_id=session.sysid) if session else None
-    charges = _service().charges(actor=request.user, desk_id=desk.sysid, page_size=30).items
+    today = timezone.localdate()
+    page = _service().charges(actor=request.user, desk_id=desk.sysid, outstanding=True, end=today, page_size=30)
+    charges = page.items
     names = _patients(request, [item.patient_id for item in charges])
     return render(
         request,
@@ -198,6 +205,8 @@ def desk_view(
             session=session,
             report=report,
             charges=[{"charge": item, "patient": names.get(item.patient_id)} for item in charges],
+            more_charges=bool(page.next_cursor),
+            outstanding_query=_charges_query(status=OUTSTANDING, due_to=today),
             open_form=finance_forms.OpenSessionForm(),
             movement_form=finance_forms.MovementForm(),
             close_form=finance_forms.CloseSessionForm(),
@@ -315,32 +324,72 @@ def session_view(request: HttpRequest, organization_id: UUID, session_id: UUID) 
 # ------------------------------------------------------------------------------------ charges
 
 
+# The status filter of the charges page: a status of the model, or "outstanding" (open or partially paid).
+OUTSTANDING = "outstanding"
+
+
+def _charges_query(*, status: str = "", due_from: Any = None, due_to: Any = None) -> str:
+    """The query string of the charges page for a filter (the desk and the receivables link to it, #132)."""
+    from django.utils.http import urlencode
+
+    values = {
+        "status": status,
+        "due_from": due_from.isoformat() if due_from else "",
+        "due_to": due_to.isoformat() if due_to else "",
+    }
+    return urlencode({name: value for name, value in values.items() if value})
+
+
+def _query_date(request: HttpRequest, name: str) -> Any:
+    from datetime import date as day_type
+
+    value = request.GET.get(name) or ""
+    if not value:
+        return None
+    try:
+        return day_type.fromisoformat(value)
+    except ValueError:
+        raise Http404 from None
+
+
 @tenant_page()
 def charges_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
-    status = request.GET.get("status") or None
-    try:
-        page = _service().charges(
-            actor=request.user, status=status, cursor=request.GET.get("cursor") or None, page_size=50
-        )
-    except InvalidInput:
-        raise Http404 from None
+    """The charges, filtered by status ("A receber" too) and due dates; the filter travels in the query string."""
     from django.utils.http import urlencode
 
     from .models import Charge
 
+    status = request.GET.get("status") or ""
+    due_from = _query_date(request, "due_from")
+    due_to = _query_date(request, "due_to")
+    try:
+        page = _service().charges(
+            actor=request.user,
+            status=None if status in ("", OUTSTANDING) else status,
+            outstanding=status == OUTSTANDING,
+            start=due_from,
+            end=due_to,
+            cursor=request.GET.get("cursor") or None,
+            page_size=50,
+        )
+    except InvalidInput:
+        raise Http404 from None
     names = _patients(request, [item.patient_id for item in page.items])
+    query = _charges_query(status=status, due_from=due_from, due_to=due_to)
     next_url = ""
     if page.next_cursor:
-        query = {"status": status} if status else {}
-        next_url = "?" + urlencode({**query, "cursor": page.next_cursor})
+        next_url = "?" + "&".join(part for part in (query, urlencode({"cursor": page.next_cursor})) if part)
     return render(
         request,
         "med_finance/charges.html",
         _context(
             organization_id,
             page=page,
-            status=status or "",
-            status_options=Charge.Status.choices,
+            status=status,
+            due_from=due_from,
+            due_to=due_to,
+            filtered=bool(query),
+            status_options=((OUTSTANDING, gettext("A receber (em aberto ou parcial)")), *Charge.Status.choices),
             next_url=next_url,
             rows=[{"charge": item, "patient": names.get(item.patient_id)} for item in page.items],
         ),
@@ -362,25 +411,60 @@ def charge_new(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             raise Http404 from None
     patients = PatientService().search(actor=request.user, query=query, page_size=20).items if query else ()
     prices = _service().price_items(actor=request.user) if desks[0].price_list_id else ()
-    form = finance_forms.ChargeForm(request.POST or None, prices=prices)
+    # "Item da tabela" or "Descrição livre" (#132): the choice travels in the query string and in the form.
+    mode = request.POST.get("mode") or request.GET.get("mode") or ""
+    if mode not in ("table", "free"):
+        mode = "table" if prices else "free"
+    if not prices:
+        mode = "free"
+    item_form = finance_forms.TableItemForm if mode == "table" else finance_forms.FreeItemForm
+    posted = request.method == "POST" and patient is not None
+    try:
+        count = int(request.POST.get("rows", "1")) if posted else 1
+    except ValueError:
+        count = 1
+    count = min(max(count, 1), finance_forms.MAX_ITEMS)
+    adding = posted and "add_row" in request.POST and count < finance_forms.MAX_ITEMS
+    form = finance_forms.ChargeForm(request.POST if posted and not adding else None, initial=_typed(request, "", ()))
+    if adding:
+        # "Acrescentar item": the same page with one more line and what was typed, nothing validated yet.
+        count += 1
+        rows = [_item_row(request, item_form, index, prices, bound=False) for index in range(count)]
+    else:
+        rows = [_item_row(request, item_form, index, prices, bound=posted) for index in range(count)]
     status = 200
-    if request.method == "POST" and patient is not None:
+    item_errors: list[str] = []
+    if posted and not adding:
         status = 400
-        if form.is_valid():
+        filled = [row for row in rows if row.has_changed()]
+        rows_valid = all(row.is_valid() for row in rows)
+        if not filled:
+            item_errors.append(gettext("Informe ao menos um item."))
+        for index, row in enumerate(rows, start=1):
+            for field in row:
+                for error in field.errors:
+                    item_errors.append(
+                        gettext("Item %(number)s · %(field)s: %(error)s")
+                        % {"number": index, "field": field.label, "error": error}
+                    )
+        if form.is_valid() and rows_valid and filled:
             values = form.cleaned_data
-            item = ChargeItemInput(
-                code=values["code"],
-                description=values["description"],
-                quantity=values["quantity"],
-                unit_amount=values["unit_amount"] if not values["code"] else None,
-                discount_amount=values["discount_amount"] or 0,
+            items = tuple(
+                ChargeItemInput(
+                    code=row.cleaned_data.get("code", ""),
+                    description=row.cleaned_data.get("description", ""),
+                    quantity=row.cleaned_data["quantity"],
+                    unit_amount=row.cleaned_data.get("unit_amount"),
+                    discount_amount=row.cleaned_data["discount_amount"] or 0,
+                )
+                for row in filled
             )
             try:
                 with transaction.atomic():
                     detail = _service().create_charge(
                         actor=request.user,
                         patient_id=patient.sysid,
-                        items=(item,),
+                        items=items,
                         payer_name=values["payer_name"],
                         payer_document=values["payer_document"],
                         idempotency_key=_key(request),
@@ -394,6 +478,18 @@ def charge_new(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             else:
                 messages.success(request, gettext("Conta criada."))
                 return redirect("med_finance:charge", organization_id, detail.charge.sysid)
+    modes = ()
+    if patient is not None and prices:
+        from django.utils.http import urlencode
+
+        modes = tuple(
+            {
+                "url": "?" + urlencode({"patient": patient.sysid, "mode": value}),
+                "label": label,
+                "current": mode == value,
+            }
+            for value, label in (("table", gettext("Item da tabela")), ("free", gettext("Descrição livre")))
+        )
     return render(
         request,
         "med_finance/charge_new.html",
@@ -403,10 +499,33 @@ def charge_new(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             patients=patients,
             patient=patient,
             form=form,
-            idempotency_key=uuid.uuid4().hex,
+            mode=mode,
+            modes=modes,
+            rows=rows,
+            row_count=len(rows),
+            can_add=len(rows) < finance_forms.MAX_ITEMS,
+            item_errors=item_errors,
+            idempotency_key=(request.POST.get("idempotency_key") or "")[:150] or uuid.uuid4().hex,
         ),
         status=status,
     )
+
+
+def _typed(request: HttpRequest, prefix: str, names: Any) -> dict[str, str]:
+    """What was typed in a form, as initial values: "Acrescentar item" shows it back without validating."""
+    if request.method != "POST":
+        return {}
+    names = names or ("payer_name", "payer_document")
+    return {name: request.POST[f"{prefix}{name}"] for name in names if f"{prefix}{name}" in request.POST}
+
+
+def _item_row(request: HttpRequest, form_class: Any, index: int, prices: Any, *, bound: bool) -> Any:
+    """One line of a new charge; a blank line is left out (``empty_permitted``), so no line is ``required``."""
+    prefix = f"item-{index}"
+    options = {"prefix": prefix, "prices": prices, "use_required_attribute": False}
+    if bound:
+        return form_class(request.POST, empty_permitted=True, **options)
+    return form_class(initial=_typed(request, f"{prefix}-", tuple(form_class.base_fields)), **options)
 
 
 @tenant_page()
@@ -478,20 +597,27 @@ def charge_action(request: HttpRequest, organization_id: UUID, charge_id: UUID, 
     revision = _revision(request)
     if action == "pay":
         form = finance_forms.PaymentForm(request.POST)
+        received: list[Any] = []
         if form.is_valid() and _form_run(
             form,
-            lambda: _service().register_payment(
-                actor=request.user,
-                charge_id=charge_id,
-                method=form.cleaned_data["method"],
-                amount=form.cleaned_data["amount"],
-                installments=form.cleaned_data["installments"],
-                authorization_code=form.cleaned_data["authorization_code"],
-                expected_revision=revision,
-                idempotency_key=_key(request),
+            lambda: received.append(
+                _service().register_payment(
+                    actor=request.user,
+                    charge_id=charge_id,
+                    method=form.cleaned_data["method"],
+                    amount=form.cleaned_data["amount"],
+                    installments=form.cleaned_data["installments"],
+                    authorization_code=form.cleaned_data["authorization_code"],
+                    expected_revision=revision,
+                    idempotency_key=_key(request),
+                )
             ),
         ):
             messages.success(request, gettext("Pagamento recebido e recibo emitido."))
+            # #132: straight to the receipt, whose first action is printing it.
+            receipt = _receipt_of(request, charge_id, received[0].sysid)
+            if receipt is not None:
+                return redirect("med_finance:receipt", organization_id, receipt.sysid)
             return redirect("med_finance:charge", organization_id, charge_id)
         return charge_view(request, organization_id=organization_id, charge_id=charge_id, payment_form=form, status=400)
     elif action == "confirm":
@@ -518,6 +644,15 @@ def charge_action(request: HttpRequest, organization_id: UUID, charge_id: UUID, 
     else:
         raise Http404
     return redirect("med_finance:charge", organization_id, charge_id)
+
+
+def _receipt_of(request: HttpRequest, charge_id: UUID, payment_id: UUID) -> Any:
+    """The receipt issued for a payment of the charge, or ``None``."""
+    try:
+        receipts = _service().receipts(actor=request.user, charge_id=charge_id).items
+    except (NotFound, Forbidden):
+        return None
+    return next((item for item in receipts if item.payment_id == payment_id), None)
 
 
 def _payment_of(request: HttpRequest, charge_id: UUID, payment_id: UUID) -> Any:
@@ -572,9 +707,13 @@ def payment_reverse(request: HttpRequest, organization_id: UUID, payment_id: UUI
     return redirect("med_finance:charge", organization_id, charge_id)
 
 
+@require_POST
 @tenant_page()
 def collect(request: HttpRequest, organization_id: UUID, appointment_id: UUID) -> HttpResponse:
-    """From an appointment: the charge of the appointment (created on first use)."""
+    """From an appointment ("Receber", a POST since #131): the charge of the appointment, created on first use.
+
+    A GET answers 405 and creates nothing.
+    """
     try:
         with transaction.atomic():
             detail = _service().charge_for_appointment(
@@ -841,24 +980,39 @@ def setup_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
 
 @tenant_page()
 def daily_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
-    from datetime import date as day_type
+    """One day of the desks, with the day before and the day after (#132); printed without the navigation."""
+    from datetime import timedelta
 
     from django.utils import timezone
 
-    value = request.GET.get("date")
-    try:
-        day = day_type.fromisoformat(value) if value else timezone.localdate()
-    except ValueError:
-        raise Http404 from None
+    day = _query_date(request, "date") or timezone.localdate()
     if not _service().desks(actor=request.user):
         raise Http404
     summary = _service().daily_summary(actor=request.user, date=day)
-    return render(request, "med_finance/daily.html", _context(organization_id, summary=summary))
+    return render(
+        request,
+        "med_finance/daily.html",
+        _context(
+            organization_id,
+            summary=summary,
+            previous_day=day - timedelta(days=1),
+            next_day=day + timedelta(days=1),
+            today=timezone.localdate(),
+        ),
+    )
 
 
 @tenant_page()
 def receivables_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    """The receivables by days overdue; each bucket links to its charges on the charges page (#132)."""
     if not _service().desks(actor=request.user):
         raise Http404
     report = _service().receivables(actor=request.user)
-    return render(request, "med_finance/receivables.html", _context(organization_id, report=report))
+    buckets = [
+        {
+            "bucket": item,
+            "query": _charges_query(status=OUTSTANDING, due_from=item.due_from, due_to=item.due_to),
+        }
+        for item in report.buckets
+    ]
+    return render(request, "med_finance/receivables.html", _context(organization_id, report=report, buckets=buckets))

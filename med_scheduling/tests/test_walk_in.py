@@ -843,3 +843,18 @@ def test_book_from_the_waitlist_into_a_session(ready):
             mode="walk_in",
         )
     assert (booked.mode, booked.patient_id, booked.starts_at) == ("walk_in", other.sysid, at(ready, 8))
+
+
+def test_an_arrival_taken_back_does_not_give_its_number_again(ready):
+    first, second = (arrive(ready, key=name) for name in "ab")
+    numbered = step(ready, "check_in", first)
+    assert numbered.arrival_number == 1
+    back = step(ready, "undo_check_in", numbered)
+    assert (back.status, back.arrival_number) == ("scheduled", None)
+    (session,) = queue(ready)
+    assert session.waiting == () and {entry.appointment.sysid for entry in session.expected} == {
+        first.sysid,
+        second.sysid,
+    }
+    assert step(ready, "check_in", second).arrival_number == 2
+    assert step(ready, "check_in", back).arrival_number == 3

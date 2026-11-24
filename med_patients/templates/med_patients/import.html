@@ -1,7 +1,14 @@
-{% extends "skeleton/web/base.html" %}{% load i18n skeleton_format med_patients_labels %}{% block title %}{% translate "Importação de pacientes" %} · {{ site_name }}{% endblock %}
+{% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_patients_labels %}{% block title %}{% translate "Importação de pacientes" %} · {{ site_name }}{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_patients/med_patients.css' %}"><script src="{% static 'med_patients/med_patients.js' %}" defer></script>{% endblock %}
 {% block content %}
-<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:imports' organization_id %}">{% translate "Importações" %}</a></p><h1>{% translate "Importação de pacientes" %}</h1><p class="page-description">{% with status_label=batch.status|patient_label:"import_status" %}{{ batch.status|patient_state:"import_status"|status_badge:status_label }}{% endwith %} · {% translate "enviada em" %} {{ batch.created_at|moment }}{% if batch.finished_at %} · {% translate "encerrada em" %} {{ batch.finished_at|moment }}{% endif %}</p></div></div>
-<dl class="meta-list mb-6">
+<div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_patients:imports' organization_id %}">{% translate "Importações" %}</a></p><h1>{% translate "Importação de pacientes" %}</h1><p class="page-description">{% translate "enviada em" %} {{ batch.created_at|moment }}{% if batch.finished_at %} · {% translate "encerrada em" %} {{ batch.finished_at|moment }}{% endif %}</p></div></div>
+{# The status region: while a job works on the batch, med_patients.js refreshes it as the "Atualizar" link does. #}
+<section id="import-status" class="mb-6" aria-labelledby="import-status-heading"{% if running %} data-import-poll{% endif %}>
+<h2 id="import-status-heading" class="sr-only">{% translate "Andamento" %}</h2>
+<p class="mb-3" role="status" data-import-live>{% with status_label=batch.status|patient_label:"import_status" %}{{ batch.status|patient_state:"import_status"|status_badge:status_label }}{% endwith %}{% if batch.status == "importing" %} · {% blocktranslate with done=processed total=batch.total_rows %}{{ done }} de {{ total }} linhas processadas{% endblocktranslate %}{% endif %}</p>
+{% if running %}<p class="helptext mb-3">{% if batch.status == "validating" %}{% translate "Conferindo as linhas do arquivo." %}{% else %}{% translate "Criando os pacientes, 200 linhas por vez." %}{% endif %} {% translate "A página se atualiza sozinha; se não, use" %} <a href="{% url 'med_patients:import' organization_id batch.sysid %}">{% translate "Atualizar" %}</a>.</p>{% endif %}
+{% if batch.status == "importing" %}<progress class="import-progress mb-3" max="{{ batch.total_rows }}" value="{{ processed }}" aria-label="{% translate "Linhas processadas" %}">{{ processed }}/{{ batch.total_rows }}</progress>{% endif %}
+<dl class="meta-list">
   <dt>{% translate "Linhas de dados" %}</dt><dd>{{ batch.total_rows }}</dd>
   {% if batch.status == "validated" or batch.status == "importing" or batch.status == "completed" %}<dt>{% translate "Válidas na conferência" %}</dt><dd>{{ batch.valid_rows }}</dd>{% endif %}
   {% if batch.status == "importing" or batch.status == "completed" %}<dt>{% translate "Processadas" %}</dt><dd>{{ batch.applied_rows }}</dd><dt>{% translate "Criados" %}</dt><dd>{{ batch.created_rows }}</dd>{% endif %}
@@ -9,14 +16,16 @@
   <dt>{% translate "Com erro" %}</dt><dd>{{ batch.error_rows }}</dd>
   {% if batch.error_code %}<dt>{% translate "Motivo da falha" %}</dt><dd>{{ batch.error_code|patient_import_failure }}</dd>{% endif %}
 </dl>
+</section>
 {% if mappable %}
 <section class="card max-w-3xl mb-6" aria-labelledby="mapping-heading"><h2 id="mapping-heading">{% translate "Colunas do arquivo" %}</h2>
 <form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ batch.revision }}">
 {% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
 <div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Conferir as linhas" %}</button></div></form></section>
 {% endif %}
-{% if batch.status == "validated" %}
-<form method="post" action="{% url 'med_patients:import-apply' organization_id batch.sysid %}" class="mb-6">{% csrf_token %}<input type="hidden" name="revision" value="{{ batch.revision }}"><button type="submit" class="btn btn-primary">{% translate "Importar" %}</button></form>
+{% if batch.status == "validated" %}{% if batch.valid_rows %}
+<form method="post" action="{% url 'med_patients:import-apply' organization_id batch.sysid %}" class="mb-6">{% csrf_token %}<input type="hidden" name="revision" value="{{ batch.revision }}"><button type="submit" class="btn btn-primary">{% blocktranslate count total=batch.valid_rows %}Importar {{ total }} paciente{% plural %}Importar {{ total }} pacientes{% endblocktranslate %}</button></form>
+{% else %}<div class="message warning mb-6" role="status">{% include "skeleton/web/components/icon.html" with name="warning" %}<div class="min-w-0">{% translate "Nenhuma linha válida para importar. Confira o relatório e as colunas." %}</div></div>{% endif %}
 {% endif %}
 {% if batch.report %}
 <h2 class="section-heading">{% translate "Relatório" %}</h2>
