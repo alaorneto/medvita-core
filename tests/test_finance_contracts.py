@@ -10,7 +10,7 @@ from skeleton.testing.derived import assert_derived_access_contract
 from skeleton.testing.service_api import build_service_scenario
 
 NUMBERS = count(1)
-APPS = ("med_patients", "skeleton_calendar", "skeleton_ledger", "med_scheduling", "med_finance")
+APPS = ("med_patients", "med_scheduling", "med_finance")
 
 
 def _patient(organization, owner):

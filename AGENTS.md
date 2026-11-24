@@ -2,7 +2,7 @@
 
 ## Contrato do núcleo
 
-Tudo que é do núcleo (bases de modelo, `TableSpec`, autorização, contexto, auditoria, exclusão, API de serviços, migrations, testes e rastreabilidade) está no `AGENTS.md` do Skeleton, que vale integralmente aqui e não é repetido: <https://github.com/alaorneto/skeleton/blob/v0.6.0/AGENTS.md>. A referência é a tag da release do núcleo instalada (`SKELETON_REF` em `.github/workflows/ci.yml`), que é a versão mínima de `compatibility.skeleton` dos manifestos e é atualizada na mesma mudança que sobe a faixa. A documentação do núcleo (`docs/` do mesmo repositório e da mesma referência) completa o contrato. Em divergência entre este arquivo e o do núcleo, vale o do núcleo.
+Tudo que é do núcleo (bases de modelo, `TableSpec`, autorização, contexto, auditoria, exclusão, API de serviços, migrations, testes e rastreabilidade) está no `AGENTS.md` do Skeleton, que vale integralmente aqui e não é repetido: <https://github.com/alaorneto/skeleton/blob/v0.8.0/AGENTS.md>. A referência é a tag da release do núcleo instalada (`SKELETON_REF` em `.github/workflows/ci.yml`), que é a versão mínima de `compatibility.skeleton` dos manifestos e é atualizada na mesma mudança que sobe a faixa. A documentação do núcleo (`docs/` do mesmo repositório e da mesma referência) completa o contrato. Em divergência entre este arquivo e o do núcleo, vale o do núcleo.
 
 Este arquivo guarda só o que é comum às quatro apps. O que é de uma app está no `AGENTS.md` dela.
 

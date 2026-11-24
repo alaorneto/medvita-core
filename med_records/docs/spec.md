@@ -118,6 +118,8 @@ O prontuário é guardado por 20 anos depois do último registro (Lei 13.787/201
 
 ### Páginas
 
+Emitir e substituir documento, remover seção do rascunho, marcar uma alergia como resolvida, encerrar um medicamento e desativar um modelo passam por uma página de confirmação (#119); assinar e descartar o atendimento também (#117). O documento impresso tem o timbre, a linha de assinatura e carimbo, a cidade e a data, o código de verificação e o aviso do tipo (#118).
+
 Em `/o/<org>/apps/med_records/` (nomes `med_records:<nome>`); toda leitura e escrita passa pelo `RecordsService`. As páginas clínicas respondem `Cache-Control: no-store`; o título nunca leva o nome do paciente; o texto clínico é escapado, com as quebras de linha por CSS.
 
 | Nome | Página |
@@ -126,7 +128,9 @@ Em `/o/<org>/apps/med_records/` (nomes `med_records:<nome>`); toda leitura e esc
 | `patient_section` | Aba "Prontuário" do paciente: escolha do arquivo, abrir prontuário, alergias em destaque, medicamentos, atendimentos, documentos, anexos, novo atendimento e novo documento |
 | `attend` | Entrada pela consulta: abre o prontuário e retoma (ou inicia) o rascunho da consulta |
 | `encounter`, `encounter_print` | Leitura do atendimento: seções, selo ("sem assinatura digital ICP-Brasil"), adendos, anexos; versão de impressão |
-| `encounter_edit` | Editor do rascunho: um cartão por seção com o próprio botão, busca de CID-10 por GET, anexos, salvar como modelo, assinar e descartar; funciona sem JavaScript |
+| `encounter_edit` | Editor do rascunho, um formulário só (#117): todas as seções, acrescentar seção, busca de CID-10 com "Usar" (acrescenta o código ao primeiro campo de diagnósticos), itens consumidos, anexos e salvar como modelo. Todo botão grava antes, numa transação, as seções que mudaram; se um campo é inválido, nada é gravado e a página volta com o que foi digitado e o erro no campo. Cada seção tem o próprio prefixo (`s0`, `s1`…), sem `id` repetido. Funciona sem JavaScript |
+| `encounter_sign` | Confirmação da assinatura (GET: as seções que serão seladas; POST: assina com a revisão lida). "Revisar e assinar" no editor grava o que foi digitado e leva a ela |
+| `encounter_discard` | Confirmação do descarte do rascunho, a partir da zona de perigo do editor |
 | `addendum` | Cria o rascunho de um adendo |
 | `lists` | Alergias e medicamentos, com inclusão e mudança de situação |
 | `document_edit`, `document`, `document_print`, `document_replace` | Rascunho, leitura, impressão (dados do consultório, código, resumo do selo e o aviso) e substituição do documento |

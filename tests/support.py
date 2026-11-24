@@ -19,8 +19,9 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-# Load order of the suite apps and the first-party apps they need: a dependency comes first.
-APPS = ("med_patients", "skeleton_calendar", "skeleton_ledger", "med_scheduling", "med_records", "med_finance")
+# Load order of the suite apps: a dependency comes first. The first-party libraries (calendar,
+# ledger) have no state of their own since core v0.7.0 (#792): they follow the apps that need them.
+APPS = ("med_patients", "med_scheduling", "med_records", "med_finance")
 APP_IDS = {
     "med_patients": "io.medvita.patients",
     "skeleton_calendar": "org.skeleton.calendar",

@@ -160,6 +160,8 @@ A agenda oferece ao portal do paciente do núcleo (a página é de outra app, Me
 
 ### Páginas
 
+Marcar falta, concluir, cancelar a consulta (o motivo é escolhido na própria confirmação) e remover um período ou um bloqueio da agenda passam por uma página de confirmação com o alvo e a consequência (#119). Confirmar, registrar chegada e iniciar continuam a um clique. A remarcação recusada volta com o que foi digitado e o erro no formulário (#120).
+
 Em `/o/<org>/apps/med_scheduling/` (nomes `med_scheduling:<nome>`); toda leitura e escrita passa pelo `SchedulingService` e pelo `PatientService`. As horas e o dia corrente são os do relógio do consultório: toda página roda com o fuso do consultório ativo (`practice_page`), qualquer que seja a preferência de fuso de quem lê, e a hora digitada num formulário é lida no mesmo relógio.
 
 | Nome | Página |

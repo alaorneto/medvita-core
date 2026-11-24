@@ -44,9 +44,13 @@ def test_setup_prepares_the_book_and_is_idempotent(ready):
 
 
 def test_setup_without_the_ledger(clinic):
+    """The ledger is a core library since v0.7.0 (#792): it closes when finance, its only dependent, is off."""
+    from skeleton.service_api.applications import ApplicationService
+
     setup_patients(clinic, clinic.a)
     setup_practice(clinic, clinic.a)
-    with clinic.app_disabled("skeleton_ledger"), clinic.as_user(clinic.a.admin) as admin:
+    with clinic.app_disabled("med_finance"), clinic.as_user(clinic.a.admin) as admin:
+        assert not ApplicationService().is_enabled(actor=admin, app_id="org.skeleton.ledger")
         with pytest.raises(Unavailable):
             service().setup(actor=admin, idempotency_key="off")
     from ..models import CashDesk, PriceList

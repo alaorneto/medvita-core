@@ -20,6 +20,7 @@ class MoneyField(forms.CharField):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs.setdefault("max_length", 20)
+        kwargs.setdefault("widget", forms.TextInput(attrs={"inputmode": "decimal", "autocomplete": "off"}))
         super().__init__(*args, **kwargs)
 
     def clean(self, value: Any) -> int | None:
@@ -89,7 +90,12 @@ class ChargeForm(forms.Form):
     quantity = forms.IntegerField(label=_("Quantidade"), min_value=1, max_value=1000, initial=1)
     discount_amount = MoneyField(label=_("Desconto"), required=False)
     payer_name = forms.CharField(label=_("Pagador (vazio: o paciente)"), max_length=200, required=False)
-    payer_document = forms.CharField(label=_("CPF ou CNPJ do pagador"), max_length=18, required=False)
+    payer_document = forms.CharField(
+        label=_("CPF ou CNPJ do pagador"),
+        max_length=18,
+        required=False,
+        widget=forms.TextInput(attrs={"inputmode": "numeric", "autocomplete": "off", "spellcheck": "false"}),
+    )
 
     def __init__(self, *args, prices=(), **kwargs):
         super().__init__(*args, **kwargs)
@@ -109,7 +115,12 @@ class PaymentForm(forms.Form):
     method = forms.ChoiceField(label=_("Forma de pagamento"), choices=Payment.Method.choices)
     amount = MoneyField(label=_("Valor"))
     installments = forms.IntegerField(label=_("Parcelas (cartão de crédito)"), min_value=1, max_value=24, initial=1)
-    authorization_code = forms.CharField(label=_("Código de autorização"), max_length=40, required=False)
+    authorization_code = forms.CharField(
+        label=_("Código de autorização"),
+        max_length=40,
+        required=False,
+        widget=forms.TextInput(attrs={"autocomplete": "off", "spellcheck": "false"}),
+    )
 
 
 class ReasonForm(forms.Form):

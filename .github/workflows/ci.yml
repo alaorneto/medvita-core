@@ -20,7 +20,7 @@ concurrency:
 env:
   # Tag da release do núcleo instalada: é a versão mínima de compatibility.skeleton dos manifestos
   # e a referência do AGENTS.md da raiz; as três sobem na mesma mudança.
-  SKELETON_REF: v0.6.0
+  SKELETON_REF: v0.8.0
   SKELETON_REPOSITORY: alaorneto/skeleton
   RUFF_VERSION: "0.17.4"
 

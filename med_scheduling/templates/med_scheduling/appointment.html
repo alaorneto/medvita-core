@@ -3,7 +3,7 @@
 <div class="page-header"><div class="min-w-0"><p class="page-eyebrow"><a href="{% url 'med_scheduling:day' organization_id %}?date={{ local_start|date:'Y-m-d' }}">{% translate "Agenda" %}</a> · {{ row.code }}</p>
 <h1>{% if patient %}{{ patient.display_name }}{% else %}{% translate "Paciente não disponível" %}{% endif %}</h1>
 <p class="page-description">{{ local_start|date:"l, d/m/Y" }} · {% if walk_in %}{% translate "Ordem de chegada" %} · {{ hours }}{% else %}{{ local_start|time:"H:i" }}–{{ local_end|time:"H:i" }}{% endif %} · {% with label=row.status|scheduling_label:"status" %}{{ row.status|status_badge:label }}{% endwith %}{% if row.is_fit_in %} · <span class="badge badge-warning">{% translate "Encaixe" %}</span>{% endif %}</p></div>
-{% if transitions or registered %}<nav class="toolbar" aria-label="{% translate "Ações" %}">{% for action in registered %}<a class="btn btn-primary" href="{{ action.url }}">{{ action.label }}</a>{% endfor %}{% for transition in transitions %}<form method="post" action="{% url 'med_scheduling:transition' organization_id row.sysid transition.name %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ row.revision }}"><button type="submit" class="btn btn-secondary">{{ transition.label }}</button></form>{% endfor %}</nav>{% endif %}</div>
+{% if transitions or registered %}<nav class="toolbar" aria-label="{% translate "Ações" %}">{% for action in registered %}<a class="btn btn-primary" href="{{ action.url }}">{{ action.label }}</a>{% endfor %}{% for transition in transitions %}{% if transition.final %}<a class="btn {% if transition.name == "mark_no_show" %}btn-danger-outline{% else %}btn-secondary{% endif %}" href="{% url 'med_scheduling:transition' organization_id row.sysid transition.name %}">{{ transition.label }}</a>{% else %}<form method="post" action="{% url 'med_scheduling:transition' organization_id row.sysid transition.name %}">{% csrf_token %}<input type="hidden" name="revision" value="{{ row.revision }}"><button type="submit" class="btn btn-secondary">{{ transition.label }}</button></form>{% endif %}{% endfor %}</nav>{% endif %}</div>
 {% include "med_scheduling/_nav.html" %}
 <dl class="meta-list mb-6">
   {% if patient %}<dt>{% translate "Paciente" %}</dt><dd><a href="{% url 'med_patients:detail' organization_id row.patient_id %}">{{ patient.code }}</a></dd>{% endif %}
@@ -23,13 +23,10 @@
 {% if can_reschedule %}
 <section class="card max-w-xl mb-6" aria-labelledby="reschedule-heading"><h2 id="reschedule-heading">{% translate "Remarcar" %}</h2>
 <form method="post" action="{% url 'med_scheduling:reschedule' organization_id row.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ row.revision }}">
-{% include "skeleton/web/components/form-fields.html" with form=reschedule_form hide_marks=True %}
+{% include "skeleton/web/components/form-errors.html" with form=reschedule_form %}{% include "skeleton/web/components/form-fields.html" with form=reschedule_form %}
 <div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Remarcar" %}</button></div></form></section>
 {% endif %}
-{% if can_cancel %}
-<section class="card max-w-xl" aria-labelledby="cancel-heading"><h2 id="cancel-heading">{% translate "Cancelar" %}</h2>
-<form method="post" action="{% url 'med_scheduling:cancel' organization_id row.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ row.revision }}">
-{% include "skeleton/web/components/form-fields.html" with form=cancel_form hide_marks=True %}
-<div class="form-actions"><button type="submit" class="btn btn-danger">{% translate "Cancelar consulta" %}</button></div></form></section>
+{% if can_cancel %}{% url 'med_scheduling:cancel' organization_id row.sysid as cancel_url %}
+{% include "skeleton/web/components/danger-zone.html" with heading_id="cancel-heading" title=_("Cancelar a consulta") text=_("O horário volta para a agenda. Na confirmação você escolhe o motivo.") url=cancel_url label=_("Cancelar a consulta") %}
 {% endif %}
 {% endblock %}

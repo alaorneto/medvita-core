@@ -12,7 +12,7 @@
 {% if mappable %}
 <section class="card max-w-3xl mb-6" aria-labelledby="mapping-heading"><h2 id="mapping-heading">{% translate "Colunas do arquivo" %}</h2>
 <form method="post" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ batch.revision }}">
-{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" with hide_marks=True %}
+{% include "skeleton/web/components/form-errors.html" %}{% include "skeleton/web/components/form-fields.html" %}
 <div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Conferir as linhas" %}</button></div></form></section>
 {% endif %}
 {% if batch.status == "validated" %}

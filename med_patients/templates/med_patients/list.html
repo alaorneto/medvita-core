@@ -4,7 +4,7 @@
 {% if can_create %}<nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-secondary" href="{% url 'med_patients:imports' organization_id %}">{% translate "Importar CSV" %}</a><a class="btn btn-primary" href="{% url 'med_patients:create' organization_id %}">{% translate "Novo paciente" %}</a></nav>{% endif %}</div>
 {% if not has_registry %}<div class="empty-state"><p>{% translate "O cadastro de pacientes ainda não foi configurado nesta organização." %}</p><p><a href="{% url 'med_patients:setup' organization_id %}">{% translate "Configurar (administradores)" %}</a></p></div>{% else %}
 <form method="get" class="filter-bar" aria-label="{% translate "Filtros" %}">
-  <div class="field"><label for="q">{% translate "Buscar" %}</label><input id="q" name="q" value="{{ query }}" maxlength="200" autocomplete="off"></div>
+  <div class="field"><label for="q">{% translate "Buscar" %}</label><input id="q" name="q" type="search" value="{{ query }}" maxlength="200" autocomplete="off" spellcheck="false"></div>
   <div class="field"><label for="status">{% translate "Situação" %}</label><select id="status" name="status"><option value="">{% translate "Todas" %}</option>{% for code, label in statuses %}<option value="{{ code }}"{% if code == status %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
   <div class="filter-actions"><button type="submit" class="btn btn-secondary">{% translate "Filtrar" %}</button>{% if query or status %}<a class="btn btn-ghost" href="?">{% translate "Limpar" %}</a>{% endif %}</div>
 </form>

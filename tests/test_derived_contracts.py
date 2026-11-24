@@ -30,7 +30,7 @@ def test_appointment_follows_the_schedule(skeleton_db):
     from applications.med_scheduling.models import Appointment, AppointmentType, Practice, Room, Schedule
     from skeleton.contrib.calendar.service_api import CalendarService
 
-    for label in ("med_patients", "skeleton_calendar", "med_scheduling"):
+    for label in ("med_patients", "med_scheduling"):
         open_app(label)
     scenario = build_service_scenario(Appointment, slug="derived-appointment")
     calendars = {}
@@ -110,7 +110,7 @@ def test_records_tables_follow_the_archive(skeleton_db, table):
         PatientChart,
     )
 
-    for label in ("med_patients", "skeleton_calendar", "med_scheduling", "med_records"):
+    for label in ("med_patients", "med_scheduling", "med_records"):
         open_app(label)
     models = {
         "patientchart": PatientChart,

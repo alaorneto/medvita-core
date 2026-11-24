@@ -20,7 +20,7 @@
 {% if patient.writable and not patient.anonymized_at %}
 <section class="card max-w-xl" aria-labelledby="status-heading"><h2 id="status-heading">{% translate "Situação do cadastro" %}</h2>
 <form method="post" action="{% url 'med_patients:status' organization_id patient.sysid %}" class="mt-3">{% csrf_token %}<input type="hidden" name="revision" value="{{ patient.revision }}">
-{% include "skeleton/web/components/form-fields.html" with form=status_form hide_marks=True %}
+{% include "skeleton/web/components/form-fields.html" with form=status_form %}
 <div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Atualizar situação" %}</button></div></form></section>
 {% endif %}
 {% endblock %}

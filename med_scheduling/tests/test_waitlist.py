@@ -94,7 +94,7 @@ def test_expiry_job_is_idempotent(ready):
 
 
 def test_waitlist_follows_the_practice(skeleton_db):
-    for label in ("med_patients", "skeleton_calendar", "med_scheduling"):
+    for label in ("med_patients", "med_scheduling"):
         open_app(label)
     scenario = build_service_scenario(WaitlistEntry, slug="waitlist")
     patients = {}

@@ -13,6 +13,19 @@ def _date_input() -> forms.DateInput:
     return forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d")
 
 
+# Personal data never goes to the browser's form history: the reception computer is shared (#120).
+NUMERIC = {"inputmode": "numeric", "autocomplete": "off", "spellcheck": "false"}
+PHONE = {"type": "tel", "inputmode": "tel", "autocomplete": "off"}
+EMAIL = {"autocomplete": "off", "spellcheck": "false"}
+
+
+def keep_private(form: forms.Form, **attrs: dict[str, str]) -> None:
+    """Every field of a personal-data form without browser history; the named ones get their keyboard."""
+    for name, field in form.fields.items():
+        field.widget.attrs.setdefault("autocomplete", "off")
+        field.widget.attrs.update(attrs.get(name, {}))
+
+
 class PatientForm(forms.Form):
     full_name = forms.CharField(label=_("Nome completo"), max_length=200)
     social_name = forms.CharField(label=_("Nome social"), max_length=200, required=False)
@@ -44,6 +57,18 @@ class PatientForm(forms.Form):
         help_text=_("Nunca registre aqui informação clínica: ela pertence ao prontuário."),
     )
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        keep_private(
+            self,
+            cpf=NUMERIC,
+            national_health_card=NUMERIC,
+            postal_code=NUMERIC,
+            phone=PHONE,
+            phone_secondary=PHONE,
+            email=EMAIL,
+        )
+
 
 class StatusForm(forms.Form):
     status = forms.ChoiceField(label=_("Situação"), choices=Patient.Status.choices)
@@ -58,6 +83,11 @@ class GuardianForm(forms.Form):
     email = forms.EmailField(label=_("Email"), required=False)
     is_legal_representative = forms.BooleanField(label=_("Representante legal"), required=False)
     is_financial_responsible = forms.BooleanField(label=_("Responsável financeiro"), required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        keep_private(self, cpf=NUMERIC, phone=PHONE, email=EMAIL)
+
     notes = forms.CharField(label=_("Observações"), required=False, widget=forms.Textarea(attrs={"rows": 2}))
 
 

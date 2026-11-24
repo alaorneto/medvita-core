@@ -152,6 +152,12 @@ class PracticeForm(forms.Form):
     state = forms.CharField(label=_("UF"), max_length=2, required=False)
     timezone = forms.CharField(label=_("Fuso horário"), max_length=64)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["tax_id"].widget.attrs.update({"inputmode": "numeric", "spellcheck": "false"})
+        self.fields["phone"].widget.attrs.update({"type": "tel", "inputmode": "tel"})
+        self.fields["email"].widget.attrs.update({"spellcheck": "false"})
+
 
 class ProfessionalForm(forms.Form):
     display_name = forms.CharField(label=_("Nome"), max_length=200)

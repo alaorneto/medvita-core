@@ -104,8 +104,36 @@ def test_reception_flow(ready):
     )
     with ready.as_user(ready.a.reception) as actor:
         (consent,) = PatientService().consents(actor=actor, patient_id=summary.sysid)
-    revoke = client.post(url(ready, "consent-revoke", summary.sysid, consent.sysid), {"revision": consent.revision})
+    revoke_url = url(ready, "consent-revoke", summary.sysid, consent.sysid)
+    # #119: revoking asks first; the GET names the purpose and changes nothing.
+    asked = assert_safe(client.get(revoke_url))
+    assert "Revogar o consentimento" in asked and "btn-danger" in asked
+    assert (
+        client_for(ready.b.reception)
+        .get(url(ready, "consent-revoke", summary.sysid, consent.sysid, organization=ready.org_b))
+        .status_code
+        == 404
+    )
+    revoke = client.post(revoke_url, {"revision": consent.revision})
     assert revoke.status_code == 302
+    assert client.get(revoke_url).status_code == 404  # Revoked: nothing left to revoke.
+    # Registering a death asks first, with the date; without the date nothing is asked or written.
+    status_url = url(ready, "status", summary.sysid)
+    with ready.as_user(ready.a.reception) as actor:
+        revision = PatientService().get(actor=actor, patient_id=summary.sysid).revision
+    assert client.post(status_url, {"status": "deceased", "deceased_on": "", "revision": revision}).status_code == 302
+    asked = assert_safe(
+        client.post(status_url, {"status": "deceased", "deceased_on": "2026-05-01", "revision": revision})
+    )
+    assert "Registrar o óbito" in asked and "01/05/2026" in asked
+    with ready.as_user(ready.a.reception) as actor:
+        assert PatientService().get(actor=actor, patient_id=summary.sysid).status == "active"
+    done = client.post(
+        status_url, {"status": "deceased", "deceased_on": "2026-05-01", "revision": revision, "confirmed": "1"}
+    )
+    assert done.status_code == 302
+    with ready.as_user(ready.a.reception) as actor:
+        assert PatientService().get(actor=actor, patient_id=summary.sysid).status == "deceased"
     for page in ("list", "create"):
         assert_safe(client.get(url(ready, page)))
     for page in ("consents", "timeline", "edit"):

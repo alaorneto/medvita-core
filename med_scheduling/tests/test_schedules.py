@@ -357,7 +357,11 @@ def test_blocks_show_in_the_calendar(ready):
 
 
 def test_calendar_disabled_makes_scheduling_unavailable(ready):
-    with ready.app_disabled("skeleton_calendar"), as_admin(ready) as admin:
+    """The calendar is a core library since v0.7.0 (#792): it closes with the apps that need it."""
+    from skeleton.service_api.applications import ApplicationService
+
+    with ready.app_disabled("med_scheduling"), as_admin(ready) as admin:
+        assert not ApplicationService().is_enabled(actor=admin, app_id="org.skeleton.calendar")
         with pytest.raises(Unavailable):
             service().create_schedule(actor=admin, name="X", professional_id=ready.doctor.sysid, idempotency_key="off")
 
@@ -365,7 +369,7 @@ def test_calendar_disabled_makes_scheduling_unavailable(ready):
 @pytest.mark.parametrize("model", [AvailabilityRule, AvailabilityRuleType, ScheduleBlock, ScheduleAppointmentType])
 def test_grid_blocks_and_kinds_follow_the_schedule(skeleton_db, model):
     """Every table under a schedule is read and written as the schedule is; the kinds of a period, two hops away."""
-    for label in ("med_patients", "skeleton_calendar", "med_scheduling"):
+    for label in ("med_patients", "med_scheduling"):
         open_app(label)
     scenario = build_service_scenario(model, slug=f"schedule-{model._meta.model_name}")
     calendars = {}
@@ -446,7 +450,7 @@ def test_the_kinds_of_a_period_are_hidden_when_the_period_is_erased(skeleton_db)
     from skeleton.access.policies import authorized_queryset
 
     assert is_derived(AvailabilityRuleType) and is_derived(AvailabilityRule)
-    for label in ("med_patients", "skeleton_calendar", "med_scheduling"):
+    for label in ("med_patients", "med_scheduling"):
         open_app(label)
     scenario = build_service_scenario(AvailabilityRuleType, slug="period-kinds")
     with acting_as(scenario.admin_a, scenario.a) as admin:

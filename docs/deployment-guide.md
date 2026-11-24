@@ -1,6 +1,6 @@
 # Guia de implantação
 
-Para o operador da plataforma e para o administrador da clínica. As regras de instalação, atualização e operação do núcleo estão na documentação do Skeleton ([implantação](https://github.com/alaorneto/skeleton/blob/v0.6.0/docs/deployment.md) e [atualizações](https://github.com/alaorneto/skeleton/blob/v0.6.0/docs/updates.md)); este guia só cobre o que é próprio da suíte.
+Para o operador da plataforma e para o administrador da clínica. As regras de instalação, atualização e operação do núcleo estão na documentação do Skeleton ([implantação](https://github.com/alaorneto/skeleton/blob/v0.8.0/docs/deployment.md) e [atualizações](https://github.com/alaorneto/skeleton/blob/v0.8.0/docs/updates.md)); este guia só cobre o que é próprio da suíte.
 
 ## 1. Operador da plataforma
 
@@ -64,3 +64,7 @@ A partir do núcleo `v0.4.0`, o calendário de cada agenda de atendimento é ger
 ## 7. Ao atualizar para o núcleo `v0.6.0`
 
 A partir do núcleo `v0.6.0`, o MFA é exigido em produção do administrador da plataforma (sem como desligar) e, por padrão, de quem tem papel administrativo na organização (`SKELETON_REQUIRE_ADMIN_MFA`, na tela da instância). Até cadastrar o autenticador, essas pessoas só veem as páginas de MFA. Avise o administrador da clínica antes de atualizar. Como a clínica guarda dado de saúde, vale também ligar a política da organização para todos os membros (**Configurações → Segurança**, `mfa_policy=all`); quem perder o autenticador e os códigos de recuperação é atendido pelo administrador da plataforma, que redefine o MFA. As regras estão na autenticação da documentação do [núcleo v0.6.0](https://github.com/alaorneto/skeleton/blob/v0.6.0/docs/authentication-sso.md#mfa-cifrado-e-obrigatório).
+
+## 8. Ao atualizar para o núcleo `v0.8.0`
+
+O agente não pula uma linha minor do núcleo: de `0.6.x` o caminho é `0.6.x → 0.7.0 → 0.8.0`, cada passo com as migrations dele ([atualizações](https://github.com/alaorneto/skeleton/blob/v0.8.0/docs/updates.md)). Instale a suíte compatível com a `v0.8.0` só depois do último passo. A partir da `v0.7.0`, a agenda e o livro contábil do núcleo são bibliotecas first-party instaladas sozinhas com as apps que as exigem, e os avisos (como "Paciente chegou") têm texto de fábrica que a organização pode ligar, desligar e editar em **Configurações → Notificações** ([notificações](https://github.com/alaorneto/skeleton/blob/v0.8.0/docs/notifications.md)).
