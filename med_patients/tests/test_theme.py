@@ -64,3 +64,11 @@ def test_text_and_fills_pass_aa_in_light_and_dark():
         }
         for label, (text, background) in pairs.items():
             assert _contrast(text, background) >= 4.5, (name, label, text, background)
+
+
+def test_the_body_uses_the_core_ibm_plex_sans():
+    """The body font is the core's IBM Plex Sans (#126): the default token, no font file of its own for it."""
+    manifest = json.loads(THEME.joinpath("theme.json").read_text(encoding="utf-8"))
+    assert manifest["tokens"]["font"] == "default" and manifest["tokens"]["font_family"] == ""
+    assert [font["family"] for font in manifest["fonts"]] == ["Poppins"]  # Only the headings' face is packaged.
+    assert "Inter" not in THEME.joinpath("theme.css").read_text(encoding="utf-8")

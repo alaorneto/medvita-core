@@ -10,7 +10,7 @@ Tema da instância trazido pelo `med_patients` (`runtime.instance_themes` do man
 | `fonts/poppins-semibold.woff2` | Poppins SemiBold, subconjunto latin do Google Fonts (cobre o português); licença SIL OFL 1.1 em `LICENSES/poppins-ofl.txt` |
 | `theme.css` | `medvita-design/tokens.css` convertido para os tokens estáveis do núcleo |
 
-A cor de marca (`tokens.brand_color`, `#1273c4`) gera no núcleo a escala e os tokens de marca, nos dois modos e com contraste AA. Por isso o `theme.css` não fixa nenhum token de marca: uma clínica com cor própria continua vencendo. O corpo usa a Inter do núcleo (os `.otf` da pasta da marca são a mesma fonte).
+A cor de marca (`tokens.brand_color`, `#1273c4`) gera no núcleo a escala e os tokens de marca, nos dois modos e com contraste AA. Por isso o `theme.css` não fixa nenhum token de marca: uma clínica com cor própria continua vencendo. O corpo, os campos e as tabelas usam a IBM Plex Sans do núcleo (`tokens.font = "default"`, auto-hospedada em `static/skeleton/web/vendor/`, sem arquivo de fonte no pacote; #126). Os títulos seguem em Poppins até o sistema de design (`DESIGN.md`) decidir.
 
 Contraste (#124), conferido por `med_patients/tests/test_theme.py` nos dois modos: branco sobre o botão de perigo, texto de perigo no cartão, texto secundário no fundo e texto de atenção no fundo de atenção, todos AA (4,5:1). No escuro, `--color-danger` é o vermelho de preenchimento (4,8:1 com branco) e o texto vermelho usa `--color-fg-danger`. Os rótulos de seção, de lista de dados e de tabela seguem sem caixa alta.
 

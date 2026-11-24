@@ -200,8 +200,8 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Títulos em Poppins 600 (a fonte do pacote); corpo na Inter do       */
-/* núcleo. Horários com algarismos de largura fixa.                    */
+/* Títulos em Poppins 600 (a fonte do pacote); corpo na IBM Plex Sans */
+/* do núcleo. Horários com algarismos de largura fixa.                 */
 /* ------------------------------------------------------------------ */
 @layer base {
   h1,
