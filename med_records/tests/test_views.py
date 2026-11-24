@@ -39,6 +39,16 @@ def url(ready, name, *args, organization=None):
     return reverse(f"med_records:{name}", args=((organization or ready.org_a).pk, *args))
 
 
+def current_revision(ready, encounter_id):
+    with ready.as_user(ready.a.doctor) as actor:
+        return RecordsService().encounter(actor=actor, encounter_id=encounter_id).header.revision
+
+
+def sections_of(ready, encounter_id):
+    with ready.as_user(ready.a.doctor) as actor:
+        return RecordsService().encounter(actor=actor, encounter_id=encounter_id).sections
+
+
 def assert_safe(response, *, clinical=True):
     assert response.status_code == 200, response.status_code
     html = response.content.decode()
@@ -63,42 +73,50 @@ def test_clinical_flow_through_the_pages(ready, patient):
     assert doctor.post(url(ready, "chart_open", patient.sysid)).status_code == 302
     with ready.as_user(ready.a.doctor) as actor:
         (chart,) = RecordsService().charts_for_patient(actor=actor, patient_id=patient.sysid)
-    response = doctor.post(url(ready, "encounter_new", chart.sysid), {"kind": "consultation", "template": ""})
+    response = doctor.post(
+        url(ready, "encounter_new", chart.sysid), {"encounter-kind": "consultation", "encounter-template": ""}
+    )
     assert response.status_code == 302
     encounter_id = response["Location"].rstrip("/").split("/")[-2]
     edit = url(ready, "encounter_edit", encounter_id)
     html = assert_safe(doctor.get(edit + "?add=med_records.vitals"))
-    assert "Salvar seção" in html
-    with ready.as_user(ready.a.doctor) as actor:
-        revision = RecordsService().encounter(actor=actor, encounter_id=encounter_id).header.revision
+    assert "Revisar e assinar" in html
+    revision = current_revision(ready, encounter_id)
     saved = doctor.post(
         edit,
         {
-            "action": "section",
-            "section_type": "med_records.vitals",
-            "position": 0,
+            "action": "save",
             "revision": revision,
-            "s-systolic": "120",
-            "s-weight": "70",
-            "s-height": "175",
+            "cards": 1,
+            "s0-type": "med_records.vitals",
+            "s0-position": 0,
+            "s0-systolic": "120",
+            "s0-weight": "70",
+            "s0-height": "175",
         },
     )
     assert saved.status_code == 302
-    with ready.as_user(ready.a.doctor) as actor:
-        revision = RecordsService().encounter(actor=actor, encounter_id=encounter_id).header.revision
-    doctor.post(
+    (vitals,) = sections_of(ready, encounter_id)
+    # The free text card is new and never saved on its own: "Revisar e assinar" saves it first.
+    to_sign = doctor.post(
         edit,
         {
-            "action": "section",
-            "section_type": "med_records.free_text",
-            "position": 0,
-            "revision": revision,
-            "s-text": XSS,
+            "action": "sign",
+            "revision": current_revision(ready, encounter_id),
+            "cards": 2,
+            "s0-section": vitals.sysid,
+            "s0-systolic": "120",
+            "s0-weight": "70",
+            "s0-height": "175",
+            "s1-type": "med_records.free_text",
+            "s1-position": 0,
+            "s1-text": XSS,
         },
     )
-    with ready.as_user(ready.a.doctor) as actor:
-        revision = RecordsService().encounter(actor=actor, encounter_id=encounter_id).header.revision
-    signed = doctor.post(edit, {"action": "sign", "revision": revision})
+    assert to_sign.status_code == 302 and to_sign["Location"] == url(ready, "encounter_sign", encounter_id)
+    confirmation = assert_safe(doctor.get(to_sign["Location"]))
+    assert "Sinais vitais" in confirmation and "Texto livre" in confirmation and "btn-danger" in confirmation
+    signed = doctor.post(to_sign["Location"], {"revision": current_revision(ready, encounter_id)})
     assert signed.status_code == 302
     page = assert_safe(doctor.get(url(ready, "encounter", encounter_id)))
     assert "Registro assinado em" in page and "Sem assinatura digital ICP-Brasil" in page and "22.9" in page
@@ -108,16 +126,29 @@ def test_clinical_flow_through_the_pages(ready, patient):
     addendum = doctor.post(url(ready, "addendum", encounter_id), {"text": "correção", "idempotency_key": "ad"})
     assert addendum.status_code == 302 and "/edit/" in addendum["Location"]
 
-    created = doctor.post(url(ready, "document_new", chart.sysid), {"kind": "med_records.certificate", "template": ""})
+    created = doctor.post(
+        url(ready, "document_new", chart.sysid), {"document-kind": "med_records.certificate", "document-template": ""}
+    )
     document_id = created["Location"].rstrip("/").split("/")[-2]
     with ready.as_user(ready.a.doctor) as actor:
         revision = RecordsService().document(actor=actor, document_id=document_id).header.revision
-    issued = doctor.post(
+    to_issue = doctor.post(
         url(ready, "document_edit", document_id),
         {"title": "Atestado", "body": "Repouso de 2 dias.", "revision": revision, "action": "issue"},
     )
+    # #119: "Revisar e emitir" saves the draft and asks; the document is issued only on the confirmation.
+    assert to_issue.status_code == 302 and to_issue["Location"] == url(ready, "document_issue", document_id)
+    asked = assert_safe(doctor.get(to_issue["Location"]))
+    assert "Emitir o documento" in asked and "Atestado" in asked
+    with ready.as_user(ready.a.doctor) as actor:
+        current = RecordsService().document(actor=actor, document_id=document_id).header
+    assert not current.issued
+    issued = doctor.post(to_issue["Location"], {"revision": current.revision})
     assert issued.status_code == 302
-    assert "Repouso de 2 dias." in assert_safe(doctor.get(url(ready, "document_print", document_id)))
+    printed = assert_safe(doctor.get(url(ready, "document_print", document_id)))
+    assert "Repouso de 2 dias." in printed
+    # #118: the signature line and the integrity footer are part of the printed document.
+    assert "Assinatura e carimbo" in printed and "Código de verificação" in printed and "<footer" in printed
     listing = assert_safe(doctor.get(section))
     assert "Atestado" in listing and "Assinado" in listing
     assert assert_safe(doctor.get(url(ready, "lists", chart.sysid)))
@@ -174,3 +205,48 @@ def test_setup_page(clinic):
     )
     assert response.status_code == 302
     assert client_for(clinic.a.reception).get(reverse("med_records:setup", args=(clinic.org_a.pk,))).status_code == 404
+
+
+def test_clinical_list_endings_and_replacements_ask_first(ready, patient):
+    from .helpers import start
+
+    chart = open_chart(ready, patient)
+    with ready.as_user(ready.a.doctor) as actor:
+        allergy = RecordsService().add_allergy(
+            actor=actor,
+            chart_id=chart.sysid,
+            substance="Dipirona",
+            category="drug",
+            severity="severe",
+            reaction="",
+            noted_on=None,
+            idempotency_key="allergy",
+        )
+    doctor = client_for(ready.a.doctor)
+    end = url(ready, "list_end", chart.sysid, "allergy", allergy.sysid)
+    assert end in assert_safe(doctor.get(url(ready, "lists", chart.sysid)))
+    asked = assert_safe(doctor.get(end))
+    assert "Dipirona" in asked and "Marcar a alergia como resolvida" in asked
+    assert client_for(ready.a.reception).get(end).status_code == 404
+    assert doctor.get(url(ready, "list_end", chart.sysid, "other", allergy.sysid)).status_code == 404
+    assert doctor.post(end, {"revision": allergy.revision}).status_code == 302
+    with ready.as_user(ready.a.doctor) as actor:
+        (stored,) = RecordsService().allergies(actor=actor, chart_id=chart.sysid)
+    assert stored.status == "resolved"
+    assert doctor.get(end).status_code == 404  # Nothing active left to resolve.
+    draft = start(ready, chart, key="to-remove")
+    with ready.as_user(ready.a.doctor) as actor:
+        saved = RecordsService().save_section(
+            actor=actor,
+            encounter_id=draft.header.sysid,
+            section_type="med_records.plan",
+            text="x",
+            expected_revision=draft.header.revision,
+        )
+    (section,) = saved.sections
+    remove = url(ready, "section_remove", draft.header.sysid, section.sysid)
+    assert "Remover a seção" in assert_safe(doctor.get(remove))
+    assert client_for(ready.b.doctor).get(remove).status_code == 404
+    assert doctor.post(remove, {"revision": saved.header.revision}).status_code == 302
+    with ready.as_user(ready.a.doctor) as actor:
+        assert RecordsService().encounter(actor=actor, encounter_id=draft.header.sysid).sections == ()

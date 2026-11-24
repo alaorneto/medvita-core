@@ -22,6 +22,7 @@
 - Operações de privacidade (relatório do titular, restrição de tratamento, anonimização) exigem `manage_access` no `PatientRegistry`: permissão de tabela mais dono ou administrador.
 - Configuração inicial (`setup` de cada app) exige a capacidade `access.manage`, porque cria contêiner e concede acesso a grupos.
 - Cada `setup` dá ao papel `member` a permissão de tabela do contêiner (`AccessService.grant_member_table_access`): quem decide o acesso real são as concessões por registro.
+- A página de confirmação de uma ação irreversível (`skeleton.web.confirm.confirmation_step`, #119) acha o alvo pelo mesmo serviço e com o mesmo ator da ação: não abre leitura nova, e o alvo que a pessoa não alcança responde o mesmo 404 no GET da confirmação e no POST.
 
 ## Acesso em espelho
 

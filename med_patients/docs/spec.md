@@ -119,6 +119,8 @@ Com o prontuário dentro do prazo de guarda, a guarda do `med_records` veta a an
 
 ### Telas
 
+Revogar um consentimento, remover um responsável ou um convênio e registrar o óbito passam por uma página de confirmação com o alvo e a consequência (#119): os botões da tela são links para a confirmação; a do óbito exige a data antes. Os campos de dado pessoal e a busca não entram no histórico de formulário do navegador (#120).
+
 Todas em `/o/<org>/apps/med_patients/`, pelo `PatientService`; paciente inexistente, de outra organização ou ilegível responde 404.
 
 | Rota | Tela |

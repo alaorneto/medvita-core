@@ -90,6 +90,8 @@ def test_desk_flow_through_the_pages(ready):
     assert charge.status == "paid" and len(receipts) == 2
     printed = assert_safe(client.get(url(ready, "receipt_print", receipts[0].sysid)))
     assert "Maria Caixa" in printed and "não substitui documento fiscal" in printed
+    # #118: the printed receipt has its own title, the clinic's address and the receiver's signature line.
+    assert "<h1" in printed and "Assinatura de quem recebeu" in printed and "Código de verificação" in printed
     assert (
         client.post(
             url(ready, "session_movement", session.sysid),
@@ -97,10 +99,14 @@ def test_desk_flow_through_the_pages(ready):
         ).status_code
         == 302
     )
-    closed = client.post(
-        url(ready, "session_close", session.sysid),
-        {"counted_amount": "140,00", "note": "", "revision": session.revision},
-    )
+    values = {"counted_amount": "140,00", "note": "", "revision": session.revision}
+    # #119: the first POST shows expected, counted and difference; nothing is closed yet.
+    asked = assert_safe(client.post(url(ready, "session_close", session.sysid), values))
+    assert "Esperado em dinheiro: R$ 150,00" in asked or "Esperado em dinheiro: R$ 150,00" in asked
+    assert "Faltam" in asked and 'name="confirmed"' in asked
+    with ready.as_user(ready.a.reception) as actor:
+        assert FinanceService().current_session(actor=actor) is not None
+    closed = client.post(url(ready, "session_close", session.sysid), {**values, "confirmed": "1"})
     assert closed.status_code == 302
     report = assert_safe(client.get(closed["Location"]))
     assert "R$ 150,00" in report and "-R$ 10,00" in report
@@ -181,3 +187,64 @@ def test_api(ready):
     assert outsider.get(api(ready, "charge", charge["sysid"], organization=ready.org_b)).status_code == 404
     with ready.app_disabled("med_finance"):
         assert client.get(api(ready, "charges")).status_code in (403, 404, 503)
+
+
+def test_money_actions_ask_first(ready):
+    """Cancelling a charge, reversing a payment, voiding a receipt and deactivating a price ask (#119)."""
+    patient = new_patient(ready)
+    client = client_for(ready.a.reception)
+    with ready.as_user(ready.a.reception) as actor:
+        from ..service_api import ChargeItemInput
+
+        charge = (
+            FinanceService()
+            .create_charge(
+                actor=actor,
+                patient_id=patient.sysid,
+                items=(ChargeItemInput(description="Consulta", unit_amount=20000),),
+                idempotency_key="ask",
+            )
+            .charge
+        )
+    cancel = url(ready, "charge_action", charge.sysid, "cancel")
+    asked = assert_safe(client.get(cancel))
+    assert "Cancelar a conta" in asked and 'name="reason"' in asked
+    assert client.get(url(ready, "charge_action", charge.sysid, "pay")).status_code == 405
+    assert (
+        client_for(ready.b.reception)
+        .get(url(ready, "charge_action", charge.sysid, "cancel", organization=ready.org_b))
+        .status_code
+        == 404
+    )
+    with ready.as_user(ready.a.reception) as actor:
+        assert FinanceService().charge(actor=actor, charge_id=charge.sysid).charge.status != "cancelled"
+    done = client.post(cancel, {"reason": "Lançada por engano", "revision": charge.revision})
+    assert done.status_code == 302
+    with ready.as_user(ready.a.reception) as actor:
+        assert FinanceService().charge(actor=actor, charge_id=charge.sysid).charge.status == "cancelled"
+    assert client.get(cancel).status_code == 404  # Nothing left to cancel.
+
+
+def test_a_refused_payment_keeps_what_was_typed(ready):
+    patient = new_patient(ready)
+    with ready.as_user(ready.a.reception) as actor:
+        from ..service_api import ChargeItemInput
+
+        charge = (
+            FinanceService()
+            .create_charge(
+                actor=actor,
+                patient_id=patient.sysid,
+                items=(ChargeItemInput(description="Consulta", unit_amount=20000),),
+                idempotency_key="typed",
+            )
+            .charge
+        )
+    client = client_for(ready.a.reception)
+    response = client.post(
+        url(ready, "charge_action", charge.sysid, "pay"),
+        {"method": "pix", "amount": "duzentos", "installments": "1", "revision": charge.revision},
+    )
+    html = response.content.decode()
+    assert response.status_code == 400 and 'value="duzentos"' in html and "Informe um valor em reais" in html
+    assert "error-summary" in html

@@ -5,7 +5,7 @@
 <nav class="toolbar" aria-label="{% translate "Ações" %}"><a class="btn btn-primary" href="{% url 'med_finance:charge_new' organization_id %}">{% translate "Nova conta" %}</a></nav></div>
 {% with section="desk" %}{% include "med_finance/_nav.html" %}{% endwith %}
 {% if not session %}
-{% if desk.writable %}<form method="post" action="{% url 'med_finance:session_open' organization_id %}" class="card max-w-xl mb-6">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% include "skeleton/web/components/form-fields.html" with form=open_form hide_marks=True %}<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Abrir o caixa" %}</button></div></form>{% endif %}
+{% if desk.writable %}<form method="post" action="{% url 'med_finance:session_open' organization_id %}" class="card max-w-xl mb-6">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">{% include "skeleton/web/components/form-fields.html" with form=open_form %}<div class="form-actions"><button type="submit" class="btn btn-primary">{% translate "Abrir o caixa" %}</button></div></form>{% endif %}
 {% else %}
 <dl class="meta-list mb-6"><dt>{% translate "Abertura" %}</dt><dd class="amount">{{ session.opening_amount|brl }}</dd>
 {% for item in report.by_method %}<dt>{{ item.method|finance_label:"method" }} ({{ item.count }})</dt><dd class="amount">{{ item.amount|brl }}</dd>{% endfor %}
@@ -13,8 +13,8 @@
 <dt>{% translate "Dinheiro esperado" %}</dt><dd class="amount"><strong>{{ report.expected_cash|brl }}</strong></dd></dl>
 {% if desk.writable %}
 <div class="day-columns mb-6">
-<form method="post" action="{% url 'med_finance:session_movement' organization_id session.sysid %}" class="card">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}-m"><h2 class="section-heading">{% translate "Suprimento ou sangria" %}</h2>{% include "skeleton/web/components/form-fields.html" with form=movement_form hide_marks=True %}<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Registrar" %}</button></div></form>
-<form method="post" action="{% url 'med_finance:session_close' organization_id session.sysid %}" class="card">{% csrf_token %}<input type="hidden" name="revision" value="{{ session.revision }}"><h2 class="section-heading">{% translate "Fechar o caixa" %}</h2>{% include "skeleton/web/components/form-fields.html" with form=close_form hide_marks=True %}<div class="form-actions"><button type="submit" class="btn btn-danger">{% translate "Fechar" %}</button></div></form>
+<form method="post" action="{% url 'med_finance:session_movement' organization_id session.sysid %}" class="card">{% csrf_token %}<input type="hidden" name="idempotency_key" value="{{ idempotency_key }}-m"><h2 class="section-heading">{% translate "Suprimento ou sangria" %}</h2>{% include "skeleton/web/components/form-errors.html" with form=movement_form %}{% include "skeleton/web/components/form-fields.html" with form=movement_form %}<div class="form-actions"><button type="submit" class="btn btn-secondary">{% translate "Registrar" %}</button></div></form>
+<form method="post" action="{% url 'med_finance:session_close' organization_id session.sysid %}" class="card">{% csrf_token %}<input type="hidden" name="revision" value="{{ session.revision }}"><h2 class="section-heading">{% translate "Fechar o caixa" %}</h2>{% include "skeleton/web/components/form-errors.html" with form=close_form %}{% include "skeleton/web/components/form-fields.html" with form=close_form %}<div class="form-actions"><button type="submit" class="btn btn-danger-outline">{% translate "Conferir e fechar o caixa" %}</button></div></form>
 </div>
 {% endif %}
 {% endif %}

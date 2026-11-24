@@ -30,6 +30,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from applications.med_patients.service_api import PatientService
 from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
+from skeleton.web.confirm import Confirmation, confirmation_step
 from skeleton.web.views import tenant_page
 
 from . import forms as scheduling_forms
@@ -43,6 +44,17 @@ TRANSITION_LABELS = {
     "complete": gettext("Concluir"),
     "mark_no_show": gettext("Marcar falta"),
 }
+# Transitions that end the appointment: they ask first (#119); the others stay one click.
+FINAL_TRANSITIONS = {
+    "complete": (
+        gettext("Concluir a consulta"),
+        gettext("A consulta passa a concluída e sai da fila. A situação não volta atrás."),
+    ),
+    "mark_no_show": (
+        gettext("Marcar falta"),
+        gettext("A consulta fica registrada como falta do paciente e o horário não volta para a agenda."),
+    ),
+}
 WALK_IN = "walk_in"
 # The field of the booking page each refusal of the service is about.
 BOOKING_FIELDS = {
@@ -52,6 +64,34 @@ BOOKING_FIELDS = {
     "room_unavailable": "slot",
     "type_not_allowed": "appointment_type",
 }
+
+
+def confirmation_page(
+    request: HttpRequest, confirmation: Confirmation, *, error: Any = "", status: int = 200
+) -> HttpResponse:
+    """The confirmation page of an action, again, with the reason it was refused (#119).
+
+    The core's ``confirmation_step`` shows it on GET; a POST refused by the service (revision, state)
+    shows it once more with the message, from the same ``Confirmation`` and the same template.
+    """
+    return render(
+        request,
+        confirmation.template,
+        {
+            "title": confirmation.title,
+            "message": confirmation.message,
+            "submit_label": confirmation.submit_label,
+            "cancel_url": confirmation.cancel_url,
+            "subject_label": confirmation.subject,
+            "eyebrow": confirmation.eyebrow,
+            "hidden": sorted(confirmation.hidden.items()),
+            "reason_label": confirmation.reason_label,
+            "reason_required": confirmation.reason_required,
+            "error": error,
+            **confirmation.context,
+        },
+        status=status,
+    )
 
 
 def _service() -> SchedulingService:
@@ -732,7 +772,14 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
 
 
 @practice_page
-def appointment_view(request: HttpRequest, organization_id: UUID, appointment_id: UUID) -> HttpResponse:
+def appointment_view(
+    request: HttpRequest,
+    organization_id: UUID,
+    appointment_id: UUID,
+    *,
+    reschedule_form: Any = None,
+    status: int = 200,
+) -> HttpResponse:
     practice = _practice_or_none(request)
     try:
         detail = _service().appointment(actor=request.user, appointment_id=appointment_id)
@@ -751,9 +798,9 @@ def appointment_view(request: HttpRequest, organization_id: UUID, appointment_id
         except NoReverseMatch:
             continue
     transitions = [
-        {"name": name, "label": TRANSITION_LABELS[name]}
+        {"name": name, "label": TRANSITION_LABELS[name], "final": name in FINAL_TRANSITIONS}
         for name in actions_from(row.status)
-        if name in TRANSITION_LABELS
+        if name in TRANSITION_LABELS and not (name == "mark_no_show" and _too_early_for_no_show(row))
     ]
     walk_in = row.mode == WALK_IN
     return render(
@@ -773,7 +820,7 @@ def appointment_view(request: HttpRequest, organization_id: UUID, appointment_id
             queue_day=row.starts_at.astimezone(zone).date().isoformat(),
             transitions=transitions if detail.writable else [],
             registered=registered,
-            reschedule_form=scheduling_forms.RescheduleForm(walk_in=walk_in),
+            reschedule_form=reschedule_form or scheduling_forms.RescheduleForm(walk_in=walk_in),
             cancel_form=scheduling_forms.CancelForm(),
             can_cancel="cancel" in actions_from(row.status) and detail.writable,
             # Who arrived for a walk-in session keeps the number: the appointment is not moved.
@@ -783,6 +830,7 @@ def appointment_view(request: HttpRequest, organization_id: UUID, appointment_id
             can_set_modality=detail.writable and row.status in ("scheduled", "confirmed", "arrived"),
             modalities=scheduling_forms.Modality.choices,
         ),
+        status=status,
     )
 
 
@@ -855,8 +903,56 @@ def appointment_priority(request: HttpRequest, organization_id: UUID, appointmen
     return _after(request, organization_id, appointment_id)
 
 
-@require_POST
+def _next_hidden(request: HttpRequest) -> dict[str, str]:
+    """The page a change goes back to, carried by the confirmation (only the known values)."""
+    hidden = {}
+    if request.GET.get("next") in ("reception", "queue"):
+        hidden["next"] = request.GET["next"]
+        for name in ("schedule", "day"):
+            if request.GET.get(name):
+                hidden[name] = request.GET[name][:40]
+    return hidden
+
+
+def _appointment_subject(request: HttpRequest, appointment_id: UUID) -> tuple[Any, str]:
+    """The appointment the actor reads and how the confirmation names it (patient, day and time)."""
+    try:
+        row = _service().appointment(actor=request.user, appointment_id=appointment_id).appointment
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    patient = _patient_names(request, [row.patient_id]).get(row.patient_id)
+    name = patient.display_name if patient else gettext("Paciente não disponível")
+    when = dj_timezone.localtime(row.starts_at)
+    return row, f"{name} · {when:%d/%m/%Y %H:%M}"
+
+
+def _too_early_for_no_show(row: Any) -> bool:
+    """The service refuses a no-show before the time (or, for a walk-in, before the end of the period)."""
+    now = dj_timezone.now()
+    return now < (row.ends_at if row.mode == WALK_IN else row.starts_at)
+
+
+def _describe_transition(request: HttpRequest, organization_id: UUID, appointment_id: UUID, name: str) -> Any:
+    if name not in FINAL_TRANSITIONS:
+        return None
+    row, subject = _appointment_subject(request, appointment_id)
+    if name not in actions_from(row.status) or (name == "mark_no_show" and _too_early_for_no_show(row)):
+        raise Http404
+    title, message = FINAL_TRANSITIONS[name]
+    return Confirmation(
+        title=title,
+        eyebrow=row.code,
+        subject=subject,
+        message=message,
+        submit_label=title,
+        cancel_url=reverse("med_scheduling:appointment", args=(organization_id, appointment_id)),
+        hidden={"revision": row.revision, **_next_hidden(request)},
+    )
+
+
 @practice_page
+@confirmation_step(_describe_transition)
+@require_POST
 def appointment_transition(
     request: HttpRequest, organization_id: UUID, appointment_id: UUID, name: str
 ) -> HttpResponse:
@@ -885,9 +981,14 @@ def appointment_reschedule(request: HttpRequest, organization_id: UUID, appointm
     except (NotFound, Forbidden):
         raise Http404 from None
     form = scheduling_forms.RescheduleForm(request.POST, walk_in=current.mode == WALK_IN)
+
+    def again() -> HttpResponse:
+        return appointment_view(
+            request, organization_id=organization_id, appointment_id=appointment_id, reschedule_form=form, status=400
+        )
+
     if not form.is_valid() or practice is None:
-        messages.error(request, gettext("Informe a nova data e hora."))
-        return redirect("med_scheduling:appointment", organization_id, appointment_id)
+        return again()
     starts_at = datetime.combine(
         form.cleaned_data["day"], form.cleaned_data["time"], tzinfo=ZoneInfo(practice.timezone)
     )
@@ -903,38 +1004,55 @@ def appointment_reschedule(request: HttpRequest, organization_id: UUID, appointm
     except (NotFound, Forbidden):
         raise Http404 from None
     except Conflict as error:
-        messages.error(request, conflict_text(error))
-        return redirect("med_scheduling:appointment", organization_id, appointment_id)
+        form.add_error(None, conflict_text(error))
+        return again()
     except InvalidInput as error:
-        messages.error(request, _messages_of(error))
-        return redirect("med_scheduling:appointment", organization_id, appointment_id)
+        form.add_error(None, _messages_of(error))
+        return again()
     messages.success(request, gettext("Consulta remarcada."))
     return redirect("med_scheduling:appointment", organization_id, moved.sysid)
 
 
-@require_POST
 @practice_page
 def appointment_cancel(request: HttpRequest, organization_id: UUID, appointment_id: UUID) -> HttpResponse:
-    form = scheduling_forms.CancelForm(request.POST)
-    if not form.is_valid():
-        messages.error(request, gettext("Escolha o motivo do cancelamento."))
-        return redirect("med_scheduling:appointment", organization_id, appointment_id)
-    try:
-        with transaction.atomic():
-            _service().cancel(
-                actor=request.user,
-                appointment_id=appointment_id,
-                reason=form.cleaned_data["reason"],
-                note=form.cleaned_data["note"],
-                expected_revision=_revision(request),
-            )
-    except (NotFound, Forbidden):
-        raise Http404 from None
-    except Conflict as error:
-        messages.error(request, conflict_text(error))
-    else:
-        messages.success(request, gettext("Consulta cancelada."))
-    return redirect("med_scheduling:appointment", organization_id, appointment_id)
+    """Cancel an appointment: the GET asks for the reason and says what happens; the POST cancels (#119)."""
+    row, subject = _appointment_subject(request, appointment_id)
+    if not row.status or "cancel" not in actions_from(row.status):
+        raise Http404
+    form = scheduling_forms.CancelForm(request.POST or None)
+    error = ""
+    if request.method == "POST" and form.is_valid():
+        try:
+            with transaction.atomic():
+                _service().cancel(
+                    actor=request.user,
+                    appointment_id=appointment_id,
+                    reason=form.cleaned_data["reason"],
+                    note=form.cleaned_data["note"],
+                    expected_revision=_revision(request),
+                )
+        except (NotFound, Forbidden):
+            raise Http404 from None
+        except Conflict as conflict:
+            error = conflict_text(conflict)
+        else:
+            messages.success(request, gettext("Consulta cancelada. Avise o paciente."))
+            return redirect("med_scheduling:appointment", organization_id, appointment_id)
+    elif request.method not in ("GET", "HEAD", "POST"):
+        raise Http404
+    confirmation = Confirmation(
+        title=gettext("Cancelar a consulta"),
+        eyebrow=row.code,
+        subject=subject,
+        message=gettext("O horário volta para a agenda e a consulta fica como cancelada. Isso não se desfaz."),
+        submit_label=gettext("Cancelar a consulta"),
+        cancel_url=reverse("med_scheduling:appointment", args=(organization_id, appointment_id)),
+        hidden={"revision": request.POST.get("revision") or row.revision},
+        template="med_scheduling/confirm_cancel.html",
+        context={"form": form},
+    )
+    status = 200 if request.method != "POST" else (409 if error else 400)
+    return confirmation_page(request, confirmation, error=error, status=status)
 
 
 @practice_page
@@ -1751,8 +1869,30 @@ def period_edit_view(request: HttpRequest, organization_id: UUID, schedule_id: U
     )
 
 
-@require_POST
+def _describe_period_remove(request: HttpRequest, organization_id: UUID, schedule_id: UUID, rule_id: UUID) -> Any:
+    schedule, rules = _grid_or_404(request, schedule_id)
+    rule = next((item for item in rules if item.sysid == rule_id), None)
+    if not schedule.writable or rule is None:
+        raise Http404
+    weekday = dict(scheduling_forms.WEEKDAYS)[rule.weekday]
+    span = f"{scheduling_forms.clock(rule.start_minute)}–{scheduling_forms.clock(rule.end_minute)}"
+    return Confirmation(
+        title=gettext("Remover o período da grade"),
+        eyebrow=schedule.name,
+        subject=f"{weekday} · {span}",
+        message=gettext(
+            "O período sai da grade semanal: não há mais horários livres nele, inclusive na marcação online. "
+            "As consultas já marcadas não mudam."
+        ),
+        submit_label=gettext("Remover o período"),
+        cancel_url=reverse("med_scheduling:schedule", args=(organization_id, schedule_id)),
+        hidden={"revision": schedule.revision},
+    )
+
+
 @practice_page
+@confirmation_step(_describe_period_remove)
+@require_POST
 def period_remove(request: HttpRequest, organization_id: UUID, schedule_id: UUID, rule_id: UUID) -> HttpResponse:
     """Take one period out of the weekly grid; the appointments already booked in it do not change."""
     schedule, rules = _grid_or_404(request, schedule_id)
@@ -1981,8 +2121,33 @@ def day_exception_view(request: HttpRequest, organization_id: UUID, schedule_id:
     )
 
 
-@require_POST
+def _describe_block_remove(request: HttpRequest, organization_id: UUID, schedule_id: UUID, block_id: UUID) -> Any:
+    try:
+        schedule = _service().schedule(actor=request.user, schedule_id=schedule_id)
+        now = dj_timezone.now()
+        blocks = _service().blocks(
+            actor=request.user, schedule_id=schedule_id, start=now - timedelta(days=1), end=now + timedelta(days=365)
+        )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    block = next((item for item in blocks if item.sysid == block_id), None)
+    if not schedule.writable or block is None:
+        raise Http404
+    start, end = dj_timezone.localtime(block.starts_at), dj_timezone.localtime(block.ends_at)
+    return Confirmation(
+        title=gettext("Remover o bloqueio"),
+        eyebrow=schedule.name,
+        subject=f"{start:%d/%m/%Y %H:%M}–{end:%H:%M}",
+        message=gettext("Os horários do bloqueio voltam a ficar livres para marcar, inclusive pela marcação online."),
+        submit_label=gettext("Remover o bloqueio"),
+        cancel_url=reverse("med_scheduling:schedule", args=(organization_id, schedule_id)),
+        hidden={"revision": block.revision},
+    )
+
+
 @practice_page
+@confirmation_step(_describe_block_remove)
+@require_POST
 def block_remove(request: HttpRequest, organization_id: UUID, schedule_id: UUID, block_id: UUID) -> HttpResponse:
     try:
         with transaction.atomic():

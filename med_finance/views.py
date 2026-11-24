@@ -20,12 +20,41 @@ from django.views.decorators.http import require_POST
 
 from applications.med_patients.service_api import PatientService
 from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
+from skeleton.web.confirm import Confirmation, confirmation_step
 from skeleton.web.views import tenant_page
 
 from . import forms as finance_forms
 from .service_api import ChargeItemInput, FinanceService
 
 logger = logging.getLogger(__name__)
+
+
+def confirmation_page(
+    request: HttpRequest, confirmation: Confirmation, *, error: Any = "", status: int = 200
+) -> HttpResponse:
+    """The confirmation page of an action, again, with the reason it was refused (#119).
+
+    The core's ``confirmation_step`` shows it on GET; a POST refused by the service (revision, state)
+    shows it once more with the message, from the same ``Confirmation`` and the same template.
+    """
+    return render(
+        request,
+        confirmation.template,
+        {
+            "title": confirmation.title,
+            "message": confirmation.message,
+            "submit_label": confirmation.submit_label,
+            "cancel_url": confirmation.cancel_url,
+            "subject_label": confirmation.subject,
+            "eyebrow": confirmation.eyebrow,
+            "hidden": sorted(confirmation.hidden.items()),
+            "reason_label": confirmation.reason_label,
+            "reason_required": confirmation.reason_required,
+            "error": error,
+            **confirmation.context,
+        },
+        status=status,
+    )
 
 
 def _service() -> FinanceService:
@@ -125,11 +154,29 @@ def _run(request: HttpRequest, action: Any, success: str) -> bool:
     return True
 
 
+def _form_run(form: Any, action: Any) -> bool:
+    """Run a service command in a transaction; a refusal goes on the form, which keeps what was typed."""
+    try:
+        with transaction.atomic():
+            action()
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except InvalidInput as error:
+        finance_forms.apply_service_errors(form, error)
+        return False
+    except Conflict as error:
+        form.add_error(None, conflict_text(error))
+        return False
+    return True
+
+
 # ------------------------------------------------------------------------------------ desk
 
 
 @tenant_page()
-def desk_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+def desk_view(
+    request: HttpRequest, organization_id: UUID, *, forms: dict[str, Any] | None = None, status: int = 200
+) -> HttpResponse:
     """The cash desk of the day: the session, its totals and movements, and the open charges."""
     from skeleton.service_api.access import AccessService
 
@@ -155,7 +202,9 @@ def desk_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
             movement_form=finance_forms.MovementForm(),
             close_form=finance_forms.CloseSessionForm(),
             idempotency_key=uuid.uuid4().hex,
+            **(forms or {}),
         ),
+        status=status,
     )
 
 
@@ -182,43 +231,76 @@ def session_open(request: HttpRequest, organization_id: UUID) -> HttpResponse:
 @tenant_page()
 def session_movement(request: HttpRequest, organization_id: UUID, session_id: UUID) -> HttpResponse:
     form = finance_forms.MovementForm(request.POST)
-    if form.is_valid():
-        _run(
-            request,
-            lambda: _service().add_movement(
-                actor=request.user,
-                session_id=session_id,
-                kind=form.cleaned_data["kind"],
-                amount=form.cleaned_data["amount"],
-                reason=form.cleaned_data["reason"],
-                idempotency_key=_key(request),
-            ),
-            gettext("Movimento registrado."),
-        )
-    else:
-        messages.error(request, " ".join(str(error) for errors in form.errors.values() for error in errors))
-    return redirect("med_finance:desk", organization_id)
+    if form.is_valid() and _form_run(
+        form,
+        lambda: _service().add_movement(
+            actor=request.user,
+            session_id=session_id,
+            kind=form.cleaned_data["kind"],
+            amount=form.cleaned_data["amount"],
+            reason=form.cleaned_data["reason"],
+            idempotency_key=_key(request),
+        ),
+    ):
+        messages.success(request, gettext("Movimento registrado."))
+        return redirect("med_finance:desk", organization_id)
+    return desk_view(request, organization_id=organization_id, forms={"movement_form": form}, status=400)
 
 
 @require_POST
 @tenant_page()
 def session_close(request: HttpRequest, organization_id: UUID, session_id: UUID) -> HttpResponse:
+    """Close the session in two steps (#119): what was counted against what is expected, then the close."""
+    from django.urls import reverse
+
+    from .templatetags.med_finance_format import brl
+
     form = finance_forms.CloseSessionForm(request.POST)
-    if form.is_valid() and _run(
-        request,
+    if not form.is_valid():
+        return desk_view(request, organization_id=organization_id, forms={"close_form": form}, status=400)
+    counted = form.cleaned_data["counted_amount"]
+    if request.POST.get("confirmed") != "1":
+        try:
+            report = _service().session_report(actor=request.user, session_id=session_id)
+        except (NotFound, Forbidden):
+            raise Http404 from None
+        difference = counted - report.expected_cash
+        if difference == 0:
+            outcome = gettext("O caixa fecha sem diferença.")
+        elif difference > 0:
+            outcome = gettext("Sobram %(amount)s.") % {"amount": brl(difference)}
+        else:
+            outcome = gettext("Faltam %(amount)s.") % {"amount": brl(-difference)}
+        message = gettext(
+            "Esperado em dinheiro: %(expected)s. Contado: %(counted)s. %(outcome)s "
+            "Fechado, o caixa não recebe mais pagamentos nem movimentos."
+        ) % {"expected": brl(report.expected_cash), "counted": brl(counted), "outcome": outcome}
+        confirmation = Confirmation(
+            title=gettext("Fechar o caixa"),
+            message=message,
+            submit_label=gettext("Fechar o caixa"),
+            cancel_url=reverse("med_finance:desk", args=(organization_id,)),
+            hidden={
+                "confirmed": "1",
+                "revision": request.POST.get("revision", ""),
+                "counted_amount": request.POST.get("counted_amount", ""),
+                "note": form.cleaned_data["note"],
+            },
+        )
+        return confirmation_page(request, confirmation)
+    if _form_run(
+        form,
         lambda: _service().close_session(
             actor=request.user,
             session_id=session_id,
-            counted_amount=form.cleaned_data["counted_amount"],
+            counted_amount=counted,
             note=form.cleaned_data["note"],
             expected_revision=_revision(request),
         ),
-        gettext("Caixa fechado."),
     ):
+        messages.success(request, gettext("Caixa fechado."))
         return redirect("med_finance:session", organization_id, session_id)
-    if not form.is_valid():
-        messages.error(request, " ".join(str(error) for errors in form.errors.values() for error in errors))
-    return redirect("med_finance:desk", organization_id)
+    return desk_view(request, organization_id=organization_id, forms={"close_form": form}, status=400)
 
 
 @tenant_page()
@@ -318,7 +400,9 @@ def charge_new(request: HttpRequest, organization_id: UUID) -> HttpResponse:
 
 
 @tenant_page()
-def charge_view(request: HttpRequest, organization_id: UUID, charge_id: UUID) -> HttpResponse:
+def charge_view(
+    request: HttpRequest, organization_id: UUID, charge_id: UUID, *, payment_form: Any = None, status: int = 200
+) -> HttpResponse:
     try:
         detail = _service().charge(actor=request.user, charge_id=charge_id)
         payments = _service().payments(actor=request.user, charge_id=charge_id)
@@ -342,40 +426,64 @@ def charge_view(request: HttpRequest, organization_id: UUID, charge_id: UUID) ->
             charge=charge,
             patient=_patients(request, [charge.patient_id]).get(charge.patient_id),
             payments=[{"payment": item, "receipt": receipt_of.get(item.sysid)} for item in payments],
-            payment_form=finance_forms.PaymentForm(
-                initial={"amount": f"{charge.balance // 100},{charge.balance % 100:02d}"}
-            ),
+            payment_form=payment_form
+            or finance_forms.PaymentForm(initial={"amount": f"{charge.balance // 100},{charge.balance % 100:02d}"}),
             reason_form=finance_forms.ReasonForm(),
             idempotency_key=uuid.uuid4().hex,
             panels=panels,
         ),
+        status=status,
     )
 
 
-@require_POST
+def _describe_charge_action(request: HttpRequest, organization_id: UUID, charge_id: UUID, action: str) -> Any:
+    from django.urls import reverse
+
+    if action != "cancel":
+        return None
+    try:
+        charge = _service().charge(actor=request.user, charge_id=charge_id).charge
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    if charge.status in ("cancelled", "paid") or charge.balance != charge.total:
+        raise Http404
+    patient = _patients(request, [charge.patient_id]).get(charge.patient_id)
+    return Confirmation(
+        title=gettext("Cancelar a conta"),
+        eyebrow=charge.code,
+        subject=patient.display_name if patient else "",
+        message=gettext("A conta deixa de cobrar o paciente e fica guardada como cancelada. Isso não se desfaz."),
+        submit_label=gettext("Cancelar a conta"),
+        cancel_url=reverse("med_finance:charge", args=(organization_id, charge_id)),
+        hidden={"revision": charge.revision},
+        reason_label=gettext("Motivo do cancelamento"),
+        reason_required=True,
+    )
+
+
 @tenant_page()
+@confirmation_step(_describe_charge_action)
+@require_POST
 def charge_action(request: HttpRequest, organization_id: UUID, charge_id: UUID, action: str) -> HttpResponse:
     revision = _revision(request)
     if action == "pay":
         form = finance_forms.PaymentForm(request.POST)
-        if not form.is_valid():
-            messages.error(request, " ".join(str(error) for errors in form.errors.values() for error in errors))
-            return redirect("med_finance:charge", organization_id, charge_id)
-        values = form.cleaned_data
-        _run(
-            request,
+        if form.is_valid() and _form_run(
+            form,
             lambda: _service().register_payment(
                 actor=request.user,
                 charge_id=charge_id,
-                method=values["method"],
-                amount=values["amount"],
-                installments=values["installments"],
-                authorization_code=values["authorization_code"],
+                method=form.cleaned_data["method"],
+                amount=form.cleaned_data["amount"],
+                installments=form.cleaned_data["installments"],
+                authorization_code=form.cleaned_data["authorization_code"],
                 expected_revision=revision,
                 idempotency_key=_key(request),
             ),
-            gettext("Pagamento recebido e recibo emitido."),
-        )
+        ):
+            messages.success(request, gettext("Pagamento recebido e recibo emitido."))
+            return redirect("med_finance:charge", organization_id, charge_id)
+        return charge_view(request, organization_id=organization_id, charge_id=charge_id, payment_form=form, status=400)
     elif action == "confirm":
         _run(
             request,
@@ -402,8 +510,39 @@ def charge_action(request: HttpRequest, organization_id: UUID, charge_id: UUID, 
     return redirect("med_finance:charge", organization_id, charge_id)
 
 
-@require_POST
+def _payment_of(request: HttpRequest, charge_id: UUID, payment_id: UUID) -> Any:
+    try:
+        payments = _service().payments(actor=request.user, charge_id=charge_id)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    payment = next((item for item in payments if item.sysid == payment_id), None)
+    if payment is None or payment.status != "registered":
+        raise Http404
+    return payment
+
+
+def _describe_reverse(request: HttpRequest, organization_id: UUID, payment_id: UUID) -> Confirmation:
+    from django.urls import reverse
+
+    from .templatetags.med_finance_format import brl, finance_label
+
+    charge_id = _uuid(request.GET.get("charge", ""))
+    payment = _payment_of(request, charge_id, payment_id)
+    return Confirmation(
+        title=gettext("Estornar o pagamento"),
+        subject=f"{finance_label(payment.method, 'method')} · {brl(payment.amount)}",
+        message=gettext("O valor volta a ficar em aberto na conta e sai do caixa em que foi recebido."),
+        submit_label=gettext("Estornar o pagamento"),
+        cancel_url=reverse("med_finance:charge", args=(organization_id, charge_id)),
+        hidden={"revision": payment.revision, "charge": charge_id},
+        reason_label=gettext("Motivo do estorno"),
+        reason_required=True,
+    )
+
+
 @tenant_page()
+@confirmation_step(_describe_reverse)
+@require_POST
 def payment_reverse(request: HttpRequest, organization_id: UUID, payment_id: UUID) -> HttpResponse:
     form = finance_forms.ReasonForm(request.POST)
     charge_id = _uuid(request.POST.get("charge", ""))
@@ -474,15 +613,50 @@ def receipt_view(request: HttpRequest, organization_id: UUID, receipt_id: UUID) 
     )
 
 
+def _practice(request: HttpRequest) -> Any:
+    """The clinic's identification for the printed receipt (address and phone), when the actor reads it."""
+    from applications.med_scheduling.service_api import SchedulingService
+
+    try:
+        return SchedulingService().practice(actor=request.user)
+    except (NotFound, Forbidden):
+        return None
+
+
 @tenant_page()
 def receipt_print(request: HttpRequest, organization_id: UUID, receipt_id: UUID) -> HttpResponse:
+    receipt = _receipt(request, receipt_id)
     return render(
-        request, "med_finance/receipt_print.html", _context(organization_id, receipt=_receipt(request, receipt_id))
+        request,
+        "med_finance/receipt_print.html",
+        _context(organization_id, receipt=receipt, practice=_practice(request)),
     )
 
 
-@require_POST
+def _describe_void(request: HttpRequest, organization_id: UUID, receipt_id: UUID) -> Confirmation:
+    from django.urls import reverse
+
+    receipt = _receipt(request, receipt_id)
+    if receipt.voided:
+        raise Http404
+    return Confirmation(
+        title=gettext("Anular o recibo"),
+        eyebrow=gettext("Recibo %(number)s") % {"number": receipt.number},
+        message=gettext(
+            "O recibo continua guardado, marcado como anulado, e o número não volta. "
+            "Depois de anulado, o pagamento pode ser estornado."
+        ),
+        submit_label=gettext("Anular o recibo"),
+        cancel_url=reverse("med_finance:receipt", args=(organization_id, receipt_id)),
+        hidden={"idempotency_key": uuid.uuid4().hex},
+        reason_label=gettext("Motivo da anulação"),
+        reason_required=True,
+    )
+
+
 @tenant_page()
+@confirmation_step(_describe_void)
+@require_POST
 def receipt_void(request: HttpRequest, organization_id: UUID, receipt_id: UUID) -> HttpResponse:
     form = finance_forms.ReasonForm(request.POST)
     if form.is_valid():
@@ -518,19 +692,7 @@ def prices_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         if not writable:
             raise Http404
         status = 400
-        if request.POST.get("action") == "deactivate":
-            if _run(
-                request,
-                lambda: _service().update_price_item(
-                    actor=request.user,
-                    item_id=_uuid(request.POST.get("id", "")),
-                    changes=(("is_active", False),),
-                    expected_revision=_revision(request),
-                ),
-                gettext("Item desativado."),
-            ):
-                return redirect("med_finance:prices", organization_id)
-        elif form.is_valid():
+        if form.is_valid():
             try:
                 with transaction.atomic():
                     _service().add_price_item(
@@ -555,6 +717,44 @@ def prices_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         _context(organization_id, items=items, writable=writable, form=form, idempotency_key=uuid.uuid4().hex),
         status=status,
     )
+
+
+def _describe_price_deactivate(request: HttpRequest, organization_id: UUID, item_id: UUID) -> Confirmation:
+    from django.urls import reverse
+
+    from .templatetags.med_finance_format import brl
+
+    try:
+        lists = _service().price_lists(actor=request.user)
+        items = _service().price_items(actor=request.user, active_only=True)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    item = next((row for row in items if row.sysid == item_id), None)
+    if item is None or not (lists and lists[0].writable):
+        raise Http404
+    return Confirmation(
+        title=gettext("Desativar o item"),
+        subject=f"{item.code} · {item.description} · {brl(item.amount)}",
+        message=gettext("O item deixa de entrar em contas novas. As contas que já o têm não mudam."),
+        submit_label=gettext("Desativar o item"),
+        cancel_url=reverse("med_finance:prices", args=(organization_id,)),
+        hidden={"revision": item.revision},
+    )
+
+
+@tenant_page()
+@confirmation_step(_describe_price_deactivate)
+@require_POST
+def price_deactivate(request: HttpRequest, organization_id: UUID, item_id: UUID) -> HttpResponse:
+    _describe_price_deactivate(request, organization_id, item_id)
+    _run(
+        request,
+        lambda: _service().update_price_item(
+            actor=request.user, item_id=item_id, changes=(("is_active", False),), expected_revision=_revision(request)
+        ),
+        gettext("Item desativado."),
+    )
+    return redirect("med_finance:prices", organization_id)
 
 
 @tenant_page()

@@ -99,6 +99,8 @@ O financeiro não emite documento fiscal: as apps de Receita Saúde (Medvita Pro
 
 ### Páginas
 
+Cancelar a conta, estornar um pagamento e anular um recibo pedem o motivo numa página de confirmação; desativar um item de preço também confirma (#119). "Estornar" só aparece depois de anulado o recibo do pagamento, e "Cancelar a conta" só numa conta sem pagamento. Fechar o caixa tem dois passos: o primeiro mostra o esperado em dinheiro, o contado e a diferença; o segundo fecha. Pagamento, movimento e fechamento recusados voltam com o que foi digitado e o erro no formulário (#120). O recibo impresso tem título, endereço da clínica e a linha de assinatura de quem recebeu (#118).
+
 Em `/o/<org>/apps/med_finance/` (nomes `med_finance:<nome>`); toda leitura e escrita passa pelo `FinanceService`. Valores são digitados em reais com vírgula ("250,00"), convertidos para centavos por `skeleton.common.money.parse` (nunca `float`), e mostrados com o filtro `brl`.
 
 | Nome | Página |

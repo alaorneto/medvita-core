@@ -21,6 +21,7 @@ urlpatterns = [
     path("receipts/<uuid:receipt_id>/print/", views.receipt_print, name="receipt_print"),
     path("receipts/<uuid:receipt_id>/void/", views.receipt_void, name="receipt_void"),
     path("prices/", views.prices_view, name="prices"),
+    path("prices/<uuid:item_id>/deactivate/", views.price_deactivate, name="price_deactivate"),
     path("reports/daily/", views.daily_view, name="daily"),
     path("reports/receivables/", views.receivables_view, name="receivables"),
     path("patients/<uuid:patient_id>/", views.patient_section, name="patient_section"),

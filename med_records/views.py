@@ -23,6 +23,7 @@ from django.views.decorators.http import require_POST
 
 from applications.med_patients.service_api import PatientService
 from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
+from skeleton.web.confirm import Confirmation, confirmation_step
 from skeleton.web.views import tenant_page
 
 from . import forms as record_forms
@@ -31,6 +32,34 @@ from .sections import body_mass_index
 from .service_api import ConsumptionInput, RecordsService, TemplateSectionInput
 
 logger = logging.getLogger(__name__)
+
+
+def confirmation_page(
+    request: HttpRequest, confirmation: Confirmation, *, error: Any = "", status: int = 200
+) -> HttpResponse:
+    """The confirmation page of an action, again, with the reason it was refused (#119).
+
+    The core's ``confirmation_step`` shows it on GET; a POST refused by the service (revision, state)
+    shows it once more with the message, from the same ``Confirmation`` and the same template.
+    """
+    return render(
+        request,
+        confirmation.template,
+        {
+            "title": confirmation.title,
+            "message": confirmation.message,
+            "submit_label": confirmation.submit_label,
+            "cancel_url": confirmation.cancel_url,
+            "subject_label": confirmation.subject,
+            "eyebrow": confirmation.eyebrow,
+            "hidden": sorted(confirmation.hidden.items()),
+            "reason_label": confirmation.reason_label,
+            "reason_required": confirmation.reason_required,
+            "error": error,
+            **confirmation.context,
+        },
+        status=status,
+    )
 
 
 def _service() -> RecordsService:
@@ -226,9 +255,11 @@ def patient_section(request: HttpRequest, organization_id: UUID, patient_id: UUI
             documents=_service().documents(actor=request.user, chart_id=chart.sysid),
             attachments=_service().attachments(actor=request.user, chart_id=chart.sysid),
             encounter_form=record_forms.NewEncounterForm(
-                templates=_service().templates(actor=request.user, archive_id=archive.sysid, kind="encounter")
+                prefix="encounter",
+                templates=_service().templates(actor=request.user, archive_id=archive.sysid, kind="encounter"),
             ),
             document_form=record_forms.NewDocumentForm(
+                prefix="document",
                 kinds=active_document_kinds(request.user),
                 templates=_service().templates(actor=request.user, archive_id=archive.sysid, kind="document"),
             ),
@@ -301,7 +332,7 @@ def attachment_download(request: HttpRequest, organization_id: UUID, attachment_
 @tenant_page()
 def encounter_new(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> HttpResponse:
     form = record_forms.NewEncounterForm(
-        request.POST, templates=_service().templates(actor=request.user, kind="encounter")
+        request.POST, prefix="encounter", templates=_service().templates(actor=request.user, kind="encounter")
     )
     if not form.is_valid():
         raise Http404
@@ -391,31 +422,117 @@ def encounter_print(request: HttpRequest, organization_id: UUID, encounter_id: U
     return render(request, "med_records/encounter_print.html", context)
 
 
-def _encounter_post(request: HttpRequest, organization_id: UUID, encounter_id: UUID, info: Any, types: dict) -> Any:
-    """Run one action of the draft editor; return a response to send, or ``None`` to render again."""
-    action = request.POST.get("action", "")
-    if action == "section":
-        kind = types.get(request.POST.get("section_type", ""))
+ICD_LIST = "icd10_list"
+
+
+def _card_prefix(index: int) -> str:
+    return f"s{index}"
+
+
+def _stored_cards(info: Any) -> list[dict[str, Any]]:
+    """The cards of the stored sections, in order, with the values they were saved with."""
+    cards = []
+    for section in info.sections:
+        kind = SECTION_TYPES.get(section.section_type)
         if kind is None:
-            raise Http404
-        form = record_forms.section_form(kind, request.POST, prefix="s")
-        if not form.is_valid():
-            raise InvalidInput({"data": [gettext("Confira os campos da seção.")]})
-        try:
-            position = int(request.POST.get("position", "0"))
-        except ValueError:
-            position = 0
-        _service().save_section(
+            continue
+        cards.append(
+            {
+                "section": section,
+                "kind": kind,
+                "position": section.position,
+                "initial": record_forms.section_initial(kind, json.loads(section.data_json), section.text),
+            }
+        )
+    return cards
+
+
+def _posted_cards(request: HttpRequest, info: Any, types: dict) -> list[dict[str, Any]]:
+    """The cards the editor sent: a stored section by its id, or a new one by type and position."""
+    stored = {str(card["section"].sysid): card for card in _stored_cards(info)}
+    try:
+        count = min(int(request.POST.get("cards", "0")), 60)
+    except ValueError:
+        count = 0
+    cards = []
+    for index in range(count):
+        prefix = _card_prefix(index)
+        section_id = request.POST.get(f"{prefix}-section", "")
+        if section_id:
+            card = stored.get(section_id)
+            if card is None:
+                continue  # Removed meanwhile: the revision check of the next write reports it.
+            card = dict(card)
+        else:
+            kind = types.get(request.POST.get(f"{prefix}-type", ""))
+            if kind is None:
+                raise Http404
+            try:
+                position = int(request.POST.get(f"{prefix}-position", "0"))
+            except ValueError:
+                position = 0
+            card = {"section": None, "kind": kind, "position": position, "initial": {}}
+        card["form"] = record_forms.section_form(card["kind"], request.POST, prefix=prefix, initial=card["initial"])
+        cards.append(card)
+    return cards
+
+
+def _use_icd(request: HttpRequest, cards: list[dict[str, Any]], code: str) -> bool:
+    """Append the chosen ICD-10 code to the first diagnoses field of the posted cards."""
+    try:
+        found = _service().search_icd10(actor=request.user, query=code)
+    except InvalidInput:
+        return False
+    item = next((row for row in found if row.code == code), None)
+    if item is None:
+        return False
+    for card in cards:
+        for field in card["kind"].fields:
+            if field.kind == ICD_LIST:
+                form = card["form"]
+                name = form.add_prefix(field.name)
+                data = form.data.copy()
+                current = (data.get(name) or "").rstrip()
+                data[name] = f"{current}\n{item.code} {item.description}".strip()
+                card["form"] = record_forms.section_form(
+                    card["kind"], data, prefix=form.prefix, initial=card["initial"]
+                )
+                return True
+    return False
+
+
+def _save_cards(request: HttpRequest, encounter_id: UUID, cards: list[dict[str, Any]], revision: int) -> int:
+    """Save every card that changed, in order; return the revision after the last save."""
+    for card in cards:
+        form = card["form"]
+        if card["section"] is not None and not form.has_changed():
+            continue
+        data = record_forms.section_data(card["kind"], form.cleaned_data)
+        text = form.cleaned_data.get("text", "") or ""
+        if card["section"] is None and not data and not text.strip():
+            card["pending"] = True  # A new card left empty is not a section: the page keeps it open.
+            continue
+        info = _service().save_section(
             actor=request.user,
             encounter_id=encounter_id,
-            section_type=kind.code,
-            data=record_forms.section_data(kind, form.cleaned_data),
-            text=form.cleaned_data.get("text", "") or "",
-            position=position,
-            expected_revision=_revision(request),
+            section_type=card["kind"].code,
+            data=data,
+            text=text,
+            position=card["position"],
+            expected_revision=revision,
         )
-        messages.success(request, gettext("Seção salva."))
-    elif action == "consumption_add":
+        revision = info.header.revision
+    return revision
+
+
+def _encounter_action(
+    request: HttpRequest, organization_id: UUID, encounter_id: UUID, action: str, revision: int
+) -> HttpResponse | None:
+    """Run the action of the button after the sections were saved; ``None`` renders the editor again."""
+    kind, _sep, target = action.partition(":")
+    if kind == "remove":
+        return redirect("med_records:section_remove", organization_id, encounter_id, _uuid(target))
+    elif kind == "consumption_add":
         provider, _sep, ref = request.POST.get("item", "").partition("|")
         _service().add_consumption(
             actor=request.user,
@@ -426,28 +543,15 @@ def _encounter_post(request: HttpRequest, organization_id: UUID, encounter_id: U
                 quantity=(request.POST.get("quantity") or "").strip()[:20],
                 lot=(request.POST.get("lot") or "")[:41],
             ),
-            expected_revision=_revision(request),
+            expected_revision=revision,
         )
         messages.success(request, gettext("Item consumido incluído."))
-    elif action == "consumption_remove":
+    elif kind == "consumption_remove":
         _service().remove_consumption(
-            actor=request.user,
-            encounter_id=encounter_id,
-            consumption_id=_uuid(request.POST.get("consumption_id", "")),
-            expected_revision=_revision(request),
+            actor=request.user, encounter_id=encounter_id, consumption_id=_uuid(target), expected_revision=revision
         )
-    elif action == "remove":
-        _service().remove_section(
-            actor=request.user,
-            encounter_id=encounter_id,
-            section_id=_uuid(request.POST.get("section_id", "")),
-            expected_revision=_revision(request),
-        )
-    elif action == "discard":
-        _service().discard_draft(actor=request.user, encounter_id=encounter_id, expected_revision=_revision(request))
-        messages.success(request, gettext("Rascunho descartado."))
-        return redirect("med_records:patient_section", organization_id, info.header.patient_id)
-    elif action == "attach":
+        messages.success(request, gettext("Item consumido removido."))
+    elif kind == "attach":
         upload = request.FILES.get("file")
         if upload is None:
             raise InvalidInput({"file": [gettext("Escolha um arquivo.")]})
@@ -459,83 +563,63 @@ def _encounter_post(request: HttpRequest, organization_id: UUID, encounter_id: U
             content_type=upload.content_type,
         )
         messages.success(request, gettext("Anexo incluído."))
-    elif action == "template":
+    elif kind == "template":
+        current = _service().encounter(actor=request.user, encounter_id=encounter_id)
         _service().create_template(
             actor=request.user,
             name=(request.POST.get("template_name") or "").strip()[:120] or gettext("Modelo"),
             kind="encounter",
             sections=tuple(
                 TemplateSectionInput(section.section_type, section.text, tuple(json.loads(section.data_json).items()))
-                for section in info.sections
+                for section in current.sections
             ),
             personal=request.POST.get("personal") == "on",
             idempotency_key=_key(request),
         )
         messages.success(request, gettext("Modelo salvo."))
-    elif action == "sign":
-        signed = _service().sign_encounter(
-            actor=request.user, encounter_id=encounter_id, expected_revision=_revision(request)
-        )
-        messages.success(request, gettext("Atendimento assinado."))
-        if signed.header.appointment_id and not signed.appointment_completed:
-            messages.warning(request, gettext("A consulta não foi concluída na agenda."))
-        return redirect("med_records:encounter", organization_id, encounter_id)
+    elif kind == "add":
+        response = redirect("med_records:encounter_edit", organization_id, encounter_id)
+        new = request.POST.get("add_type", "")
+        if new:
+            response["Location"] += f"?add={new}"
+        return response
+    elif kind == "sign":
+        return redirect("med_records:encounter_sign", organization_id, encounter_id)
+    elif kind == "save":
+        messages.success(request, gettext("Rascunho salvo."))
+    elif kind in ("search", "use_icd"):
+        return None
     else:
         raise Http404
     return redirect("med_records:encounter_edit", organization_id, encounter_id)
 
 
-@never_cache
-@tenant_page()
-def encounter_edit(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
-    """The draft editor: one card per section, each with its own save button; sign at the end."""
-    context = _encounter_context(request, organization_id, encounter_id)
+def _editor_page(
+    request: HttpRequest,
+    organization_id: UUID,
+    encounter_id: UUID,
+    context: dict[str, Any],
+    types: dict,
+    *,
+    cards: list[dict[str, Any]] | None = None,
+    pending: tuple[dict[str, Any], ...] = (),
+    query: str = "",
+    status: int = 200,
+) -> HttpResponse:
     info = context["info"]
-    if not info.writable:
-        return redirect("med_records:encounter", organization_id, encounter_id)
-    status = 200
-    types = {item.code: item for item in active_section_types(request.user)}
-    if request.method == "POST":
-        try:
-            with transaction.atomic():
-                response = _encounter_post(request, organization_id, encounter_id, info, types)
-            return response
-        except (NotFound, Forbidden):
-            raise Http404 from None
-        except InvalidInput as error:
-            messages.error(request, _errors(error))
-        except Conflict as error:
-            messages.error(request, conflict_text(error))
-        status = 400
-        context = _encounter_context(request, organization_id, encounter_id)
-        info = context["info"]
-    cards = []
-    used: dict[str, int] = {}
-    for section in info.sections:
-        kind = SECTION_TYPES.get(section.section_type)
-        used[section.section_type] = max(used.get(section.section_type, -1), section.position)
-        if kind is None:
-            continue
-        initial = record_forms.section_initial(kind, json.loads(section.data_json), section.text)
-        cards.append(
-            {
-                "section": section,
-                "kind": kind,
-                "position": section.position,
-                "form": record_forms.section_form(kind, prefix="s", initial=initial),
-            }
-        )
-    new = request.GET.get("add", "")
-    if new in types:
-        cards.append(
-            {
-                "section": None,
-                "kind": types[new],
-                "position": used.get(new, -1) + 1,
-                "form": record_forms.section_form(types[new], prefix="s"),
-            }
-        )
-    query = request.GET.get("cid", "")[:100]
+    if cards is None:
+        cards = _stored_cards(info)
+        cards += [{**card, "initial": {}} for card in pending]
+        used: dict[str, int] = {}
+        for section in info.sections:
+            used[section.section_type] = max(used.get(section.section_type, -1), section.position)
+        new = request.GET.get("add", "")
+        if new in types:
+            cards.append({"section": None, "kind": types[new], "position": used.get(new, -1) + 1, "initial": {}})
+        for index, card in enumerate(cards):
+            card["form"] = record_forms.section_form(card["kind"], prefix=_card_prefix(index), initial=card["initial"])
+    for index, card in enumerate(cards):
+        card["prefix"] = _card_prefix(index)
     icd: tuple = ()
     if query.strip():
         try:
@@ -551,10 +635,170 @@ def encounter_edit(request: HttpRequest, organization_id: UUID, encounter_id: UU
         types=list(types.values()),
         query=query,
         icd=icd,
+        has_icd=any(field.kind == ICD_LIST for card in cards for field in card["kind"].fields),
         idempotency_key=uuid.uuid4().hex,
         consumables=consumables,
     )
     return render(request, "med_records/encounter_edit.html", context, status=status)
+
+
+@never_cache
+@tenant_page()
+def encounter_edit(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
+    """The draft editor: one form for every section; each button saves what was typed, then acts."""
+    context = _encounter_context(request, organization_id, encounter_id)
+    info = context["info"]
+    if not info.writable:
+        return redirect("med_records:encounter", organization_id, encounter_id)
+    types = {item.code: item for item in active_section_types(request.user)}
+    if request.method != "POST":
+        return _editor_page(request, organization_id, encounter_id, context, types)
+    action = request.POST.get("action", "save")
+    cards = _posted_cards(request, info, types)
+    query = (request.POST.get("cid") or "")[:100]
+    if action.startswith("use_icd:") and not _use_icd(request, cards, action.partition(":")[2]):
+        messages.error(request, gettext("Acrescente a seção de hipóteses diagnósticas para usar o código."))
+    if not all(card["form"].is_valid() for card in cards):
+        context["form_error"] = gettext("Confira os campos marcados. Nada foi salvo.")
+        return _editor_page(
+            request, organization_id, encounter_id, context, types, cards=cards, query=query, status=400
+        )
+    try:
+        with transaction.atomic():
+            revision = _save_cards(request, encounter_id, cards, _revision(request))
+            response = _encounter_action(request, organization_id, encounter_id, action, revision)
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except InvalidInput as error:
+        context["form_error"] = _errors(error)
+    except Conflict as error:
+        context["form_error"] = conflict_text(error)
+    else:
+        if response is not None:
+            return response
+        context = _encounter_context(request, organization_id, encounter_id)
+        pending = tuple(card for card in cards if card.get("pending"))
+        return _editor_page(request, organization_id, encounter_id, context, types, pending=pending, query=query)
+    # One transaction: nothing was saved. The page keeps what was typed, with the reason.
+    return _editor_page(request, organization_id, encounter_id, context, types, cards=cards, query=query, status=400)
+
+
+def _describe_sign(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> Confirmation:
+    from django.urls import reverse
+
+    context = _encounter_context(request, organization_id, encounter_id)
+    header = context["header"]
+    labels = ", ".join(str(row["label"]) for row in context["sections"]) or gettext("nenhuma")
+    return Confirmation(
+        title=gettext("Assinar o atendimento"),
+        eyebrow=header.code,
+        message=gettext(
+            "Depois de assinado, o atendimento não muda nem é excluído: uma correção só entra por adendo. "
+            "Seções que serão seladas: %(sections)s."
+        )
+        % {"sections": labels},
+        submit_label=gettext("Assinar o atendimento"),
+        cancel_url=reverse("med_records:encounter_edit", args=(organization_id, encounter_id)),
+        hidden={"revision": header.revision},
+    )
+
+
+@never_cache
+@tenant_page()
+@confirmation_step(_describe_sign)
+@require_POST
+def encounter_sign(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
+    try:
+        with transaction.atomic():
+            signed = _service().sign_encounter(
+                actor=request.user, encounter_id=encounter_id, expected_revision=_revision(request)
+            )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except (Conflict, InvalidInput) as error:
+        text = conflict_text(error) if isinstance(error, Conflict) else _errors(error)
+        confirmation = _describe_sign(request, organization_id, encounter_id)
+        return confirmation_page(request, confirmation, error=text, status=409)
+    messages.success(request, gettext("Atendimento assinado."))
+    if signed.header.appointment_id and not signed.appointment_completed:
+        messages.warning(request, gettext("A consulta não foi concluída na agenda."))
+    return redirect("med_records:encounter", organization_id, encounter_id)
+
+
+def _describe_section_remove(
+    request: HttpRequest, organization_id: UUID, encounter_id: UUID, section_id: UUID
+) -> Confirmation:
+    from django.urls import reverse
+
+    context = _encounter_context(request, organization_id, encounter_id)
+    row = next((item for item in context["sections"] if item["section"].sysid == section_id), None)
+    if row is None or not context["info"].writable:
+        raise Http404
+    return Confirmation(
+        title=gettext("Remover a seção"),
+        eyebrow=context["header"].code,
+        subject=str(row["label"]),
+        message=gettext("A seção e o que foi escrito nela saem do rascunho."),
+        submit_label=gettext("Remover a seção"),
+        cancel_url=reverse("med_records:encounter_edit", args=(organization_id, encounter_id)),
+        hidden={"revision": context["header"].revision},
+    )
+
+
+@never_cache
+@tenant_page()
+@confirmation_step(_describe_section_remove)
+@require_POST
+def section_remove(request: HttpRequest, organization_id: UUID, encounter_id: UUID, section_id: UUID) -> HttpResponse:
+    try:
+        with transaction.atomic():
+            _service().remove_section(
+                actor=request.user,
+                encounter_id=encounter_id,
+                section_id=section_id,
+                expected_revision=_revision(request),
+            )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except Conflict as error:
+        confirmation = _describe_section_remove(request, organization_id, encounter_id, section_id)
+        return confirmation_page(request, confirmation, error=conflict_text(error), status=409)
+    messages.success(request, gettext("Seção removida."))
+    return redirect("med_records:encounter_edit", organization_id, encounter_id)
+
+
+def _describe_discard(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> Confirmation:
+    from django.urls import reverse
+
+    header = _encounter_context(request, organization_id, encounter_id)["header"]
+    return Confirmation(
+        title=gettext("Descartar o rascunho"),
+        eyebrow=header.code,
+        message=gettext("O rascunho e as seções dele saem do prontuário. Isso não se desfaz."),
+        submit_label=gettext("Descartar o rascunho"),
+        cancel_url=reverse("med_records:encounter_edit", args=(organization_id, encounter_id)),
+        hidden={"revision": header.revision},
+    )
+
+
+@never_cache
+@tenant_page()
+@confirmation_step(_describe_discard)
+@require_POST
+def encounter_discard(request: HttpRequest, organization_id: UUID, encounter_id: UUID) -> HttpResponse:
+    header = _encounter_context(request, organization_id, encounter_id)["header"]
+    try:
+        with transaction.atomic():
+            _service().discard_draft(
+                actor=request.user, encounter_id=encounter_id, expected_revision=_revision(request)
+            )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except Conflict as error:
+        confirmation = _describe_discard(request, organization_id, encounter_id)
+        return confirmation_page(request, confirmation, error=conflict_text(error), status=409)
+    messages.success(request, gettext("Rascunho descartado."))
+    return redirect("med_records:patient_section", organization_id, header.patient_id)
 
 
 @require_POST
@@ -600,17 +844,6 @@ def _lists_post(request: HttpRequest, chart_id: UUID) -> tuple[bool, Any, Any]:
         _service().add_medication(
             actor=request.user, chart_id=chart_id, idempotency_key=_key(request), **medication_form.cleaned_data
         )
-    elif kind in ("allergy_status", "medication_status"):
-        target = _uuid(request.POST.get("id", ""))
-        changes = (("status", request.POST.get("status", "")),)
-        if kind == "allergy_status":
-            _service().update_allergy(
-                actor=request.user, allergy_id=target, changes=changes, expected_revision=_revision(request)
-            )
-        else:
-            _service().update_medication(
-                actor=request.user, medication_id=target, changes=changes, expected_revision=_revision(request)
-            )
     else:
         raise Http404
     return True, None, None
@@ -658,6 +891,86 @@ def lists_view(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> H
     )
 
 
+LIST_ENDINGS = {
+    # kind: (status written, title, message)
+    "allergy": (
+        "resolved",
+        gettext("Marcar a alergia como resolvida"),
+        gettext("A alergia sai do destaque do prontuário e dos avisos ao prescrever. Ela continua no histórico."),
+    ),
+    "medication": (
+        "ended",
+        gettext("Encerrar o medicamento"),
+        gettext("O medicamento sai da lista de medicamentos em uso. Ele continua no histórico."),
+    ),
+}
+
+
+def _list_item(request: HttpRequest, chart_id: UUID, kind: str, item_id: UUID) -> Any:
+    try:
+        items = (
+            _service().allergies(actor=request.user, chart_id=chart_id)
+            if kind == "allergy"
+            else _service().medications(actor=request.user, chart_id=chart_id)
+        )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    item = next((row for row in items if row.sysid == item_id and row.status == "active"), None)
+    if item is None:
+        raise Http404
+    return item
+
+
+def _describe_list_end(request: HttpRequest, organization_id: UUID, chart_id: UUID, kind: str, item_id: UUID) -> Any:
+    from django.urls import reverse
+
+    if kind not in LIST_ENDINGS:
+        raise Http404
+    item = _list_item(request, chart_id, kind, item_id)
+    _status, title, message = LIST_ENDINGS[kind]
+    return Confirmation(
+        title=title,
+        subject=item.substance if kind == "allergy" else item.name,
+        message=message,
+        submit_label=title,
+        cancel_url=reverse("med_records:lists", args=(organization_id, chart_id)),
+        hidden={"revision": item.revision},
+    )
+
+
+@never_cache
+@tenant_page()
+@confirmation_step(_describe_list_end)
+@require_POST
+def list_end(request: HttpRequest, organization_id: UUID, chart_id: UUID, kind: str, item_id: UUID) -> HttpResponse:
+    """Resolve an allergy or end a medication of the chart (#119)."""
+    if kind not in LIST_ENDINGS:
+        raise Http404
+    _list_item(request, chart_id, kind, item_id)
+    status, _title, _message = LIST_ENDINGS[kind]
+    changes = (("status", status),)
+    try:
+        with transaction.atomic():
+            if kind == "allergy":
+                _service().update_allergy(
+                    actor=request.user, allergy_id=item_id, changes=changes, expected_revision=_revision(request)
+                )
+            else:
+                _service().update_medication(
+                    actor=request.user, medication_id=item_id, changes=changes, expected_revision=_revision(request)
+                )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except (Conflict, InvalidInput) as error:
+        messages.error(request, conflict_text(error) if isinstance(error, Conflict) else _errors(error))
+    else:
+        messages.success(
+            request,
+            gettext("Alergia marcada como resolvida.") if kind == "allergy" else gettext("Medicamento encerrado."),
+        )
+    return redirect("med_records:lists", organization_id, chart_id)
+
+
 # ------------------------------------------------------------------------------------ documents
 
 
@@ -666,6 +979,7 @@ def lists_view(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> H
 def document_new(request: HttpRequest, organization_id: UUID, chart_id: UUID) -> HttpResponse:
     form = record_forms.NewDocumentForm(
         request.POST,
+        prefix="document",
         kinds=active_document_kinds(request.user),
         templates=_service().templates(actor=request.user, kind="document"),
     )
@@ -749,17 +1063,13 @@ def document_edit(request: HttpRequest, organization_id: UUID, document_id: UUID
         if form.is_valid():
             try:
                 with transaction.atomic():
-                    saved = _service().update_document(
+                    _service().update_document(
                         actor=request.user,
                         document_id=document_id,
                         title=form.cleaned_data["title"],
                         body=form.cleaned_data["body"],
                         expected_revision=_revision(request),
                     )
-                    if request.POST.get("action") == "issue":
-                        _service().issue_document(
-                            actor=request.user, document_id=document_id, expected_revision=saved.header.revision
-                        )
             except (NotFound, Forbidden):
                 raise Http404 from None
             except InvalidInput as error:
@@ -768,16 +1078,77 @@ def document_edit(request: HttpRequest, organization_id: UUID, document_id: UUID
                 form.add_error(None, conflict_text(error))
             else:
                 if request.POST.get("action") == "issue":
-                    messages.success(request, gettext("Documento emitido."))
-                    return redirect("med_records:document", organization_id, document_id)
+                    return redirect("med_records:document_issue", organization_id, document_id)
                 messages.success(request, gettext("Rascunho salvo."))
                 return redirect("med_records:document_edit", organization_id, document_id)
     context["form"] = form
     return render(request, "med_records/document_edit.html", context, status=status)
 
 
-@require_POST
+def _describe_issue(request: HttpRequest, organization_id: UUID, document_id: UUID) -> Confirmation:
+    from django.urls import reverse
+
+    context = _document_context(request, organization_id, document_id)
+    header = context["header"]
+    if not context["info"].writable:
+        raise Http404
+    return Confirmation(
+        title=gettext("Emitir o documento"),
+        eyebrow=f"{header.code} · {context['kind_label']}",
+        subject=header.title,
+        message=gettext(
+            "Emitido, o documento é selado e não muda mais: uma correção só sai por um documento que o substitui."
+        ),
+        submit_label=gettext("Emitir o documento"),
+        cancel_url=reverse("med_records:document_edit", args=(organization_id, document_id)),
+        hidden={"revision": header.revision},
+    )
+
+
+@never_cache
 @tenant_page()
+@confirmation_step(_describe_issue)
+@require_POST
+def document_issue(request: HttpRequest, organization_id: UUID, document_id: UUID) -> HttpResponse:
+    try:
+        with transaction.atomic():
+            _service().issue_document(actor=request.user, document_id=document_id, expected_revision=_revision(request))
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except (Conflict, InvalidInput) as error:
+        text = conflict_text(error) if isinstance(error, Conflict) else _errors(error)
+        return confirmation_page(
+            request, _describe_issue(request, organization_id, document_id), error=text, status=409
+        )
+    messages.success(request, gettext("Documento emitido."))
+    return redirect("med_records:document", organization_id, document_id)
+
+
+def _describe_replace(request: HttpRequest, organization_id: UUID, document_id: UUID) -> Confirmation:
+    from django.urls import reverse
+
+    context = _document_context(request, organization_id, document_id)
+    header = context["header"]
+    if not header.issued or header.replaced_by_code:
+        raise Http404
+    return Confirmation(
+        title=gettext("Substituir o documento"),
+        eyebrow=f"{header.code} · {context['kind_label']}",
+        subject=header.title,
+        message=gettext(
+            "Um rascunho novo nasce com o texto deste documento. Quando ele for emitido, este passa a constar "
+            "como substituído; o original continua guardado."
+        ),
+        submit_label=gettext("Criar o rascunho substituto"),
+        cancel_url=reverse("med_records:document", args=(organization_id, document_id)),
+        hidden={"idempotency_key": uuid.uuid4().hex},
+    )
+
+
+@never_cache
+@tenant_page()
+@confirmation_step(_describe_replace)
+@require_POST
 def document_replace(request: HttpRequest, organization_id: UUID, document_id: UUID) -> HttpResponse:
     try:
         with transaction.atomic():
@@ -805,14 +1176,6 @@ def templates_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         status = 400
         try:
             with transaction.atomic():
-                if request.POST.get("action") == "deactivate":
-                    _service().update_template(
-                        actor=request.user,
-                        template_id=_uuid(request.POST.get("id", "")),
-                        active=False,
-                        expected_revision=_revision(request),
-                    )
-                    return redirect("med_records:templates", organization_id)
                 if form.is_valid():
                     values = form.cleaned_data
                     _service().create_template(
@@ -844,6 +1207,43 @@ def templates_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         ),
         status=status,
     )
+
+
+def _describe_template_deactivate(request: HttpRequest, organization_id: UUID, template_id: UUID) -> Confirmation:
+    from django.urls import reverse
+
+    item = next((row for row in _service().templates(actor=request.user) if row.sysid == template_id), None)
+    if item is None:
+        raise Http404
+    return Confirmation(
+        title=gettext("Desativar o modelo"),
+        subject=item.name,
+        message=gettext(
+            "O modelo deixa de aparecer ao iniciar atendimentos e documentos. O que já foi escrito não muda."
+        ),
+        submit_label=gettext("Desativar o modelo"),
+        cancel_url=reverse("med_records:templates", args=(organization_id,)),
+        hidden={"revision": item.revision},
+    )
+
+
+@tenant_page()
+@confirmation_step(_describe_template_deactivate)
+@require_POST
+def template_deactivate(request: HttpRequest, organization_id: UUID, template_id: UUID) -> HttpResponse:
+    _describe_template_deactivate(request, organization_id, template_id)
+    try:
+        with transaction.atomic():
+            _service().update_template(
+                actor=request.user, template_id=template_id, active=False, expected_revision=_revision(request)
+            )
+    except (NotFound, Forbidden):
+        raise Http404 from None
+    except Conflict as error:
+        messages.error(request, conflict_text(error))
+    else:
+        messages.success(request, gettext("Modelo desativado."))
+    return redirect("med_records:templates", organization_id)
 
 
 def _origin(entry: Any) -> str:

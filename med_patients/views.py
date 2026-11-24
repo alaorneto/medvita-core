@@ -25,6 +25,7 @@ from rest_framework.response import Response
 from skeleton.api.openapi import Operation, results
 from skeleton.api.views import request_fields
 from skeleton.service_api import Conflict, Forbidden, InvalidInput, NotFound
+from skeleton.web.confirm import Confirmation, confirmation_step
 from skeleton.web.views import tenant_page
 
 from . import forms as patient_forms
@@ -43,6 +44,34 @@ from .service_api import (
 
 PAGE_SIZE = 25
 INPUT_FIELDS = tuple(PatientInput.__dataclass_fields__)
+
+
+def confirmation_page(
+    request: HttpRequest, confirmation: Confirmation, *, error: Any = "", status: int = 200
+) -> HttpResponse:
+    """The confirmation page of an action, again, with the reason it was refused (#119).
+
+    The core's ``confirmation_step`` shows it on GET; a POST refused by the service (revision, state)
+    shows it once more with the message, from the same ``Confirmation`` and the same template.
+    """
+    return render(
+        request,
+        confirmation.template,
+        {
+            "title": confirmation.title,
+            "message": confirmation.message,
+            "submit_label": confirmation.submit_label,
+            "cancel_url": confirmation.cancel_url,
+            "subject_label": confirmation.subject,
+            "eyebrow": confirmation.eyebrow,
+            "hidden": sorted(confirmation.hidden.items()),
+            "reason_label": confirmation.reason_label,
+            "reason_required": confirmation.reason_required,
+            "error": error,
+            **confirmation.context,
+        },
+        status=status,
+    )
 
 
 def _service() -> PatientService:
@@ -259,6 +288,32 @@ def patient_status(request: HttpRequest, organization_id: UUID, patient_id: UUID
     if not form.is_valid():
         messages.error(request, gettext("Escolha uma situação válida."))
         return redirect("med_patients:detail", organization_id, patient_id)
+    if form.cleaned_data["status"] == "deceased" and not form.cleaned_data["deceased_on"]:
+        messages.error(request, gettext("Informe a data do óbito."))
+        return redirect("med_patients:detail", organization_id, patient_id)
+    if form.cleaned_data["status"] == "deceased" and request.POST.get("confirmed") != "1":
+        from django.urls import reverse
+
+        patient = _summary_or_404(request, patient_id)
+        when = form.cleaned_data["deceased_on"]
+        confirmation = Confirmation(
+            title=gettext("Registrar o óbito"),
+            eyebrow=patient.code,
+            subject=patient.display_name,
+            message=gettext(
+                "O cadastro passa a constar como falecido em %(when)s. O prontuário e o histórico continuam guardados."
+            )
+            % {"when": f"{when:%d/%m/%Y}"},
+            submit_label=gettext("Registrar o óbito"),
+            cancel_url=reverse("med_patients:detail", args=(organization_id, patient_id)),
+            hidden={
+                "confirmed": "1",
+                "status": "deceased",
+                "deceased_on": when.isoformat(),
+                "revision": request.POST.get("revision", ""),
+            },
+        )
+        return confirmation_page(request, confirmation)
     try:
         with transaction.atomic():
             _service().set_status(
@@ -392,6 +447,81 @@ def patient_consents(request: HttpRequest, organization_id: UUID, patient_id: UU
     )
 
 
+ROW_CONFIRMATIONS = {
+    # tab: (title, message, submit label)
+    "guardians": (
+        gettext("Remover o responsável"),
+        gettext("O responsável deixa de constar no cadastro do paciente."),
+        gettext("Remover o responsável"),
+    ),
+    "coverages": (
+        gettext("Remover o convênio"),
+        gettext("O convênio deixa de constar no cadastro do paciente. O que já foi atendido e cobrado não muda."),
+        gettext("Remover o convênio"),
+    ),
+    "consents": (
+        gettext("Revogar o consentimento"),
+        gettext(
+            "A finalidade deixa de valer a partir de agora. O registro do consentimento e da revogação fica guardado."
+        ),
+        gettext("Revogar o consentimento"),
+    ),
+}
+
+
+def _summary_or_404(request: HttpRequest, patient_id: UUID) -> Any:
+    try:
+        return _service().summary(actor=request.user, patient_id=patient_id)
+    except (Forbidden, NotFound):
+        raise Http404 from None
+
+
+def _row_confirmation(request: HttpRequest, organization_id: UUID, patient_id: UUID, row_id: UUID, tab: str) -> Any:
+    from django.urls import reverse
+
+    patient = _summary_or_404(request, patient_id)
+    try:
+        if tab == "guardians":
+            rows = _service().guardians(actor=request.user, patient_id=patient_id)
+            row = next((item for item in rows if item.sysid == row_id), None)
+            subject = row.name if row else ""
+        elif tab == "coverages":
+            rows = _service().coverages(actor=request.user, patient_id=patient_id)
+            row = next((item for item in rows if item.sysid == row_id), None)
+            subject = f"{row.insurer_name} · {row.card_number}" if row else ""
+        else:
+            rows = _service().consents(actor=request.user, patient_id=patient_id)
+            row = next((item for item in rows if item.sysid == row_id and item.status == "granted"), None)
+            labels = {purpose.code: purpose.label for purpose in _service().consent_purposes(actor=request.user)}
+            subject = str(labels.get(row.purpose, row.purpose)) if row else ""
+    except (Forbidden, NotFound):
+        raise Http404 from None
+    if row is None:
+        raise Http404
+    title, message, label = ROW_CONFIRMATIONS[tab]
+    return Confirmation(
+        title=title,
+        eyebrow=f"{patient.code} · {patient.display_name}",
+        subject=subject,
+        message=message,
+        submit_label=label,
+        cancel_url=reverse(f"med_patients:{tab}", args=(organization_id, patient_id)),
+        hidden={"revision": row.revision},
+    )
+
+
+def _describe_guardian_remove(request, organization_id, patient_id, row_id):
+    return _row_confirmation(request, organization_id, patient_id, row_id, "guardians")
+
+
+def _describe_coverage_remove(request, organization_id, patient_id, row_id):
+    return _row_confirmation(request, organization_id, patient_id, row_id, "coverages")
+
+
+def _describe_consent_revoke(request, organization_id, patient_id, row_id):
+    return _row_confirmation(request, organization_id, patient_id, row_id, "consents")
+
+
 def _remove(
     request: HttpRequest, organization_id: UUID, patient_id: UUID, *, tab: str, call: Any, done: str
 ) -> HttpResponse:
@@ -407,8 +537,9 @@ def _remove(
     return redirect(f"med_patients:{tab}", organization_id, patient_id)
 
 
-@require_POST
 @tenant_page()
+@confirmation_step(_describe_guardian_remove)
+@require_POST
 def guardian_remove(request: HttpRequest, organization_id: UUID, patient_id: UUID, row_id: UUID) -> HttpResponse:
     return _remove(
         request,
@@ -422,8 +553,9 @@ def guardian_remove(request: HttpRequest, organization_id: UUID, patient_id: UUI
     )
 
 
-@require_POST
 @tenant_page()
+@confirmation_step(_describe_coverage_remove)
+@require_POST
 def coverage_remove(request: HttpRequest, organization_id: UUID, patient_id: UUID, row_id: UUID) -> HttpResponse:
     return _remove(
         request,
@@ -437,8 +569,9 @@ def coverage_remove(request: HttpRequest, organization_id: UUID, patient_id: UUI
     )
 
 
-@require_POST
 @tenant_page()
+@confirmation_step(_describe_consent_revoke)
+@require_POST
 def consent_revoke(request: HttpRequest, organization_id: UUID, patient_id: UUID, row_id: UUID) -> HttpResponse:
     return _remove(
         request,

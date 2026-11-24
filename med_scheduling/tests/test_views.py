@@ -115,12 +115,49 @@ def test_book_and_attend_through_the_pages(ready):
     assert "mudou desde que a página abriu" in stale.content.decode()
     assert detail(ready, row.sysid).status == "arrived"
 
+    # #119: cancelling asks first, with the reason on the confirmation page; the GET changes nothing.
+    asked = assert_safe(client.get(url(ready, "cancel", row.sysid)))
+    assert "Cancelar a consulta" in asked and 'name="reason"' in asked and "Maria Paciente Secreta" in asked
+    assert detail(ready, row.sysid).status == "arrived"
+    unexplained = client.post(
+        url(ready, "cancel", row.sysid), {"reason": "", "revision": detail(ready, row.sysid).revision}
+    )
+    assert unexplained.status_code == 400 and detail(ready, row.sysid).status == "arrived"
     current = detail(ready, row.sysid)
     response = client.post(
         url(ready, "cancel", row.sysid), {"reason": "patient", "note": "", "revision": current.revision}
     )
     assert response.status_code == 302
     assert detail(ready, row.sysid).status == "cancelled"
+    assert client.get(url(ready, "cancel", row.sysid)).status_code == 404  # Nothing left to cancel.
+
+
+def test_final_transitions_ask_first(ready):
+    appointment = book(ready, 9)
+    client = client_for(ready.a.reception)
+    page = assert_safe(client.get(url(ready, "appointment", appointment.sysid)))
+    no_show = url(ready, "transition", appointment.sysid, "mark_no_show")
+    # A future appointment cannot be a no-show yet: the page does not offer it, the confirmation is 404.
+    assert no_show not in page and client.get(no_show).status_code == 404
+    assert client.get(url(ready, "transition", appointment.sysid, "confirm")).status_code == 405
+    for name in ("confirm", "check_in", "start"):
+        current = detail(ready, appointment.sysid)
+        assert (
+            client.post(url(ready, "transition", appointment.sysid, name), {"revision": current.revision}).status_code
+            == 302
+        )
+    complete = url(ready, "transition", appointment.sysid, "complete")
+    assert f'href="{complete}"' in assert_safe(client.get(url(ready, "appointment", appointment.sysid)))
+    asked = assert_safe(client.get(complete))
+    assert "Concluir a consulta" in asked and "não volta atrás" in asked
+    assert detail(ready, appointment.sysid).status == "in_progress"
+    outsider = client_for(ready.b.reception)
+    assert (
+        outsider.get(url(ready, "transition", appointment.sysid, "complete", organization=ready.org_b)).status_code
+        == 404
+    )
+    assert client.post(complete, {"revision": detail(ready, appointment.sysid).revision}).status_code == 302
+    assert detail(ready, appointment.sysid).status == "completed"
 
 
 def test_reschedule_through_the_page(ready):
@@ -818,7 +855,10 @@ def test_a_period_is_changed_and_removed_from_the_grid(ready, subtests):
         assert remove(morning, who=reader).status_code == 404
         away = url(ready, "period-remove", ready.schedule.sysid, morning.sysid, organization=ready.org_b)
         assert outsider.post(away, {"revision": 1}).status_code == 404
-        assert client.get(url(ready, "period-remove", ready.schedule.sysid, morning.sysid)).status_code == 405
+        # #119: the GET is the confirmation; it changes nothing and names the period.
+        asked = assert_safe(client.get(url(ready, "period-remove", ready.schedule.sysid, morning.sysid)))
+        assert "Remover o período da grade" in asked and "btn-danger" in asked
+        assert reader.get(url(ready, "period-remove", ready.schedule.sysid, morning.sysid)).status_code == 404
     assert shapes(ready) == [(0, 480, 720, ()), (0, 840, 1080, ())]
     with subtests.test("other hours make another period, and the old address is gone"):
         assert change(weekday="2", start="09:00", end="11:00").status_code == 302

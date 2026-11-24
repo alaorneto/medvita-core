@@ -68,7 +68,12 @@ def _field(field: Any) -> forms.Field:
     if field.kind == "integer":
         return forms.IntegerField(label=label, required=False, min_value=field.min, max_value=field.max)
     if field.kind == "decimal":
-        return forms.CharField(label=label, required=False, max_length=20)
+        return forms.CharField(
+            label=label,
+            required=False,
+            max_length=20,
+            widget=forms.TextInput(attrs={"inputmode": "decimal", "autocomplete": "off"}),
+        )
     if field.kind == "boolean":
         return forms.BooleanField(label=label, required=False)
     if field.kind == "choice":
