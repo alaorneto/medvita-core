@@ -1,15 +1,17 @@
 /* Scheduling app: the colors of the appointment types and the day columns. Colours come from tokens only (#124):
    the type colours are --mv-type-* of the Medvita theme, with the core palette as fallback. The stripe is a
    reminder; the type is always written in text. */
-.appt { border-left-width: 4px; border-left-style: solid; padding: 0.25rem 0.5rem; margin-bottom: 0.25rem; }
-.appt-color-blue { border-left-color: var(--mv-type-blue, var(--color-blue-600)); }
-.appt-color-green { border-left-color: var(--mv-type-green, var(--color-emerald-600)); }
-.appt-color-amber { border-left-color: var(--mv-type-amber, var(--color-amber-500)); }
-.appt-color-red { border-left-color: var(--mv-type-red, var(--color-rose-600)); }
-.appt-color-purple { border-left-color: var(--mv-type-purple, var(--color-purple-500)); }
-.appt-color-teal { border-left-color: var(--mv-type-teal, var(--color-teal-500)); }
-.appt-color-gray { border-left-color: var(--mv-type-gray, var(--color-gray-600)); }
-.appt-color-pink { border-left-color: var(--mv-type-pink, var(--color-pink-500)); }
+.appt { position: relative; padding: 0.25rem 0.5rem 0.25rem 1.25rem; margin-bottom: 0.25rem; }
+/* The type colour is a small leading swatch next to the written type, never a side stripe (finish review). */
+.appt::before { content: ""; position: absolute; left: 0.25rem; top: 0.75rem; width: 0.5rem; height: 0.5rem; border-radius: 999px; background: var(--appt-type, var(--color-default-medium)); }
+.appt-color-blue { --appt-type: var(--mv-type-blue, var(--color-blue-600)); }
+.appt-color-green { --appt-type: var(--mv-type-green, var(--color-emerald-600)); }
+.appt-color-amber { --appt-type: var(--mv-type-amber, var(--color-amber-500)); }
+.appt-color-red { --appt-type: var(--mv-type-red, var(--color-rose-600)); }
+.appt-color-purple { --appt-type: var(--mv-type-purple, var(--color-purple-500)); }
+.appt-color-teal { --appt-type: var(--mv-type-teal, var(--color-teal-500)); }
+.appt-color-gray { --appt-type: var(--mv-type-gray, var(--color-gray-600)); }
+.appt-color-pink { --appt-type: var(--mv-type-pink, var(--color-pink-500)); }
 .day-columns { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); }
 .slot-list { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; list-style: none; padding: 0; margin: 0.25rem 0 0; font-variant-numeric: tabular-nums; }
 .appt-type { color: var(--color-body-subtle); }
