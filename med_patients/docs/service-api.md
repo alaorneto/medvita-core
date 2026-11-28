@@ -180,7 +180,7 @@ Say which column feeds which patient field, with CAS, and queue the validation o
 
 #### `page_tabs(*, actor, patient_id) -> tuple[PatientSectionInfo, ...]`
 
-Every tab of the patient page, by use (#136): Resumo first (``order`` 0), the sections of active apps by their ``order`` (the suite's Consultas 20, Prontuário 30, Financeiro 40), then the app's own Cadastro (50), Responsáveis, Convênios, Consentimentos, Linha do tempo and, for who manages access to the registry, Privacidade (55); a section of ``order`` above 55 comes after them. A page of another app renders the same navigation from it (the route of each tab receives ``org`` and ``patient_id``). A section with ``visible`` shows only when it answers ``True`` for the actor and the patient.
+Every tab of the patient page, by use (#136): Resumo first (``order`` 0), the sections of active apps by their ``order`` (the suite's Consultas 20, Prontuário 30, Financeiro 40), then the app's own Cadastro (50), Linha do tempo (54) and, for who manages access to the registry, Privacidade (55); a section of ``order`` above 55 comes after them. Responsáveis, Convênios and Consentimentos are sub-tabs of Cadastro (#149), so the row holds every tab at once. A page of another app renders the same navigation from it (the route of each tab receives ``org`` and ``patient_id``). A section with ``visible`` shows only when it answers ``True`` for the actor and the patient.
 
 - **Autorização:** leitura do cadastro do paciente.
 - **Erros:** NotFound para paciente inexistente, de outra organização ou ilegível.
@@ -726,3 +726,4 @@ Payload dos eventos de paciente só com `code`, `status` e `registry` (o `sysid`
 | 0.2.0 | `anonymization_vetoes`: os motivos das guardas de retenção, antes da tentativa de anonimizar (somente leitura, `manage_access`) |
 | 0.2.0 | Aba Resumo e cabeçalho único (#136): `register_summary_panel`, `summary_panels`, `summary_panel_context`, `header` (`PatientHeader`); `page_tabs` por uso, com `summary` (rota `med_patients:detail`) primeiro e `registration` (Cadastro, rota nova `med_patients:registration`) no lugar de `detail` |
 | 0.2.0 | Ícones das abas e dos painéis (#144): `icon` no fim de `PatientSection`, `PatientSectionInfo`, `SummaryPanel` e `SummaryPanelInfo`, com padrão vazio (o conceito cujo ícone a aba ou o título mostra) |
+| 0.2.0 | Abas do paciente sem esconder nenhuma (#149): `page_tabs` deixa de listar `guardians`, `coverages` e `consents`, que viram subabas de Cadastro nas páginas do próprio cadastro; as rotas continuam as mesmas |

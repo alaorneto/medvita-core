@@ -287,8 +287,15 @@ def test_the_list_keeps_cursor_pagination(ready, monkeypatch):
         new_patient(ready, full_name=f"Paginado {index}")
     client = client_for(ready.a.reception)
     monkeypatch.setattr(views, "PAGE_SIZE", 2)
-    first = client.get(url(ready, "list"), {"q": "paginado"}).content.decode()
-    following = re.search(r'href="(\?[^"]*cursor=[^"]+)"', first).group(1).replace("&amp;", "&")
-    second = client.get(url(ready, "list") + following).content.decode()
+    # The search goes by POST (#147): the next page sends the term back, never in a link.
+    first = client.post(url(ready, "list"), {"form": "search", "q": "paginado"}).content.decode()
+    cursor = re.search(r'name="cursor" value="([^"]+)"', first).group(1)
+    second = client.post(url(ready, "list"), {"form": "search", "q": "paginado", "cursor": cursor}).content.decode()
     assert "Paginado 0" in first and "Paginado 1" in first and "Paginado 2" not in first
-    assert "Paginado 2" in second and "q=paginado" in following
+    assert "Paginado 2" in second
+    assert not re.search(r'href="[^"]*q=', first + second) and 'value="paginado"' in first
+    # Without a term the pages are links, and a ``q`` in the address searches nothing.
+    plain = client.get(url(ready, "list")).content.decode()
+    assert re.search(r'href="\?cursor=[^"]+"', plain) and 'name="cursor"' not in plain
+    ignored = client.get(url(ready, "list"), {"q": "Paginado 2"}).content.decode()
+    assert 'value="Paginado 2"' not in ignored

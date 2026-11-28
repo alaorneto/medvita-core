@@ -228,13 +228,40 @@ def test_an_arrival_is_undone_from_the_board_within_the_window(ready, afternoon,
 # ------------------------------------------------------------------------ booking (#130)
 
 
+def test_the_booking_search_goes_by_post_books_nobody_and_ignores_q_in_the_address(ready):
+    """#147: the term never lands in the URL; a search with every booking field binds no booking."""
+    client = client_for(ready.a.reception)
+    fields = {
+        "schedule": ready.schedule.sysid,
+        "day": ready.monday.isoformat(),
+        "slot": at(ready, 10).isoformat(),
+        "patient": ready.patient.sysid,
+        "appointment_type": ready.kind.sysid,
+        "idempotency_key": "search-is-not-booking",
+    }
+    response = client.post(url(ready, "book"), {**fields, "form": "search", "q": "Maria"})
+    assert response.status_code == 200
+    html = without_icons(response.content.decode())
+    assert not re.search(r'href="[^"]*q=', html)
+    with ready.as_user(ready.a.reception) as actor:
+        assert SchedulingService().appointments(actor=actor, patient_id=ready.patient.sysid).items == ()
+    ignored = page(client, url(ready, "book"), q="Maria")
+    assert 'value="Maria"' not in ignored and "Pacientes encontrados" not in ignored
+    strict = Client(enforce_csrf_checks=True)
+    strict.force_login(ready.a.reception)
+    assert strict.post(url(ready, "book"), {"form": "search", "q": "Maria"}).status_code == 403
+
+
 def test_the_search_tells_namesakes_apart_and_offers_to_register(ready):
     from .helpers import new_patient
 
     new_patient(ready, full_name="Maria Paciente Secreta", birth_date=date(1980, 5, 17))
     client = client_for(ready.a.reception)
     query = {"schedule": ready.schedule.sysid, "day": ready.monday.isoformat(), "slot": at(ready, 10).isoformat()}
-    html = page(client, url(ready, "book"), q="Maria", **query)
+    # The search goes by POST with what the page carried (#147).
+    response = client.post(url(ready, "book"), {**query, "form": "search", "q": "Maria"})
+    assert response.status_code == 200
+    html = without_icons(response.content.decode())
     rows = re.findall(r"<tr><td data-label=\"Paciente\">.*?</tr>", html, re.S)
     assert len(rows) == 2 and any('datetime="1980-05-17"' in row for row in rows)
     # Birth date and code tell namesakes apart; the summary carries no contact, so no phone column (#130).

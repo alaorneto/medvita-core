@@ -1396,9 +1396,9 @@ class PatientService(ServiceAPI):
     def page_tabs(self, *, actor: Any, patient_id: UUID) -> tuple[PatientSectionInfo, ...]:
         """Every tab of the patient page, by use (#136): Resumo first (``order`` 0), the sections of
         active apps by their ``order`` (the suite's Consultas 20, Prontuário 30, Financeiro 40), then
-        the app's own Cadastro (50), Responsáveis, Convênios, Consentimentos, Linha do tempo and,
-        for who manages access to the registry, Privacidade (55); a section of ``order`` above 55
-        comes after them. A page of another app renders the same navigation from it (the route of
+        the app's own Cadastro (50), Linha do tempo (54) and, for who manages access to the registry,
+        Privacidade (55); a section of ``order`` above 55 comes after them. Responsáveis, Convênios
+        and Consentimentos are sub-tabs of Cadastro (#149), so the row holds every tab at once. A page of another app renders the same navigation from it (the route of
         each tab receives ``org`` and ``patient_id``). A section with ``visible`` shows only when it
         answers ``True`` for the actor and the patient.
 
@@ -1414,9 +1414,6 @@ class PatientService(ServiceAPI):
             PatientSectionInfo(
                 "registration", gettext("Cadastro"), "med_patients:registration", 50, "patient_registration"
             ),
-            PatientSectionInfo("guardians", gettext("Responsáveis"), "med_patients:guardians", 51, "guardians"),
-            PatientSectionInfo("coverages", gettext("Convênios"), "med_patients:coverages", 52, "coverages"),
-            PatientSectionInfo("consents", gettext("Consentimentos"), "med_patients:consents", 53, "consents"),
             PatientSectionInfo("timeline", gettext("Linha do tempo"), "med_patients:timeline", 54, "timeline"),
         ]
         if AccessService().can(

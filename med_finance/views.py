@@ -220,12 +220,24 @@ def desk_view(
 @require_POST
 @tenant_page()
 def session_open(request: HttpRequest, organization_id: UUID) -> HttpResponse:
+    """Open the cash desk; from a charge (#148), the desk of that charge, and back to it.
+
+    The charge comes as its ``sysid`` only, read through the service with the actor's access: the
+    page goes back to an address it builds, never to one it was given. Anything else goes back to
+    the desk page.
+    """
     form = finance_forms.OpenSessionForm(request.POST)
+    charge = None
+    try:
+        charge = _service().charge(actor=request.user, charge_id=UUID(request.POST.get("charge", ""))).charge
+    except (ValueError, NotFound, Forbidden):
+        charge = None
     if form.is_valid():
         _run(
             request,
             lambda: _service().open_session(
                 actor=request.user,
+                desk_id=charge.desk_id if charge is not None else None,
                 opening_amount=form.cleaned_data["opening_amount"] or 0,
                 idempotency_key=_key(request),
             ),
@@ -233,6 +245,8 @@ def session_open(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         )
     else:
         messages.error(request, " ".join(str(error) for errors in form.errors.values() for error in errors))
+    if charge is not None:
+        return redirect("med_finance:charge", organization_id, charge.sysid)
     return redirect("med_finance:desk", organization_id)
 
 
@@ -401,7 +415,9 @@ def charge_new(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     desks = _service().desks(actor=request.user)
     if not desks:
         raise Http404
-    query = request.GET.get("q", "")[:200]
+    # The patient search goes by POST, marked ``form=search``: a name or a CPF never lands in the URL (#147).
+    searching = request.method == "POST" and request.POST.get("form") == "search"
+    query = request.POST.get("q", "").strip()[:200] if searching else ""
     patient = None
     patient_id = request.GET.get("patient") or request.POST.get("patient") or ""
     if patient_id:
@@ -418,7 +434,7 @@ def charge_new(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     if not prices:
         mode = "free"
     item_form = finance_forms.TableItemForm if mode == "table" else finance_forms.FreeItemForm
-    posted = request.method == "POST" and patient is not None
+    posted = request.method == "POST" and patient is not None and not searching
     try:
         count = int(request.POST.get("rows", "1")) if posted else 1
     except ValueError:
@@ -540,6 +556,12 @@ def charge_view(
         raise Http404 from None
     charge = detail.charge
     receipt_of = {item.payment_id: item for item in receipts}
+    # #148: an open charge is received only with its desk open; closed, the page offers to open it.
+    receiving = detail.writable and charge.status in ("open", "partially_paid")
+    session = _service().current_session(actor=request.user, desk_id=charge.desk_id) if receiving else None
+    desk = None
+    if receiving and session is None:
+        desk = next((item for item in _service().desks(actor=request.user) if item.sysid == charge.desk_id), None)
     panels = _rendered_panels(
         request,
         organization_id,
@@ -560,6 +582,9 @@ def charge_view(
             reason_form=finance_forms.ReasonForm(),
             idempotency_key=uuid.uuid4().hex,
             panels=panels,
+            desk_closed=receiving and session is None,
+            can_open_desk=desk is not None and desk.writable,
+            open_form=finance_forms.OpenSessionForm(),
         ),
         status=status,
     )

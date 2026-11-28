@@ -1,5 +1,5 @@
 {% extends "skeleton/web/base.html" %}{% load i18n static skeleton_format med_patients_labels med_icons %}{% block title %}{% translate "Responsáveis" %} · {{ patient.code }} · {{ site_name }}{% endblock %}
-{% block extrahead %}<script src="{% static 'med_patients/med_patients.js' %}" defer></script>{% endblock %}
+{% block extrahead %}<link rel="stylesheet" href="{% static 'med_patients/med_patients.css' %}"><script src="{% static 'med_patients/med_patients.js' %}" defer></script>{% endblock %}
 {% block content %}
 {% include "med_patients/_patient_header.html" %}
 <div class="table-scroll table-stack mb-6"><table>

@@ -341,7 +341,9 @@ A page opens with the core's page header: a location line (the area, or a trail 
 
 Within an app, columns of cards use `auto-fit` grids: day columns at `minmax(16rem, 1fr)` with 16 px gaps (reception, the finance day, the records day), the week grid at `minmax(11rem, 1fr)` with 12 px gaps. Cards pad 20 px on phones and 24 px from 640 px; table cells pad 12 px vertically and 16 px (20 px from 640 px) horizontally. Frequent actions get 44 px targets (time slots are `min-height: 2.75rem`). The records draft editor keeps its actions in a sticky bar at the bottom, on the ground colour with a top line. A table inside a card is part of the card: it drops its own border, corners and shadow.
 
-**Phones.** Tabs between sibling screens never show a scrollbar; below 640 px, when the strip runs off the screen, its right edge fades out over the last 2rem (a mask, with 2rem of end padding so the last tab clears it). A metadata list stacks each label over its value, with 16 px between pairs. From 640 px the labels take a column as wide as the longest one (at least 9rem, at most 14rem, a long label wraps inside it) and the value starts right after it, on the same baseline: the eye reads label and value as one line, never across half the screen (#143).
+**Tabs never hide one another (#149).** From 1024 px the row of tabs wraps instead of scrolling. Below, it scrolls with a thin bar, and an edge fades over 2rem only while a tab sits past it: the strip's own scroll drives the mask where the browser supports scroll-linked animation, elsewhere only the end fades (2rem of end padding lets the last tab clear it). The patient keeps seven tabs (Resumo, Consultas, Prontuário, Financeiro, Cadastro, Linha do tempo, Privacidade); Responsáveis, Convênios and Consentimentos are a second row under Cadastro.
+
+**Phones.** A metadata list stacks each label over its value, with 16 px between pairs. From 640 px the labels take a column as wide as the longest one (at least 9rem, at most 14rem, a long label wraps inside it) and the value starts right after it, on the same baseline: the eye reads label and value as one line, never across half the screen (#143).
 
 **Tables on phones.** Every list is `table-scroll table-stack`. Below 640 px the head hides and each row becomes a card; each cell shows its own label from `data-label` in a 7rem column beside the value (the actions column has `data-label=""`). Medvita keeps that label in sentence case and lets a pill keep its own width instead of stretching. The page never scrolls sideways. A dense table compared line by line may stay scroll-only, inside its card, only with a stated reason (`{# table-scroll only: … #}`); the suite has two.
 
@@ -407,7 +409,7 @@ Quiet and certain: the colour of a button says what it does, never where it sits
 
 ### Navigation
 - **Left rail:** links at 14 / 20 px, 500, ink text, 8 px corners; hover takes the wash; the current item takes the mist fill, blue text and 600 (`aria-current`). Rail headings are labels in sentence case.
-- **Tabs between sibling screens** (`link-tabs`): a bottom-ruled row; the active tab is blue.
+- **Tabs between sibling screens** (`link-tabs`): a bottom-ruled row; the active tab is blue. A second row (`patient-subtabs`) sits right under the first for the pages of one tab (the patient's Cadastro). No row ever hides a tab without a cue (see Layout).
 - **Location line** (the core's `page-eyebrow`): a quiet trail above the `h1` in secondary grey, 13 px, 500, sentence case; its link turns blue and underlined only on hover. It is a breadcrumb, never a coloured kicker.
 - **Header:** the Medvita logo (with its dark variant through `<picture>`); the product name next to it is kept only for screen readers, since the logo already carries the wordmark.
 

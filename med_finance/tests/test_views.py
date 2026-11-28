@@ -250,6 +250,7 @@ def test_a_refused_payment_keeps_what_was_typed(ready):
             )
             .charge
         )
+        FinanceService().open_session(actor=actor, idempotency_key="typed-open")  # Receiving needs the desk open.
     client = client_for(ready.a.reception)
     response = client.post(
         url(ready, "charge_action", charge.sysid, "pay"),
@@ -258,3 +259,73 @@ def test_a_refused_payment_keeps_what_was_typed(ready):
     html = response.content.decode()
     assert response.status_code == 400 and 'value="duzentos"' in html and "Informe um valor em reais" in html
     assert "error-summary" in html
+
+
+def test_the_patient_search_goes_by_post_and_never_into_the_address(ready):
+    """#147: a name or a CPF is never in the URL; a ``q`` in the address searches nothing."""
+    new_patient(ready, full_name="Maria Caixa Busca")
+    client = client_for(ready.a.finance)
+    found = assert_safe(client.post(url(ready, "charge_new"), {"form": "search", "q": "Caixa Busca"}))
+    assert "Maria Caixa Busca" in found and not re.search(r'href="[^"]*q=', found)
+    assert "Maria Caixa Busca" not in assert_safe(client.get(url(ready, "charge_new"), {"q": "Caixa Busca"}))
+    # The search creates no charge.
+    with ready.as_user(ready.a.finance) as actor:
+        assert FinanceService().charges(actor=actor, page_size=5).items == ()
+    strict = Client(enforce_csrf_checks=True)
+    strict.force_login(ready.a.finance)
+    assert strict.post(url(ready, "charge_new"), {"form": "search", "q": "Maria"}).status_code == 403
+
+
+def test_a_charge_with_the_desk_closed_offers_to_open_it_and_comes_back(ready):
+    """#148: no receiving form while the desk is closed; opening it from the charge returns to the charge."""
+    from ..service_api import ChargeItemInput
+
+    patient = new_patient(ready, full_name="Maria Caixa Fechado")
+    with ready.as_user(ready.a.reception) as actor:
+        charge = (
+            FinanceService()
+            .create_charge(
+                actor=actor, patient_id=patient.sysid, items=(ChargeItemInput(code="C1"),), idempotency_key="closed"
+            )
+            .charge
+        )
+    client = client_for(ready.a.reception)
+    closed = assert_safe(client.get(url(ready, "charge", charge.sysid)))
+    assert "O caixa está fechado." in closed and "Receber e emitir recibo" not in closed
+    assert 'name="method"' not in closed and f'name="charge" value="{charge.sysid}"' in closed
+    opened = client.post(
+        url(ready, "session_open"),
+        {"charge": charge.sysid, "opening_amount": "50,00", "idempotency_key": "from-charge"},
+    )
+    assert opened.status_code == 302 and opened["Location"] == url(ready, "charge", charge.sysid)
+    with ready.as_user(ready.a.reception) as actor:
+        assert FinanceService().current_session(actor=actor, desk_id=charge.desk_id) is not None
+    open_page = assert_safe(client.get(url(ready, "charge", charge.sysid)))
+    assert "O caixa está fechado." not in open_page and "Receber e emitir recibo" in open_page
+
+
+@pytest.mark.parametrize("given", ["https://evil.example/x", "not-a-uuid", "00000000-0000-0000-0000-000000000000"])
+def test_opening_the_desk_goes_back_only_to_a_charge_it_can_read(ready, given):
+    """#148: the return is built from a charge the service reads; anything else goes back to the desk."""
+    client = client_for(ready.a.reception)
+    response = client.post(url(ready, "session_open"), {"charge": given, "idempotency_key": f"o-{given[:8]}"})
+    assert response.status_code == 302 and response["Location"] == url(ready, "desk")
+
+
+def test_opening_the_desk_never_goes_back_to_a_charge_of_another_organization(ready):
+    from ..service_api import ChargeItemInput
+
+    add_price(ready, "C1", 25000, side=ready.b)
+    patient = new_patient(ready, ready.b)
+    with ready.as_user(ready.b.reception, ready.org_b) as actor:
+        other = (
+            FinanceService()
+            .create_charge(
+                actor=actor, patient_id=patient.sysid, items=(ChargeItemInput(code="C1"),), idempotency_key="b"
+            )
+            .charge
+        )
+    response = client_for(ready.a.reception).post(
+        url(ready, "session_open"), {"charge": other.sysid, "idempotency_key": "cross"}
+    )
+    assert response.status_code == 302 and response["Location"] == url(ready, "desk")

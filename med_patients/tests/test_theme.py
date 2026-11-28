@@ -79,3 +79,15 @@ def test_a_data_list_keeps_label_and_value_close():
     """The labels' column of a data list is as wide as its labels, not half the page (#143)."""
     css = THEME.joinpath("theme.css").read_text(encoding="utf-8")
     assert "grid-template-columns: fit-content(14rem) minmax(0, 1fr);" in css
+
+
+def test_tabs_never_hide_one_another():
+    """#149: from 1024 px the row wraps; below, it scrolls with a visible bar and fades where tabs hide."""
+    css = (THEME / "theme.css").read_text(encoding="utf-8")
+    assert "scrollbar-width: none" not in css and "scrollbar-width: thin" in css
+    wide = css.split("@media (min-width: 64rem)", 1)[1].split("}", 2)
+    assert "flex-wrap: wrap" in "".join(wide[:2])
+    narrow = css.split("@media (max-width: 63.99rem)", 1)[1]
+    assert "mask-image" in narrow and "animation-timeline: scroll(self inline)" in narrow
+    # The scroll-linked fade is only where the browser has it: elsewhere the end alone fades.
+    assert "@supports (animation-timeline: scroll())" in narrow
