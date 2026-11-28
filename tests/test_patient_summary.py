@@ -162,12 +162,34 @@ def test_tabs_go_by_use(ready):
         "med_records.chart",
         "med_finance.account",
         "registration",
-        "guardians",
-        "coverages",
-        "consents",
         "timeline",
         "privacy",
     ]
+
+
+def test_the_registration_pages_mark_cadastro_and_show_their_sub_tabs(ready, subtests):
+    """#149: Responsáveis, Convênios and Consentimentos live under Cadastro, so no tab is pushed off."""
+    org, patient = ready.org_a.pk, ready.patient.sysid
+    names = {
+        "registration": "Dados do paciente",
+        "guardians": "Responsáveis",
+        "coverages": "Convênios",
+        "consents": "Consentimentos",
+    }
+    for name, label in names.items():
+        with subtests.test(page=name):
+            html = without_icons(
+                page(ready.a.admin, reverse(f"med_patients:{name}", args=(org, patient))).content.decode()
+            )
+            main = re.search(r'<nav class="link-tabs" aria-label="Seções do paciente">(.*?)</nav>', html, re.S).group(1)
+            assert re.findall(r'aria-current="page">([^<]+)</a>', main) == ["Cadastro"]
+            assert "Privacidade" in main and len(re.findall(r"<a ", main)) == 7
+            sub = re.search(r'<nav class="link-tabs patient-subtabs"[^>]*>(.*?)</nav>', html, re.S).group(1)
+            assert re.findall(r'aria-current="page">([^<]+)</a>', sub) == [label]
+            assert re.findall(r">([^<>]+)</a>", sub) == list(names.values())
+    # The other tabs have no sub-tabs; who does not manage access sees no Privacidade.
+    summary = page(ready.a.reception, reverse("med_patients:detail", args=(org, patient))).content.decode()
+    assert "patient-subtabs" not in summary and ">Privacidade<" not in without_icons(summary)
 
 
 def test_the_four_apps_show_the_same_patient_header(ready, subtests):
@@ -197,7 +219,7 @@ def test_every_patient_tab_and_panel_title_shows_the_icon_of_its_concept(ready):
     html = page(ready.a.doctor, summary_url(ready)).content.decode()
     nav = re.search(r'<nav class="link-tabs" aria-label="Seções do paciente">(.*?)</nav>', html, re.S).group(1)
     tabs = re.findall(r"<a [^>]*>(.*?)</a>", nav, re.S)
-    assert len(tabs) >= 6
+    assert len(tabs) >= 5
     assert all(re.match(r'<svg aria-hidden="true"[^>]*>.*</svg>[^<\s]', tab, re.S) for tab in tabs), tabs
     titles = re.findall(r'<h2 [^>]*class="section-heading patient-summary-heading">(.*?)</h2>', html, re.S)
     assert titles and all(title.startswith('<svg aria-hidden="true"') for title in titles)

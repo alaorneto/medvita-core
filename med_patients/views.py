@@ -21,7 +21,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import NoReverseMatch, reverse
 from django.utils.http import url_has_allowed_host_and_scheme, urlencode
-from django.utils.translation import gettext
+from django.utils.translation import gettext, gettext_noop
 from django.views.decorators.http import require_POST
 from rest_framework.response import Response
 
@@ -138,8 +138,23 @@ def _tabs(request: HttpRequest, organization_id: UUID, patient: Any, active: str
     return tabs
 
 
+# The pages under the "Cadastro" tab (#149): its own row of sub-tabs, the tab Cadastro marked on each.
+REGISTRATION_TABS = (
+    ("registration", "med_patients:registration", gettext_noop("Dados do paciente"), "patient_registration"),
+    ("guardians", "med_patients:guardians", gettext_noop("Responsáveis"), "guardians"),
+    ("coverages", "med_patients:coverages", gettext_noop("Convênios"), "coverages"),
+    ("consents", "med_patients:consents", gettext_noop("Consentimentos"), "consents"),
+)
+
+
+REGISTRATION_CODES = frozenset(code for code, *_rest in REGISTRATION_TABS)
+
+
 def patient_context(request: HttpRequest, organization_id: UUID, patient: Any, active: str) -> dict[str, Any]:
-    """Header and tabs of a patient page (``med_patients/_patient_header.html``, the same in every app)."""
+    """Header and tabs of a patient page (``med_patients/_patient_header.html``, the same in every app).
+
+    A page under Cadastro (``REGISTRATION_TABS``) marks the tab Cadastro and gets the sub-tabs.
+    """
     try:
         header = _service().header(actor=request.user, patient_id=patient.sysid)
     except (NotFound, Forbidden):
@@ -158,7 +173,18 @@ def patient_context(request: HttpRequest, organization_id: UUID, patient: Any, a
         "patient": patient,
         "patient_header": header,
         "header_actions": actions,
-        "tabs": _tabs(request, organization_id, patient, active),
+        "tabs": _tabs(request, organization_id, patient, "registration" if active in REGISTRATION_CODES else active),
+        "subtabs": [
+            {
+                "label": gettext(label),
+                "icon": icon,
+                "url": reverse(name, args=(organization_id, header.sysid)),
+                "current": code == active,
+            }
+            for code, name, label, icon in REGISTRATION_TABS
+        ]
+        if active in REGISTRATION_CODES
+        else [],
     }
 
 
@@ -199,29 +225,39 @@ def with_patient(url: str, patient_id: UUID) -> str:
 
 @tenant_page()
 def patient_list(request: HttpRequest, organization_id: UUID) -> HttpResponse:
-    query = request.GET.get("q", "")[:200]
-    status = request.GET.get("status") or None
+    """The registry's patients; the search goes by POST, marked ``form=search`` (#147).
+
+    A name or a CPF never lands in the URL, the history or a server log: with a term, the next
+    page is a form that sends it back; without one, the status filter and the pages are links.
+    A ``q`` in the query string is ignored.
+    """
+    searching = request.method == "POST" and request.POST.get("form") == "search"
+    source = request.POST if searching else request.GET
+    query = source.get("q", "").strip()[:200] if searching else ""
+    status = source.get("status") or None
     try:
         registries = _service().registries(actor=request.user)
         page = _service().search(
             actor=request.user,
             query=query,
             status=status,
-            cursor=request.GET.get("cursor") or None,
+            cursor=source.get("cursor") or None,
             page_size=PAGE_SIZE,
         )
     except InvalidInput:
         return _bad_request(request, organization_id, gettext("Filtro ou página inválida."))
     except (Forbidden, NotFound):
         raise Http404 from None
-    kept = {name: value for name, value in (("q", query), ("status", status or "")) if value}
+    kept = {"status": status} if status else {}
+    next_url = "?" + urlencode({**kept, "cursor": page.next_cursor}) if page.next_cursor and not query else ""
     return render(
         request,
         "med_patients/list.html",
         {
             "organization_id": organization_id,
             "page": page,
-            "next_url": "?" + urlencode({**kept, "cursor": page.next_cursor}) if page.next_cursor else "",
+            "next_url": next_url,
+            "next_cursor": page.next_cursor if query else "",
             "query": query,
             "status": status or "",
             "statuses": Patient.Status.choices,

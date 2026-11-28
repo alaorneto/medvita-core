@@ -35,6 +35,7 @@ DESTRUCTIVE = re.compile(
 )
 HEX = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 COMMENT = re.compile(r"/\*.*?\*/", re.S)
+FORM = re.compile(r"<form\b(?P<attrs>[^>]*)>(?P<body>.*?)</form>", re.S)
 
 
 def hand_written(html: str) -> list[str]:
@@ -71,6 +72,22 @@ def destructive_in_neutral(html: str) -> list[str]:
     return DESTRUCTIVE.findall(html)
 
 
+def searches_in_the_address(html: str) -> list[str]:
+    """Forms that would put a search term in the URL (#147): a ``q`` field in a form that is not POST."""
+    return [
+        match.group(0)[:80]
+        for match in FORM.finditer(html)
+        if 'name="q"' in match.group("body") and 'method="post"' not in match.group("attrs")
+    ]
+
+
+def tabs_without_app_css(html: str, app: str) -> bool:
+    """A page with tabs that does not load its app's stylesheet, where a tab's icon sits by its label (#144)."""
+    page = 'extends "skeleton/web/base.html"' in html
+    tabs = any(mark in html for mark in ("link-tabs", "_nav.html", "_patient_header.html"))
+    return page and tabs and f"static '{app}/{app}.css'" not in html
+
+
 def hard_colours(css: str) -> list[str]:
     return HEX.findall(COMMENT.sub("", css))
 
@@ -88,6 +105,8 @@ def test_templates_follow_the_interface_rules(path):
         "tabela sem table-stack nem motivo": tables_without_stack(html),
         "célula sem data-label": cells_without_label(html),
         "ação destrutiva com cor neutra": destructive_in_neutral(html),
+        "busca com o termo na URL (use POST)": searches_in_the_address(html),
+        "abas sem o CSS da app": tabs_without_app_css(html, relative(path).split("/")[0]),
     }
     assert {rule: found for rule, found in problems.items() if found} == {}
 
@@ -112,5 +131,13 @@ def test_each_rule_catches_what_it_is_for():
     assert cells_without_label(stacked) == ["<td>"]
     assert destructive_in_neutral('<button class="btn btn-secondary">{% translate "Remover" %}</button>') != []
     assert destructive_in_neutral('<a class="btn btn-danger-outline btn-sm" href="x">Remover</a>') == []
+    base = '{% extends "skeleton/web/base.html" %}'
+    assert tabs_without_app_css(base + '{% include "med_x/_nav.html" %}', "med_x")
+    assert not tabs_without_app_css(base + "{% static 'med_x/med_x.css' %}<nav class=\"link-tabs\">", "med_x")
+    assert not tabs_without_app_css('<nav class="link-tabs">', "med_x")  # A partial: its page loads the CSS.
+    assert searches_in_the_address('<form method="get"><input name="q"></form>') != []
+    assert searches_in_the_address('<form class="filter-bar"><input name="q" type="search"></form>') != []
+    assert searches_in_the_address('<form method="post">{% csrf_token %}<input name="q"></form>') == []
+    assert searches_in_the_address('<form method="get"><select name="status"></select></form>') == []
     assert hard_colours(".x { color: #dc2626; } /* #124 */") == ["#dc2626"]
     assert hard_colours(".x { color: var(--color-fg-danger); } /* issue #124 */") == []

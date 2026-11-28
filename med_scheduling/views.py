@@ -786,6 +786,17 @@ def _slot_value(slot: str) -> tuple[datetime | None, str]:
     return starts_at, mode
 
 
+def _searched(request: HttpRequest) -> tuple[bool, str]:
+    """Whether the page got the patient search, and the term (#147).
+
+    The search goes by POST, marked ``form=search``, so a name or a CPF never lands in the URL,
+    the history or a server log; a ``q`` in the query string is ignored.
+    """
+    if request.method == "POST" and request.POST.get("form") == "search":
+        return True, request.POST.get("q", "").strip()[:200]
+    return False, ""
+
+
 def _found_patients(request: HttpRequest, query: str) -> list[dict[str, Any]]:
     """The patients a search finds, with what tells namesakes apart: the birth date and the code.
 
@@ -829,7 +840,7 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     practice = _practice_or_none(request)
     if practice is None:
         raise Http404
-    query = request.GET.get("q", "")[:200]
+    searching, query = _searched(request)
     patient_id = request.GET.get("patient") or request.POST.get("patient") or ""
     entry_id = request.GET.get("entry") or request.POST.get("entry") or ""
     patients: tuple[Any, ...] = ()
@@ -842,8 +853,12 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         except (NotFound, InvalidInput, ValueError):
             raise Http404 from None
     schedules = _service().schedules(actor=request.user)
-    data = request.POST or (request.GET if request.GET.get("schedule") else None)
-    asked = data if data is not None else request.GET
+    if searching:
+        # A search binds no booking: what the page carried comes back in the search form.
+        data, asked = None, request.POST
+    else:
+        data = request.POST or (request.GET if request.GET.get("schedule") else None)
+        asked = data if data is not None else request.GET
     # The kinds offered are the ones of the schedule in the form: the one asked for, or the first of the list.
     writable = [item for item in schedules if item.writable]
     schedule = next((item for item in writable if str(item.sysid) == asked.get("schedule")), None)
@@ -1009,7 +1024,7 @@ def book_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
                 "suggested_duration": "" if suggested is None else suggested,
             },
         )
-    elif request.method == "POST":
+    elif request.method == "POST" and not searching:
         status = 400
     return render(
         request,
@@ -1636,7 +1651,7 @@ def waitlist_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
     if practice is None:
         return redirect("med_scheduling:home", organization_id)
     types = _service().appointment_types(actor=request.user)
-    query = request.GET.get("q", "")[:200]
+    searching, query = _searched(request)
     chosen_id = request.POST.get("patient") or request.GET.get("patient") or ""
     chosen = None
     if chosen_id:
@@ -1645,12 +1660,12 @@ def waitlist_view(request: HttpRequest, organization_id: UUID) -> HttpResponse:
         except (NotFound, Forbidden, InvalidInput, ValueError):
             chosen = None
     form = scheduling_forms.WaitlistForm(
-        request.POST or None,
+        None if searching else (request.POST or None),
         types=types,
         initial={"earliest_date": dj_timezone.localdate(), "patient": chosen.sysid if chosen else ""},
     )
     status = 200
-    if request.method == "POST":
+    if request.method == "POST" and not searching:
         status = 400
         if form.is_valid():
             values = form.cleaned_data

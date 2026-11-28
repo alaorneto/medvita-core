@@ -466,7 +466,7 @@ def test_the_reception_runs_the_queue_of_today(ready, subtests):
             "arrived": "on",
         }
         # The search keeps where the page came from, and so does the choice of the patient.
-        found = assert_safe(client.get(link + "&q=Maria"))
+        found = assert_safe(client.post(link, {**asked, "form": "search", "q": "Maria"}))
         chosen = re.search(r'href="(\?patient=[^"]+)"', found).group(1).replace("&amp;", "&")
         assert "arrived=on" in chosen and "slot=walk_in" in chosen
         html = assert_safe(client.get(url(ready, "book") + chosen))

@@ -111,7 +111,7 @@ Em `/o/<org>/apps/med_finance/` (nomes `med_finance:<nome>`); toda leitura e esc
 |---|---|
 | `desk` | Caixa do dia: abrir, totais por forma de pagamento, suprimento e sangria, fechar, contas em aberto até hoje |
 | `session` | Relatório da sessão (imprimível): abertura, formas de pagamento, movimentos, contado e diferença |
-| `charges`, `charge_new`, `charge` | Contas com filtro de situação (e "A receber") e vencimento; nova conta (busca de paciente, item da tabela ou descrição livre, vários itens, pagador); a conta com itens, pagamentos, recibos, receber, estornar, confirmar e cancelar |
+| `charges`, `charge_new`, `charge` | Contas com filtro de situação (e "A receber") e vencimento; nova conta (busca de paciente por POST, sem o termo na URL, #147; item da tabela ou descrição livre, vários itens, pagador); a conta com itens, pagamentos, recibos, receber, estornar, confirmar e cancelar. Com o caixa da conta fechado, a conta não mostra o formulário de recebimento: diz "O caixa está fechado." e, para quem escreve no caixa, oferece "Abrir o caixa" com o dinheiro na gaveta, que abre o caixa da conta e volta a ela (#148; o retorno é só o `sysid` da conta, lido pelo serviço) |
 | `collect` | Entrada pela consulta ("Receber", só POST): a conta da consulta |
 | `receipt`, `receipt_print` | Recibo com o valor por extenso, o resumo do selo, o aviso fiscal e "ANULADO" quando for o caso; imprimir (a ação principal); anular |
 | `prices` | Tabela de preços: itens, incluir, desativar |

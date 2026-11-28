@@ -363,7 +363,7 @@ def test_start_and_complete_through_the_pages(ready):
 def test_waitlist_add_and_book_from_it_through_the_pages(ready):
     client = client_for(ready.a.reception)
     # #130: the patient is found by the search and chosen, never typed by code.
-    found = assert_safe(client.get(url(ready, "waitlist"), {"q": "Maria"}))
+    found = assert_safe(client.post(url(ready, "waitlist"), {"form": "search", "q": "Maria"}))
     assert f'href="?patient={ready.patient.sysid}#add-heading"' in found and 'name="patient_code"' not in found
     chosen = assert_safe(client.get(url(ready, "waitlist"), {"patient": ready.patient.sysid}))
     assert f'name="patient" value="{ready.patient.sysid}"' in chosen and "Maria Paciente Secreta" in chosen
